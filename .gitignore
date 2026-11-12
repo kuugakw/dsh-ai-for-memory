@@ -1,0 +1,8 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# 插件运行数据（默认落在各自工作区；固定目录不在这里）
+.ai-for-memory/
+ai-for-memory-data/

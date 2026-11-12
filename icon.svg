@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AI Game Memory">
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#0f172a"/>
+  <path d="M16 21l16-8 16 8-16 8-16-8z" fill="#38bdf8"/>
+  <path d="M16 32l16 8 16-8v6l-16 8-16-8v-6z" fill="#818cf8"/>
+  <path d="M16 43l16 8 16-8v5l-16 8-16-8v-5z" fill="#c084fc" opacity="0.92"/>
+</svg>

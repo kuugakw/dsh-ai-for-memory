@@ -1,0 +1,9 @@
+# AI for Memory — DSH bundle patch.
+# Mounted by the profile loader; the plugin id is stable so user config
+# overrides in the profile patch layer keep working across upgrades.
+- insert:
+    - id: ai-for-memory
+      name: dsh-ai-for-memory
+      config:
+        directoryName: .ai-for-memory
+        reviewHighRiskOnly: true
