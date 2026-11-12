@@ -61,8 +61,13 @@ window.__ModuleLoader__.load({
         reason: '理由',
         thesis: '正',
         antithesis: '反',
-        storageSettings: '存储设置（记忆文件地址）',
+        storageSettings: '使用与存储设置',
         storageHint: '固定目录：所有项目共用这个文件夹（绝对路径）；留空则每个项目各自保存在工作区下的目录里。保存后插件会自动重载。',
+        modeManual: '手动挡',
+        modeAuto: '自动挡',
+        modeRounds: '每几轮触发（自动挡）',
+        modeHintManual: '手动挡：在对话框里让我调用 aim_memory / aim_search / aim_decide 来读写记忆。',
+        modeHintAuto: '自动挡：每 N 轮对话结束后，自动把最近 N 轮摘要写入流水并归档，不需要手动触发。',
         fixedPath: '记忆地址（绝对路径，留空=跟随项目）',
         dirName: '目录名（跟随项目时使用）',
         save: '保存设置',
@@ -120,8 +125,13 @@ window.__ModuleLoader__.load({
         reason: 'Reason',
         thesis: 'Thesis',
         antithesis: 'Antithesis',
-        storageSettings: 'Storage settings (memory file location)',
+        storageSettings: 'Usage and storage settings',
         storageHint: 'Fixed directory: every project shares this folder (absolute path). Leave empty to keep one memory directory inside each workspace. The plugin reloads after saving.',
+        modeManual: 'Manual',
+        modeAuto: 'Automatic',
+        modeRounds: 'Trigger every N rounds (automatic)',
+        modeHintManual: 'Manual: ask the assistant in the chat to call aim_memory / aim_search / aim_decide.',
+        modeHintAuto: 'Automatic: after every N turns, the last N turns are summarized into the log and archived without a manual call.',
         fixedPath: 'Memory path (absolute, empty = follow project)',
         dirName: 'Directory name (used when following the project)',
         save: 'Save settings',
@@ -248,6 +258,10 @@ window.__ModuleLoader__.load({
       tileLabel: { fontSize: '11.5px', color: colors.secondary },
       tileValue: { fontSize: '20px', fontWeight: 650, fontVariantNumeric: 'tabular-nums' },
       tabs: { display: 'flex', gap: '4px', flexWrap: 'wrap', borderBottom: `1px solid ${colors.border}` },
+      modeRow: {
+        display: 'flex', gap: '4px', flexWrap: 'wrap',
+        borderBottom: `1px solid ${colors.border}`, paddingBottom: '4px',
+      },
       tab: {
         font: 'inherit', fontSize: '12.5px', color: colors.secondary, background: 'transparent',
         border: 'none', borderBottom: '2px solid transparent', padding: '7px 10px',
@@ -364,6 +378,8 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = React.useState(null);
       const [formRoot, setFormRoot] = React.useState('');
       const [formDir, setFormDir] = React.useState('.ai-for-memory');
+      const [formMode, setFormMode] = React.useState('manual');
+      const [formRounds, setFormRounds] = React.useState(5);
       const [saving, setSaving] = React.useState(false);
 
       const load = React.useCallback(async (root) => {
@@ -375,6 +391,8 @@ window.__ModuleLoader__.load({
           setError(null);
           if (typeof payload.fixedRoot === 'string') setFormRoot(payload.fixedRoot);
           if (typeof payload.directoryName === 'string') setFormDir(payload.directoryName);
+          if (payload.mode === 'manual' || payload.mode === 'auto') setFormMode(payload.mode);
+          if (Number.isInteger(payload.autoEveryRounds)) setFormRounds(payload.autoEveryRounds);
         } catch (fetchError) {
           setError(String(fetchError?.message ?? fetchError));
         } finally {
@@ -417,7 +435,12 @@ window.__ModuleLoader__.load({
         try {
           await callApi('/config', {
             method: 'POST',
-            body: { root: formRoot.trim(), directoryName: formDir.trim() },
+            body: {
+              root: formRoot.trim(),
+              directoryName: formDir.trim(),
+              usageMode: formMode,
+              autoEveryRounds: Number(formRounds) || 5,
+            },
           });
           setNotice({ kind: 'ok', text: t.saved });
           setTimeout(() => load(''), 2500);
@@ -573,6 +596,30 @@ window.__ModuleLoader__.load({
 
         h('section', { style: styles.card },
           h('h3', { style: styles.cardTitle }, t.storageSettings),
+          h('div', { style: styles.modeRow },
+            h('button', {
+              type: 'button',
+              style: { ...styles.tab, ...(formMode === 'manual' ? styles.tabOn : {}) },
+              onClick: () => setFormMode('manual'),
+            }, t.modeManual),
+            h('button', {
+              type: 'button',
+              style: { ...styles.tab, ...(formMode === 'auto' ? styles.tabOn : {}) },
+              onClick: () => setFormMode('auto'),
+            }, t.modeAuto)),
+          h('p', { style: styles.hint }, formMode === 'auto' ? t.modeHintAuto : t.modeHintManual),
+          formMode === 'auto'
+            ? h('label', { style: { ...styles.label, maxWidth: '220px' } },
+              t.modeRounds,
+              h('input', {
+                style: styles.input,
+                type: 'number',
+                min: 1,
+                max: 100,
+                value: formRounds,
+                onChange: (event) => setFormRounds(event.target.value),
+              }))
+            : null,
           h('p', { style: styles.hint }, t.storageHint),
           h('div', { style: styles.grid2 },
             h('label', { style: styles.label },

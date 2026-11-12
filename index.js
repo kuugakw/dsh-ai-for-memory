@@ -18,6 +18,7 @@ import { evaluateDecision } from './lib/decision.js';
 import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
 import { defaultRegistryDir, rememberRoot } from './lib/registry.js';
 import { installApi } from './lib/api.js';
+import { collectTurnDigest } from './lib/auto.js';
 
 export const name = 'dsh-ai-for-memory';
 
@@ -27,6 +28,8 @@ export const inject = ['tools'];
 const DEFAULTS = Object.freeze({
   directoryName: '.ai-for-memory',
   root: '',
+  usageMode: 'manual',
+  autoEveryRounds: 5,
   defaultTopK: 5,
   reviewHighRiskOnly: true,
   maxContentChars: 20000,
@@ -50,6 +53,22 @@ export const Config = Object.freeze({
       const value = { ...DEFAULTS };
       for (const key of Object.keys(DEFAULTS)) {
         if (!Object.hasOwn(input, key) || input[key] === undefined) continue;
+        if (key === 'usageMode') {
+          if (!['manual', 'auto'].includes(input[key])) {
+            issues.push({ message: 'usageMode 必须是 manual 或 auto', path: [key] });
+          } else {
+            value[key] = input[key];
+          }
+          continue;
+        }
+        if (key === 'autoEveryRounds') {
+          if (!Number.isInteger(input[key]) || input[key] < 1 || input[key] > 100) {
+            issues.push({ message: 'autoEveryRounds 必须是 1~100 的整数', path: [key] });
+          } else {
+            value[key] = input[key];
+          }
+          continue;
+        }
         const fallbackType = typeof DEFAULTS[key];
         if (typeof input[key] !== fallbackType) {
           issues.push({ message: `${key} 必须是 ${fallbackType}`, path: [key] });
@@ -475,6 +494,46 @@ export function createTools(config, deps = {}) {
 // ---- plugin entry --------------------------------------------------------
 
 /**
+ * Automatic mode: every N completed turns, write a digest of the last N turns
+ * into the memory store and archive it. Manual mode registers no listener and
+ * only reacts to explicit `aim_*` tool calls.
+ *
+ * Subagent sessions are skipped: they would duplicate the parent's memory.
+ */
+export function installAutoMode(ctx, config, deps) {
+  if (config.usageMode !== 'auto') return;
+  const rounds = config.autoEveryRounds;
+  const counters = new Map();
+
+  const onSessionEvent = (session, event) => {
+    if (!session || !event || event.type !== 'turn/end') return;
+    if (session.header?.parentSession) return;
+    const id = String(session.id);
+    const count = (counters.get(id) ?? 0) + 1;
+    if (count < rounds) {
+      counters.set(id, count);
+      return;
+    }
+    counters.delete(id);
+    try {
+      const content = collectTurnDigest(session.ownEvents(), rounds);
+      if (!content) return;
+      const store = storeFor(config, { agent: { session } }, deps);
+      store.stage({ content, kind: 'digest', source: 'auto' });
+      const stats = store.archive();
+      // eslint-disable-next-line no-console
+      console.log(`[ai-for-memory] 自动记忆：已写入最近 ${rounds} 轮摘要（归档 ${stats.archived} 条）`);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error(`[ai-for-memory] 自动记忆失败：${error?.message ?? error}`);
+    }
+  };
+
+  ctx.effect(() => ctx.on('session/event', onSessionEvent));
+  ctx.effect(() => ctx.on('session/disposed', (session) => counters.delete(String(session?.id))));
+}
+
+/**
  * Register the three tools on the plugin's context.
  *
  * Each registration goes through `ctx.effect` so unloading the plugin removes
@@ -491,6 +550,16 @@ export function apply(ctx, config) {
   }
   const registryDir = defaultRegistryDir();
   const deps = { workingDirectory, registryDir };
+
+  if (resolved.usageMode === 'auto') {
+    try {
+      installAutoMode(ctx, resolved, deps);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error(`[ai-for-memory] 自动模式注册失败：${error?.message ?? error}`);
+    }
+  }
+
   for (const raw of createTools(resolved, deps)) {
     const tool = toRegistrableTool(raw);
     try {

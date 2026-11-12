@@ -9,8 +9,9 @@ import { evaluateDecision } from '../lib/decision.js';
 import { search, tokenize } from '../lib/retrieval.js';
 import { CATEGORIES, hourKey } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
+import { collectTurnDigest } from '../lib/auto.js';
 import { listRootRows, readRoots, rememberRoot, resolveRegisteredRoot } from '../lib/registry.js';
-import { apply, compileParameterSchema, createTools, normalizeConfig, workspaceOf } from '../index.js';
+import { apply, compileParameterSchema, Config, createTools, installAutoMode, normalizeConfig, workspaceOf } from '../index.js';
 
 function tempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agm-test-'));
@@ -278,6 +279,82 @@ test('workspace prefers the live working-directory service', () => {
   assert.equal(workspaceOf(exec, { get: () => '/current' }), '/current');
   assert.equal(workspaceOf(exec, { get: () => { throw new Error('not ready'); } }), '/original');
   assert.equal(workspaceOf(exec, undefined), '/original');
+});
+
+test('turn digest keeps the last completed turns', () => {
+  const events = [
+    { type: 'turn/start', data: { turn: 1 } },
+    { type: 'user/message', data: { content: [{ type: 'text', text: '第一轮问题' }] } },
+    { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '第一轮回答' }] } } },
+    { type: 'turn/end', data: { turn: 1 } },
+    { type: 'turn/start', data: { turn: 2 } },
+    { type: 'user/message', data: { content: [{ type: 'text', text: '第二轮问题' }] } },
+    { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '第二轮回答' }, { type: 'tool-call' }] } } },
+    { type: 'turn/end', data: { turn: 2 } },
+  ];
+  const digest = collectTurnDigest(events, 2);
+  assert.match(digest, /自动记忆/);
+  assert.match(digest, /第 1-2 轮/);
+  assert.match(digest, /第一轮问题/);
+  assert.match(digest, /第二轮回答/);
+  assert.equal(collectTurnDigest(events, 1).includes('第一轮问题'), false);
+  assert.equal(collectTurnDigest([], 2), null);
+});
+
+test('auto mode triggers after the configured number of turns', () => {
+  const root = tempRoot();
+  const workspace = path.join(root, 'workspace');
+  fs.mkdirSync(workspace, { recursive: true });
+  const memoryRoot = path.join(root, 'memory');
+  const registryDir = path.join(root, 'registry');
+  try {
+    const session = {
+      id: 'session-test',
+      header: { cwd: workspace },
+      ownEvents: () => [
+        { type: 'turn/start', data: { turn: 1 } },
+        { type: 'user/message', data: { content: [{ type: 'text', text: '记住这件事' }] } },
+        { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '好的' }] } } },
+        { type: 'turn/end', data: { turn: 1 } },
+      ],
+    };
+    const handlers = new Map();
+    const ctx = {
+      effect: (fn) => fn(),
+      on: (event, handler) => { handlers.set(event, handler); return () => {}; },
+    };
+    const config = normalizeConfig({
+      usageMode: 'auto',
+      autoEveryRounds: 2,
+      root: memoryRoot,
+    });
+    installAutoMode(ctx, config, { registryDir });
+    const onSessionEvent = handlers.get('session/event');
+    assert.equal(typeof onSessionEvent, 'function');
+
+    onSessionEvent(session, { type: 'turn/end', data: { turn: 1 } });
+    assert.equal(new MemoryStore(memoryRoot).stagingRecords().length, 0);
+    onSessionEvent(session, { type: 'turn/end', data: { turn: 2 } });
+
+    const records = new MemoryStore(memoryRoot).stagingRecords();
+    assert.equal(records.length, 1);
+    assert.equal(records[0].kind, 'digest');
+    assert.match(records[0].content, /自动记忆/);
+    assert.equal(new MemoryStore(memoryRoot).archivedCount('action_logs'), 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('config validator accepts only manual/auto and bounded rounds', () => {
+  const defaults = normalizeConfig({});
+  assert.equal(defaults.usageMode, 'manual');
+  assert.equal(defaults.autoEveryRounds, 5);
+  const validator = Config['~standard'].validate;
+  assert.equal(validator({ usageMode: 'auto', autoEveryRounds: 3 }).value.usageMode, 'auto');
+  assert.ok(validator({ usageMode: 'sometimes' }).issues);
+  assert.ok(validator({ autoEveryRounds: 0 }).issues);
+  assert.ok(validator({ autoEveryRounds: 101 }).issues);
 });
 
 test('config validator accepts defaults and rejects wrong types', () => {

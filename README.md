@@ -1,10 +1,10 @@
 # AI for Memory — DSH 插件
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](package.json)
 [![Status](https://img.shields.io/badge/status-early%20preview-orange.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **这是初版（v0.1.0）。** 核心功能已可用、已实测，但仍在早期阶段；接口、存储格式和界面后续都可能
+> **这是初版（当前 v0.2.0）。** 核心功能已可用、已实测，但仍在早期阶段；接口、存储格式和界面后续都可能
 > 继续调整与优化（见 [路线图](#路线图)）。欢迎试用和提建议，不建议直接用于关键生产数据。
 
 把一套分层记忆思路做成 DeepSeek Harness 的**项目级记忆插件**：流水、归档、快照、本地检索、
@@ -32,6 +32,31 @@ aim_memory  action=remember doc_id=err_timeout text="超时先重试三次，仍
 aim_search  query="超时怎么处理" mode=hybrid
 aim_decide  decision="删除全部临时文件" risk=high thesis="释放空间" antithesis="可能丢失未归档流水"
 ```
+
+## 使用模式（手动挡 / 自动挡）
+
+### 手动挡（默认）
+
+在对话框里让 agent 调用 `aim_*` 工具触发，例如：
+
+```text
+把这次决策记进项目记忆
+帮我查一下之前关于超时的记录
+```
+
+agent 会调用 `aim_memory` / `aim_search` / `aim_decide` 读写记忆。
+
+### 自动挡
+
+在面板「使用与存储设置」里切到「自动挡」，设置 **每 N 轮触发**：
+
+- 每 N 个对话轮结束后，自动把最近 N 轮的「用户提问 + 助手回答」压缩成一条
+  `digest` 记录写入流水，并立即归档；
+- 不需要手动提醒，也不需要模型额外调用工具；
+- 子会话（subagent）不会触发，避免同一段记忆写两遍；
+- 计数是内存态：插件重载 / 进程重启后从 0 开始计。
+
+> 自动挡的摘要是**本地文本压缩**（截断 + 拼接），不是模型生成的摘要；后续路线图会加入更聪明的版本。
 
 ## Web 面板
 
@@ -73,6 +98,8 @@ aim_decide  decision="删除全部临时文件" risk=high thesis="释放空间" 
 |------|--------|------|
 | `directoryName` | `.ai-for-memory` | 工作区下的记忆目录名（`root` 为空时生效） |
 | `root` | `""` | 固定记忆目录（绝对路径）；非空时所有项目共用 |
+| `usageMode` | `"manual"` | `manual` 手动挡 / `auto` 自动挡 |
+| `autoEveryRounds` | `5` | 自动挡每 N 轮触发一次（1~100） |
 | `defaultTopK` | `5` | 检索默认返回条数 |
 | `reviewHighRiskOnly` | `true` | `true` 时中风险决策直接放行，只审查高风险 |
 | `maxContentChars` | `20000` | 单条流水/知识正文上限 |
