@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Layered project memory for DeepSeek Harness, rewritten from ai-game-for-memory: process log, archive, snapshots, context compaction and restore, local search and risk-reviewed decisions. Test build.",
+  "description": "Per-conversation layered project memory for DeepSeek Harness, rewritten from ai-game-for-memory: isolated conversation stores, a shared layer, cross-conversation search, process log, archive, snapshots, context compaction and restore, risk-reviewed decisions. Test build.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",

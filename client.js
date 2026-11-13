@@ -23,7 +23,7 @@ window.__ModuleLoader__.load({
       zh: {
         nav: 'AI 记忆',
         title: 'AI 记忆',
-        subtitle: '分层项目记忆：过程记录 · 归档 · 快照 · 知识 · 决策',
+        subtitle: '分层项目记忆：对话隔离 · 过程记录 · 归档 · 快照 · 知识 · 决策',
         refresh: '刷新',
         loading: '加载中…',
         loadFailed: '读取记忆失败',
@@ -50,6 +50,32 @@ window.__ModuleLoader__.load({
         emptyKnowledge: '还没有知识文档。',
         emptyDecisions: '还没有决策审查记录。',
         emptyContexts: '还没有上下文存档。',
+        scopeLabel: '查看范围',
+        scopeCurrent: '本对话',
+        scopeAll: '全部对话',
+        scopeShared: '共享层',
+        scopeAuto: '本对话（自动识别）',
+        conversation: '对话',
+        scopeHintSession: '只显示这个对话自己的记忆；其他对话的数据仍在磁盘上，切换范围即可查看，AI 也可以跨对话检索（aim_search 默认）。',
+        scopeHintAll: '合并显示所有对话与共享层，每条记录都标注来源对话。',
+        scopeHintShared: '只显示早期共享层：旧数据与所有对话共用的事实。',
+        scopeHintUnknown: '还没有识别到当前对话，临时显示共享层；在任意对话里继续一次后就能定位到本对话。',
+        conversationSettings: '对话设置',
+        conversationHint: '每个对话有自己的记忆文件夹。在这里给它命名、决定是否对其他对话开放；在顶部「查看范围」切换对话后，可以分别设置每一个。',
+        conversationName: '对话名称',
+        conversationNamePlaceholder: '例如：修复GitHub发布文件夹问题 / 大肥鱼',
+        conversationAccess: '对外开放',
+        conversationOpen: '开放',
+        conversationClosed: '不开放',
+        conversationOpenHintOn: '其他对话可以通过 aim_search（默认跨对话）和面板「全部对话」读到它。',
+        conversationOpenHintOff: '只有本对话能读自己的记忆；其他对话的检索、恢复和合并视图都会跳过它。',
+        conversationFolder: '记忆文件夹',
+        saveConversation: '保存对话设置',
+        conversationSaved: '对话设置已保存',
+        conversationSaveFailed: '保存对话设置失败',
+        privateBadge: '私有',
+        defaultPublic: '新对话默认对外开放',
+        defaultPublicHint: '新建对话时自动创建记忆文件夹，并按这个默认值设置开放状态。',
         contextRestoreHint: '需要恢复时，在对话里让我执行 aim_context restore。',
         searchPlaceholder: '搜索知识（标题/正文/分类）',
         clearSearch: '清空',
@@ -92,7 +118,7 @@ window.__ModuleLoader__.load({
       en: {
         nav: 'AI for Memory',
         title: 'AI for Memory',
-        subtitle: 'Layered project memory: process log · archive · snapshots · knowledge · decisions',
+        subtitle: 'Layered project memory: per-conversation isolation · process log · archive · snapshots · knowledge · decisions',
         refresh: 'Refresh',
         loading: 'Loading…',
         loadFailed: 'Failed to load memory',
@@ -119,6 +145,32 @@ window.__ModuleLoader__.load({
         emptyKnowledge: 'No knowledge documents yet.',
         emptyDecisions: 'No decision reviews yet.',
         emptyContexts: 'No archived contexts yet.',
+        scopeLabel: 'Scope',
+        scopeCurrent: 'This conversation',
+        scopeAll: 'All conversations',
+        scopeShared: 'Shared layer',
+        scopeAuto: 'This conversation (auto)',
+        conversation: 'Conversation',
+        scopeHintSession: 'Only this conversation\'s own memory is shown. Other conversations keep their data; switch the scope to browse it, and the model can search across conversations (aim_search by default).',
+        scopeHintAll: 'Merged view of every conversation plus the shared layer; every row names its source conversation.',
+        scopeHintShared: 'Only the early shared layer: legacy data and facts shared by every conversation.',
+        scopeHintUnknown: 'The current conversation is not identified yet, so the shared layer is shown; it resolves after one more turn in any conversation.',
+        conversationSettings: 'Conversation settings',
+        conversationHint: 'Every conversation has its own memory folder. Name it here and choose whether other conversations may read it; switch conversations in "Scope" above to configure each one.',
+        conversationName: 'Conversation name',
+        conversationNamePlaceholder: 'e.g. Fix GitHub release folder / Big Fish',
+        conversationAccess: 'Open to others',
+        conversationOpen: 'Open',
+        conversationClosed: 'Closed',
+        conversationOpenHintOn: 'Other conversations can read it through aim_search (cross-conversation by default) and the "All conversations" view.',
+        conversationOpenHintOff: 'Only this conversation can read its memory; other conversations skip it in search, restore and merged views.',
+        conversationFolder: 'Memory folder',
+        saveConversation: 'Save conversation',
+        conversationSaved: 'Conversation settings saved',
+        conversationSaveFailed: 'Failed to save conversation settings',
+        privateBadge: 'private',
+        defaultPublic: 'New conversations open by default',
+        defaultPublicHint: 'A new conversation gets its memory folder automatically, seeded with this access setting.',
         contextRestoreHint: 'To restore one, ask me in the chat to run aim_context restore.',
         searchPlaceholder: 'Search knowledge (id, text, category)',
         clearSearch: 'Clear',
@@ -372,6 +424,9 @@ window.__ModuleLoader__.load({
           row.kind ? h('span', { style: badgeStyle('pending') }, row.kind) : null,
           row.risk ? h('span', { style: badgeStyle(row.risk) }, `${t.risk}: ${row.risk}`) : null,
           row.category ? h('span', { style: badgeStyle('pending') }, row.category) : null,
+          props.showSession && row.session_label
+            ? h('span', { style: badgeStyle('pending') }, row.session_label)
+            : null,
           h('span', { style: { marginLeft: 'auto', color: colors.secondary, fontSize: '11.5px' } }, formatTime(row.timestamp))),
         h('p', { style: styles.content }, row.content ?? ''),
         row.source || row.dedup_id ? h('div', { style: styles.meta },
@@ -379,7 +434,13 @@ window.__ModuleLoader__.load({
           row.dedup_id ? h('span', { style: styles.mono }, row.dedup_id.slice(0, 10)) : null) : null);
     }
 
-    function Dashboard() {
+    /**
+     * The panel is registered on the root-scoped `main` slot, so the renderer
+     * hands it the root standard kit, including the `useSessions` selector hook
+     * over the Session catalog. That catalog supplies conversation titles; the
+     * Host API supplies the memory rows and which conversation is current.
+     */
+    function Dashboard(props) {
       const [data, setData] = React.useState(null);
       const [error, setError] = React.useState(null);
       const [busy, setBusy] = React.useState(false);
@@ -390,13 +451,60 @@ window.__ModuleLoader__.load({
       const [formDir, setFormDir] = React.useState('.ai-for-memory');
       const [formMode, setFormMode] = React.useState('manual');
       const [formRounds, setFormRounds] = React.useState(5);
+      const [formDefaultPublic, setFormDefaultPublic] = React.useState(true);
+      const [formName, setFormName] = React.useState('');
+      const [formPublic, setFormPublic] = React.useState(true);
       const [saving, setSaving] = React.useState(false);
+      const [sessionSaving, setSessionSaving] = React.useState(false);
 
-      const load = React.useCallback(async (root) => {
+      // `useSessions` is a Hook supplied as a prop by the slot renderer. The
+      // renderer always binds it for the root kit, so this branch is stable for
+      // the page lifetime; when a future shell omits it, labels fall back to ids.
+      const useSessions = props?.useSessions;
+      const catalog = typeof useSessions === 'function'
+        ? useSessions((state) => (state && state.byId ? state.byId : null))
+        : null;
+
+      const titles = React.useMemo(() => {
+        const map = {};
+        for (const [id, row] of Object.entries(catalog ?? {})) {
+          if (row && typeof row.title === 'string' && row.title !== '') map[id] = row.title;
+        }
+        return map;
+      }, [catalog]);
+
+      // DSH knows every conversation; the memory store only knows the ones that
+      // already got a folder. Merging the catalog lets "Scope" list a brand-new
+      // conversation before its folder exists; choosing it creates the folder.
+      const catalogRows = React.useMemo(() => {
+        if (!catalog) return [];
+        return Object.entries(catalog)
+          .map(([sessionId, row]) => ({
+            sessionId,
+            title: row && typeof row.title === 'string' ? row.title : '',
+            updatedAt: Number(row?.updatedAt) || 0,
+          }))
+          .sort((left, right) => right.updatedAt - left.updatedAt)
+          .slice(0, 40);
+      }, [catalog]);
+
+      const scopeRef = React.useRef(null);
+      const [scope, setScopeState] = React.useState(null);
+      const applyScope = React.useCallback((next) => {
+        scopeRef.current = next;
+        setScopeState(next);
+      }, []);
+
+      const load = React.useCallback(async (root, nextScope) => {
         setBusy(true);
         try {
-          const suffix = typeof root === 'string' && root !== '' ? `?root=${encodeURIComponent(root)}` : '';
-          const payload = await callApi(`/state${suffix}`);
+          const active = nextScope ?? scopeRef.current;
+          const kind = active?.kind ?? 'session';
+          const params = new URLSearchParams();
+          if (typeof root === 'string' && root !== '') params.set('root', root);
+          params.set('scope', kind);
+          if (kind === 'session' && active?.key) params.set('session', active.key);
+          const payload = await callApi(`/state?${params.toString()}`);
           setData(payload);
           setError(null);
           if (typeof payload.fixedRoot === 'string') setFormRoot(payload.fixedRoot);
@@ -404,18 +512,77 @@ window.__ModuleLoader__.load({
           if (typeof payload.autoEnabled === 'boolean') setFormMode(payload.autoEnabled ? 'auto' : 'manual');
           else if (payload.mode === 'manual' || payload.mode === 'auto') setFormMode(payload.mode);
           if (Number.isInteger(payload.autoEveryRounds)) setFormRounds(payload.autoEveryRounds);
+          if (typeof payload.defaultPublic === 'boolean') setFormDefaultPublic(payload.defaultPublic);
+          const selected = payload?.selectedSession ?? null;
+          setFormName(selected?.label ?? '');
+          setFormPublic(selected?.public !== false);
+          applyScope({
+            kind: typeof payload.scope === 'string' ? payload.scope : kind,
+            key: payload?.selectedSession?.key ?? (kind === 'session' ? (active?.key ?? null) : null),
+          });
         } catch (fetchError) {
           setError(String(fetchError?.message ?? fetchError));
         } finally {
           setBusy(false);
         }
-      }, []);
+      }, [applyScope]);
 
       React.useEffect(() => { load(); }, [load]);
 
       const selectedRoot = data?.selectedRoot ?? '';
       const roots = Array.isArray(data?.roots) ? data.roots : [];
       const counts = data?.counts ?? {};
+      const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
+      const showSession = data?.scope === 'all';
+
+      const optionRows = React.useMemo(() => {
+        const known = new Set();
+        for (const row of sessions) {
+          if (row.sessionId) known.add(row.sessionId);
+        }
+        const extras = [];
+        for (const item of catalogRows) {
+          if (known.has(item.sessionId)) continue;
+          extras.push({
+            key: '',
+            sessionId: item.sessionId,
+            label: '',
+            title: item.title,
+            name: item.title,
+            public: true,
+            current: false,
+            updatedAt: item.updatedAt ? new Date(item.updatedAt).toISOString() : '',
+            counts: { staging: 0, archive: 0, snapshots: 0, knowledge: 0, decisions: 0, contexts: 0 },
+          });
+        }
+        return [...sessions, ...extras];
+      }, [sessions, catalogRows]);
+
+      const titleOf = (row) => titles[row?.sessionId] ?? '';
+      const conversationName = (row) => {
+        if (!row) return '';
+        // An explicit panel name wins, then the live DSH title, then the title
+        // snapshotted by the Host, then a short id.
+        const name = row.label || titleOf(row) || row.title || '';
+        return name !== '' ? name : String(row.sessionId ?? row.key ?? '').slice(0, 8);
+      };
+      const selectedSession = data?.selectedSession ?? null;
+      const namePlaceholder = selectedSession
+        ? (titleOf(selectedSession) || selectedSession.title || t.conversationNamePlaceholder)
+        : t.conversationNamePlaceholder;
+      const scopeHint = scope?.kind === 'all'
+        ? t.scopeHintAll
+        : scope?.kind === 'shared'
+          ? t.scopeHintShared
+          : (data?.sessionUnknown ? t.scopeHintUnknown : t.scopeHintSession);
+      const hasNothingHere = ['staging', 'archive', 'snapshots', 'knowledge', 'decisions', 'contexts']
+        .every((key) => (counts[key] ?? 0) === 0);
+      const sharedNote = scope?.kind === 'session' && hasNothingHere && data?.shared?.hasData
+        ? `${t.scopeShared}：过程记录 ${data.shared.counts?.staging ?? 0} 条，知识 ${data.shared.counts?.knowledge ?? 0} 篇。`
+        : '';
+      const scopeValue = scope == null
+        ? 'session:'
+        : scope.kind === 'all' ? 'all' : scope.kind === 'shared' ? 'shared' : `session:${scope.key ?? ''}`;
 
       const copyPath = async () => {
         if (selectedRoot === '') return;
@@ -451,6 +618,7 @@ window.__ModuleLoader__.load({
               directoryName: formDir.trim(),
               autoEnabled: formMode === 'auto',
               autoEveryRounds: Number(formRounds) || 5,
+              defaultPublic: formDefaultPublic,
             },
           });
           setNotice({ kind: 'ok', text: t.saved });
@@ -459,6 +627,29 @@ window.__ModuleLoader__.load({
           setNotice({ kind: 'err', text: `${t.saveFailed}: ${String(saveError?.message ?? saveError)}` });
         } finally {
           setSaving(false);
+        }
+      };
+
+      const saveConversation = async () => {
+        if (!selectedSession) return;
+        setSessionSaving(true);
+        setNotice(null);
+        try {
+          await callApi('/session', {
+            method: 'POST',
+            body: {
+              root: selectedRoot,
+              session: selectedSession.key,
+              label: formName.trim(),
+              public: formPublic,
+            },
+          });
+          setNotice({ kind: 'ok', text: t.conversationSaved });
+          await load(selectedRoot);
+        } catch (saveError) {
+          setNotice({ kind: 'err', text: `${t.conversationSaveFailed}: ${String(saveError?.message ?? saveError)}` });
+        } finally {
+          setSessionSaving(false);
         }
       };
 
@@ -483,7 +674,11 @@ window.__ModuleLoader__.load({
       if (tab === 'staging') {
         content = (data?.staging ?? []).length === 0
           ? h(Empty, { text: t.emptyStaging })
-          : h('div', { style: styles.list }, (data?.staging ?? []).map((row) => h(EntryRow, { key: row.dedup_id, row })));
+          : h('div', { style: styles.list }, (data?.staging ?? []).map((row) => h(EntryRow, {
+            key: `${row.session_key ?? ''}:${row.dedup_id}`,
+            row,
+            showSession,
+          })));
       } else if (tab === 'archive') {
         const categories = data?.archive ?? [];
         content = categories.length === 0
@@ -494,14 +689,19 @@ window.__ModuleLoader__.load({
               h('span', { style: styles.tabCount }, String(group.count))),
             group.entries.length === 0
               ? h(Empty, { text: t.emptyArchive })
-              : h('div', { style: styles.list }, group.entries.map((row) => h(EntryRow, { key: row.dedup_id, row: { ...row, category: group.category } }))))));
+              : h('div', { style: styles.list }, group.entries.map((row) => h(EntryRow, {
+                key: `${row.session_key ?? ''}:${row.dedup_id}`,
+                row: { ...row, category: group.category },
+                showSession,
+              }))))));
       } else if (tab === 'snapshots') {
         const rows = data?.snapshots ?? [];
         content = rows.length === 0
           ? h(Empty, { text: t.emptySnapshots })
-          : h('div', { style: styles.list }, rows.map((row) => h('div', { key: row.snapshot_id, style: styles.row },
+          : h('div', { style: styles.list }, rows.map((row) => h('div', { key: `${row.session_key ?? ''}:${row.snapshot_id}`, style: styles.row },
             h('div', { style: styles.rowHead },
               h('span', { style: { fontWeight: 600 } }, row.snapshot_id),
+              showSession && row.session_label ? h('span', { style: badgeStyle('pending') }, row.session_label) : null,
               h('span', { style: styles.meta }, `${t.size}: ${formatBytes(row.state_size)}`),
               h('span', { style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.timestamp))),
             h('details', { style: styles.details },
@@ -519,19 +719,21 @@ window.__ModuleLoader__.load({
             query !== '' ? h('button', { type: 'button', style: styles.button, onClick: () => setQuery('') }, t.clearSearch) : null),
           knowledge.length === 0
             ? h(Empty, { text: t.emptyKnowledge })
-            : knowledge.map((doc) => h('div', { key: doc.doc_id, style: styles.row },
+            : knowledge.map((doc) => h('div', { key: `${doc.session_key ?? ''}:${doc.doc_id}`, style: styles.row },
               h('div', { style: styles.rowHead },
                 h('span', { style: { fontWeight: 600 } }, doc.doc_id),
-                h('span', { style: badgeStyle('pending') }, doc.category)),
+                h('span', { style: badgeStyle('pending') }, doc.category),
+                showSession && doc.session_label ? h('span', { style: badgeStyle('pending') }, doc.session_label) : null),
               h('p', { style: styles.content }, doc.text))));
       } else if (tab === 'decisions') {
         const rows = data?.decisions ?? [];
         content = rows.length === 0
           ? h(Empty, { text: t.emptyDecisions })
-          : h('div', { style: styles.list }, rows.map((row) => h('div', { key: row.decision_id, style: styles.row },
+          : h('div', { style: styles.list }, rows.map((row) => h('div', { key: `${row.session_key ?? ''}:${row.decision_id}`, style: styles.row },
             h('div', { style: styles.rowHead },
               h('span', { style: badgeStyle(row.outcome) }, row.outcome),
               h('span', { style: badgeStyle(row.risk_level) }, `${t.risk}: ${row.risk_level}`),
+              showSession && row.session_label ? h('span', { style: badgeStyle('pending') }, row.session_label) : null,
               h('span', { style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.timestamp))),
             h('p', { style: styles.content }, row.decision),
             row.reason ? h('p', { style: styles.hint }, `${t.reason}: ${row.reason}`) : null,
@@ -544,10 +746,11 @@ window.__ModuleLoader__.load({
         const rows = data?.contexts ?? [];
         content = rows.length === 0
           ? h(Empty, { text: t.emptyContexts })
-          : h('div', { style: styles.list }, rows.map((row) => h('div', { key: row.context_id, style: styles.row },
+          : h('div', { style: styles.list }, rows.map((row) => h('div', { key: `${row.session_key ?? ''}:${row.context_id}`, style: styles.row },
             h('div', { style: styles.rowHead },
               h('span', { style: { fontWeight: 600 } }, row.context_id),
               h('span', { style: badgeStyle('pending') }, row.label),
+              showSession && row.session_label ? h('span', { style: badgeStyle('pending') }, row.session_label) : null,
               h('span', { style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.created_at))),
             h('div', { style: styles.meta },
               h('span', null, `第 ${row.turn_from}-${row.turn_to} 轮`),
@@ -562,12 +765,38 @@ window.__ModuleLoader__.load({
             h('h2', { style: styles.title }, t.title),
             h('p', { style: styles.subtitle }, t.subtitle)),
           h('div', { style: styles.actions },
+            h('label', { style: { ...styles.label, minWidth: '230px' } },
+              t.scopeLabel,
+              h('select', {
+                style: styles.input,
+                value: scopeValue,
+                onChange: (event) => {
+                  const value = event.target.value;
+                  if (value === 'all' || value === 'shared') {
+                    const next = { kind: value };
+                    applyScope(next);
+                    load(selectedRoot, next);
+                    return;
+                  }
+                  const key = value.startsWith('session:') ? value.slice('session:'.length) : '';
+                  const next = { kind: 'session', key: key === '' ? null : key };
+                  applyScope(next);
+                  load(selectedRoot, next);
+                },
+              },
+              scopeValue === 'session:' ? h('option', { value: 'session:' }, t.scopeAuto) : null,
+              optionRows.map((row) => h('option', { key: row.key || row.sessionId, value: `session:${row.key || row.sessionId}` },
+                `${row.current ? t.scopeCurrent : t.conversation} · ${conversationName(row)}${row.public === false ? `（${t.privateBadge}）` : ''}`)),
+              h('option', { value: 'all' }, t.scopeAll),
+              h('option', { value: 'shared' }, t.scopeShared))),
             h('label', { style: { ...styles.label, minWidth: '200px' } },
               t.root,
               h('select', {
                 style: styles.input,
                 value: selectedRoot ?? '',
-                onChange: (event) => load(event.target.value),
+                // A conversation key belongs to one root; switching roots must
+                // fall back to "let the Host decide the current conversation".
+                onChange: (event) => load(event.target.value, { kind: 'session', key: null }),
               },
               roots.length === 0 ? h('option', { value: '' }, t.noRootShort) : null,
               roots.map((row) => h('option', {
@@ -594,7 +823,7 @@ window.__ModuleLoader__.load({
         error !== null
           ? h('div', { style: styles.card },
             h('p', { style: styles.hint }, `${t.loadFailed}: ${error}`),
-            h('button', { type: 'button', style: styles.button, onClick: () => load('') }, t.retry))
+            h('button', { type: 'button', style: styles.button, onClick: () => load(selectedRoot) }, t.retry))
           : null,
 
         selectedRoot === ''
@@ -603,6 +832,55 @@ window.__ModuleLoader__.load({
             h('code', { style: styles.path }, selectedRoot),
             h('button', { type: 'button', style: styles.button, onClick: copyPath }, t.copy),
             h('button', { type: 'button', style: styles.button, disabled: busy, onClick: reveal }, t.reveal)),
+
+        h('p', { style: styles.hint }, scopeHint),
+        sharedNote !== '' ? h('p', { style: styles.hint }, sharedNote) : null,
+
+        selectedSession !== null
+          ? h('section', { style: styles.card },
+            h('h3', { style: styles.cardTitle }, t.conversationSettings),
+            h('p', { style: styles.hint }, t.conversationHint),
+            h('div', { style: styles.grid2 },
+              h('label', { style: styles.label },
+                t.conversationName,
+                h('input', {
+                  style: styles.input,
+                  value: formName,
+                  placeholder: namePlaceholder,
+                  maxLength: 80,
+                  onChange: (event) => setFormName(event.target.value),
+                })),
+              h('div', { style: styles.label },
+                t.conversationAccess,
+                h('div', { style: styles.modeRow },
+                  h('button', {
+                    type: 'button',
+                    role: 'switch',
+                    'aria-checked': formPublic,
+                    style: { ...styles.tab, ...(formPublic ? styles.tabOn : {}) },
+                    onClick: () => setFormPublic(true),
+                  }, t.conversationOpen),
+                  h('button', {
+                    type: 'button',
+                    role: 'switch',
+                    'aria-checked': !formPublic,
+                    style: { ...styles.tab, ...(!formPublic ? styles.tabOn : {}) },
+                    onClick: () => setFormPublic(false),
+                  }, t.conversationClosed)))),
+            h('p', { style: styles.hint }, formPublic ? t.conversationOpenHintOn : t.conversationOpenHintOff),
+            h('div', { style: styles.meta },
+              h('span', { style: styles.mono }, `${t.conversationFolder}: sessions/${selectedSession.key}`),
+              selectedSession.sessionId
+                ? h('span', { style: styles.mono }, `id: ${String(selectedSession.sessionId).slice(0, 16)}…`)
+                : null),
+            h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' } },
+              h('button', {
+                type: 'button',
+                style: styles.primary,
+                disabled: sessionSaving,
+                onClick: saveConversation,
+              }, sessionSaving ? t.saving : t.saveConversation)))
+          : null,
 
         h('div', { style: styles.tiles },
           h(Tile, { label: t.counts.staging, value: counts.staging }),
@@ -652,6 +930,23 @@ window.__ModuleLoader__.load({
                 onChange: (event) => setFormRounds(event.target.value),
               }))
             : null,
+          h('div', { style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.defaultPublic),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': formDefaultPublic,
+              style: { ...styles.tab, ...(formDefaultPublic ? styles.tabOn : {}) },
+              onClick: () => setFormDefaultPublic(true),
+            }, t.switchOn),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': !formDefaultPublic,
+              style: { ...styles.tab, ...(!formDefaultPublic ? styles.tabOn : {}) },
+              onClick: () => setFormDefaultPublic(false),
+            }, t.switchOff)),
+          h('p', { style: styles.hint }, t.defaultPublicHint),
           h('p', { style: styles.hint }, t.storageHint),
           h('div', { style: styles.grid2 },
             h('label', { style: styles.label },

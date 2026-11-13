@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { MemoryStore } from '../lib/store.js';
+import { MemoryScopes, sessionKey } from '../lib/scopes.js';
 import { evaluateDecision } from '../lib/decision.js';
 import { search, tokenize } from '../lib/retrieval.js';
 import { CATEGORIES, hourKey } from '../lib/util.js';
@@ -340,23 +341,31 @@ test('auto mode triggers after the configured number of turns', async () => {
       autoEveryRounds: 2,
       root: memoryRoot,
     });
-    const runtime = { counters: new Map(), pending: new Map() };
+    const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
     installContextManagement(ctx, config, { registryDir, getService: ctx.get }, runtime);
     const onSessionEvent = handlers.get('session/event');
     assert.equal(typeof onSessionEvent, 'function');
 
+    const scopes = new MemoryScopes(memoryRoot);
+    const conversation = scopes.sessionStoreFor('session-test', {});
+    assert.equal(conversation.key, sessionKey('session-test'));
+
     onSessionEvent(session, { type: 'turn/end', data: { turn: 1 } });
-    assert.equal(new MemoryStore(memoryRoot).stagingRecords().length, 0);
+    assert.equal(conversation.store.stagingRecords().length, 0);
     onSessionEvent(session, { type: 'turn/end', data: { turn: 2 } });
 
-    const records = new MemoryStore(memoryRoot).stagingRecords();
+    const records = conversation.store.stagingRecords();
     assert.equal(records.length, 1);
     assert.equal(records[0].kind, 'digest');
     assert.match(records[0].content, /自动记忆/);
-    assert.equal(new MemoryStore(memoryRoot).archivedCount('action_logs'), 1);
-    assert.equal(new MemoryStore(memoryRoot).listContexts().length, 1);
+    assert.equal(conversation.store.archivedCount('action_logs'), 1);
+    assert.equal(conversation.store.listContexts().length, 1);
+    // Automatic tidying writes only into the conversation's own scope.
+    assert.equal(scopes.sharedStore().stagingRecords().length, 0);
+    assert.equal(runtime.activity.get('session-test') > 0, true);
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(compacted, 1);
+    assert.equal(conversation.store.readCompactionStatus().state, 'done');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -463,13 +472,342 @@ test('context snapshot captures completed turns and restores text', () => {
   }
 });
 
+test('conversation scopes isolate records and resolve by id or prefix', () => {
+  const root = tempRoot();
+  try {
+    const scopes = new MemoryScopes(root);
+    const alpha = scopes.sessionStoreFor('session-alpha-with-a-long-id', { workspace: root });
+    const beta = scopes.sessionStoreFor('session-beta', { parent_session_id: 'session-alpha-with-a-long-id' });
+    assert.notEqual(alpha.key, beta.key);
+    assert.match(alpha.key, /^s_[0-9a-f]{16}$/);
+    assert.equal(sessionKey('session-alpha-with-a-long-id'), alpha.key);
+
+    alpha.store.stage({ content: 'A 的过程记录', kind: 'action' });
+    alpha.store.remember({ doc_id: 'alpha_doc', text: '只属于 A 的知识', category: 'errors_fixes' });
+    beta.store.remember({ doc_id: 'beta_doc', text: '只属于 B 的知识', category: 'ui_facts' });
+    scopes.sharedStore().stage({ content: '共享层记录', kind: 'action' });
+
+    assert.equal(alpha.store.stagingRecords().length, 1);
+    assert.equal(beta.store.stagingRecords().length, 0);
+    assert.deepEqual(beta.store.documents().map((doc) => doc.doc_id), ['beta_doc']);
+    assert.equal(scopes.sharedStore().stagingRecords().length, 1);
+
+    const rows = scopes.listSessions();
+    assert.equal(rows.length, 2);
+    assert.equal(rows.find((row) => row.key === beta.key).parentSessionId, 'session-alpha-with-a-long-id');
+    assert.equal(scopes.resolve(alpha.key).sessionId, 'session-alpha-with-a-long-id');
+    assert.equal(scopes.resolve('session-beta').key, beta.key);
+    assert.equal(scopes.resolve('session-alpha').key, alpha.key);
+    assert.equal(scopes.resolve('session-beta').meta.workspace ?? '', '');
+    assert.equal(scopes.resolve('s_ffffffffffffffff'), null);
+    assert.equal(scopes.sharedHasData(), true);
+
+    const counts = scopes.counts(alpha.key);
+    assert.equal(counts.staging, 1);
+    assert.equal(counts.knowledge, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('cross conversation search labels every hit', async () => {
+  const root = tempRoot();
+  const previousHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = path.join(root, 'dsh-home');
+  try {
+    const memoryRoot = path.join(root, 'memory');
+    const registered = [];
+    apply({
+      tools: { register: (tool) => { registered.push(tool); return () => {}; } },
+      effect: (fn) => fn(),
+      on: () => () => {},
+      get: () => undefined,
+    }, { root: memoryRoot });
+    const memory = registered.find((tool) => tool.name === 'aim_memory');
+    const searchTool = registered.find((tool) => tool.name === 'aim_search');
+    const contextTool = registered.find((tool) => tool.name === 'aim_context');
+
+    const execA = {
+      agent: {
+        session: { id: 'conv-alpha', header: { cwd: root }, ownEvents: () => [] },
+      },
+    };
+    const execB = {
+      agent: {
+        session: { id: 'conv-beta', header: { cwd: root }, ownEvents: () => [] },
+      },
+    };
+
+    await memory.execute({
+      action: 'remember', doc_id: 'deploy_note', text: '部署脚本位于 scripts/deploy.sh，发布前先跑测试', category: 'errors_fixes',
+    }, execA);
+    await memory.execute({
+      action: 'stage', content: 'B 的过程记录', kind: 'action',
+    }, execB);
+    await memory.execute({
+      action: 'remember', doc_id: 'deploy_cmd', text: '部署命令是 npm run deploy', category: 'action_logs',
+    }, execB);
+
+    // A's own scope still only contains A's document.
+    const own = await searchTool.execute({ query: '部署', scope: 'session' }, execA);
+    assert.match(own, /deploy_note/);
+    assert.doesNotMatch(own, /deploy_cmd/);
+
+    // Cross-conversation search is the default and names the source conversation.
+    const all = await searchTool.execute({ query: '部署' }, execA);
+    assert.match(all, /deploy_note/);
+    assert.match(all, /deploy_cmd/);
+    assert.match(all, /来源：本对话/);
+    assert.match(all, /来源：对话/);
+
+    const status = await memory.execute({ action: 'status' }, execA);
+    assert.match(status, /当前范围：本对话/);
+    assert.match(status, /其他对话：1 个/);
+
+    const conversations = await contextTool.execute({ action: 'sessions' }, execA);
+    assert.match(conversations, /共 2 个对话/);
+    assert.match(conversations, /共享层/);
+
+    // Writing to the shared layer stays visible to everyone and is not duplicated.
+    await memory.execute({
+      action: 'remember', doc_id: 'shared_fact', text: '所有对话共用的事实：发布前必须跑测试', category: 'errors_fixes', scope: 'shared',
+    }, execA);
+    const sharedSearch = await searchTool.execute({ query: '共用', scope: 'shared' }, execB);
+    assert.match(sharedSearch, /来源：共享/);
+
+    // Decisions follow the same scope rule as the other writes.
+    const decideTool = registered.find((tool) => tool.name === 'aim_decide');
+    const reviewed = await decideTool.execute({
+      decision: '把跨对话约定写进共享层', risk: 'low', scope: 'shared',
+    }, execA);
+    assert.match(reviewed, /范围：共享/);
+    const scopes = new MemoryScopes(memoryRoot);
+    assert.equal(scopes.sharedStore().decisionStats().total, 1);
+    assert.equal(scopes.counts(sessionKey('conv-alpha')).decisions, 0);
+  } finally {
+    process.env.DSH_HOME = previousHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('context archives stay per conversation and restore can cross', async () => {
+  const root = tempRoot();
+  const previousHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = path.join(root, 'dsh-home');
+  try {
+    const memoryRoot = path.join(root, 'memory');
+    const registered = [];
+    apply({
+      tools: { register: (tool) => { registered.push(tool); return () => {}; } },
+      effect: (fn) => fn(),
+      on: () => () => {},
+      get: () => undefined,
+    }, { root: memoryRoot });
+    const contextTool = registered.find((tool) => tool.name === 'aim_context');
+
+    const events = [
+      { type: 'turn/start', data: { turn: 1 } },
+      { type: 'user/message', data: { content: [{ type: 'text', text: 'A 对话里的重要上下文' }] } },
+      { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'A 的回答' }] } } },
+      { type: 'turn/end', data: { turn: 1 } },
+    ];
+    let injected = null;
+    const execA = {
+      agent: {
+        session: { id: 'conv-alpha', header: { cwd: root }, ownEvents: () => events },
+        inject: async (message) => { injected = message; },
+      },
+    };
+    const execB = {
+      agent: {
+        session: { id: 'conv-beta', header: { cwd: root }, ownEvents: () => [] },
+        inject: async (message) => { injected = message; },
+      },
+    };
+
+    const saved = await contextTool.execute({ action: 'save', name: 'a-checkpoint' }, execA);
+    const match = saved.match(/context_[0-9_]+_[0-9a-f]+/);
+    assert.ok(match, saved);
+    assert.match(saved, /本对话/);
+
+    assert.match(await contextTool.execute({ action: 'list' }, execB), /本对话暂无上下文存档/);
+    const all = await contextTool.execute({ action: 'list', scope: 'all' }, execB);
+    assert.match(all, new RegExp(match[0]));
+    assert.match(all, /对话 conv-alpha/);
+
+    const restored = await contextTool.execute({ action: 'restore', context_id: match[0] }, execB);
+    assert.match(restored, /将在下一步生效/);
+    assert.ok(injected);
+    assert.match(injected.content[0].text, /A 对话里的重要上下文/);
+
+    const status = await contextTool.execute({ action: 'status' }, execB);
+    assert.match(status, /对话数量：2 个/);
+    assert.match(status, /上下文存档：0 个（本对话）/);
+
+    // Both conversations keep their own compaction diagnostics.
+    const scopes = new MemoryScopes(memoryRoot);
+    assert.equal(scopes.counts(sessionKey('conv-beta')).contexts, 0);
+    assert.equal(scopes.counts(sessionKey('conv-alpha')).contexts, 1);
+  } finally {
+    process.env.DSH_HOME = previousHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ui state merges conversation sources and labels rows', () => {
+  const root = tempRoot();
+  try {
+    const scopes = new MemoryScopes(root);
+    const alpha = scopes.sessionStoreFor('conv-alpha', {});
+    const beta = scopes.sessionStoreFor('conv-beta', {});
+    alpha.store.stage({ content: 'A 记录', kind: 'action' });
+    beta.store.stage({ content: 'B 记录', kind: 'error' });
+    beta.store.stage({ content: 'B 记录二', kind: 'action' });
+    scopes.sharedStore().stage({ content: '共享记录', kind: 'state' });
+
+    const sources = [
+      { store: alpha.store, scope: 'session', key: alpha.key, sessionId: 'conv-alpha', label: '本对话' },
+      { store: beta.store, scope: 'session', key: beta.key, sessionId: 'conv-beta', label: '对话 conv-beta' },
+      { store: scopes.sharedStore(), scope: 'shared', key: '', sessionId: '', label: '共享' },
+    ];
+    const state = buildUiState(sources);
+    assert.equal(state.scope, 'all');
+    assert.equal(state.counts.staging, 4);
+    assert.equal(state.staging.length, 4);
+    const labels = new Set(state.staging.map((row) => row.session_label));
+    assert.deepEqual([...labels].sort(), ['共享', '对话 conv-beta', '本对话'].sort());
+    const row = state.staging.find((item) => item.content === 'B 记录');
+    assert.equal(row.session_id, 'conv-beta');
+    assert.equal(row.session_key, beta.key);
+
+    // Single-source calls keep their scope and still work with a bare store.
+    const single = buildUiState([sources[0]]);
+    assert.equal(single.scope, 'session');
+    assert.equal(single.counts.staging, 1);
+    const legacy = buildUiState(alpha.store);
+    assert.equal(legacy.counts.staging, 1);
+    assert.equal(legacy.staging[0].session_label, '共享');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('new conversations get their own folder, title and access default', () => {
+  const root = tempRoot();
+  try {
+    const workspace = path.join(root, 'workspace');
+    fs.mkdirSync(workspace, { recursive: true });
+    const memoryRoot = path.join(root, 'memory');
+    const registryDir = path.join(root, 'registry');
+    const handlers = new Map();
+    const ctx = {
+      effect: (fn) => fn(),
+      on: (name, handler) => { handlers.set(name, handler); return () => {}; },
+      get: (service) => (service === 'sessionTitle'
+        ? { get: () => ({ title: '大肥鱼', source: { kind: 'fallback' } }) }
+        : undefined),
+    };
+    const config = normalizeConfig({ root: memoryRoot, defaultPublic: false });
+    const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
+    installContextManagement(ctx, config, { registryDir, getService: ctx.get }, runtime);
+    const onCreated = handlers.get('session/created');
+    assert.equal(typeof onCreated, 'function');
+
+    const session = { id: 'session-big-fish', header: { cwd: workspace } };
+    onCreated(session);
+
+    const scopes = new MemoryScopes(memoryRoot);
+    const rows = scopes.listSessions();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].sessionId, 'session-big-fish');
+    assert.equal(rows[0].title, '大肥鱼');
+    assert.equal(rows[0].name, '大肥鱼');
+    assert.equal(rows[0].public, false);
+    const key = rows[0].key;
+    // The folder exists with its six layers, ready for the first write.
+    for (const dir of ['staging', 'archive', 'snapshots', 'knowledge', 'decisions', 'contexts']) {
+      assert.ok(fs.existsSync(path.join(memoryRoot, 'sessions', key, dir)), dir);
+    }
+    assert.ok(fs.existsSync(path.join(memoryRoot, 'sessions', key, 'session.json')));
+
+    // Subagent sessions must not spawn their own memory folders.
+    onCreated({ id: 'session-child', header: { cwd: workspace, parentSession: 'session-big-fish' } });
+    assert.equal(scopes.listSessions().length, 1);
+
+    // An explicit label wins over the generated title.
+    scopes.touch(key, { label: '修复 GitHub 发布文件夹问题' });
+    assert.equal(scopes.listSessions()[0].name, '修复 GitHub 发布文件夹问题');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('closed conversations are invisible to other conversations', async () => {
+  const root = tempRoot();
+  const previousHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = path.join(root, 'dsh-home');
+  try {
+    const memoryRoot = path.join(root, 'memory');
+    const registered = [];
+    apply({
+      tools: { register: (tool) => { registered.push(tool); return () => {}; } },
+      effect: (fn) => fn(),
+      on: () => () => {},
+      get: () => undefined,
+    }, { root: memoryRoot });
+    const memory = registered.find((tool) => tool.name === 'aim_memory');
+    const searchTool = registered.find((tool) => tool.name === 'aim_search');
+    const contextTool = registered.find((tool) => tool.name === 'aim_context');
+
+    const execA = { agent: { session: { id: 'conv-open', header: { cwd: root }, ownEvents: () => [] } } };
+    const execB = { agent: { session: { id: 'conv-other', header: { cwd: root }, ownEvents: () => [] } } };
+
+    await memory.execute({
+      action: 'remember', doc_id: 'open_doc', text: '开放对话的部署笔记', category: 'errors_fixes',
+    }, execA);
+    await memory.execute({
+      action: 'remember', doc_id: 'other_doc', text: '另一个对话的私有布置', category: 'errors_fixes',
+    }, execB);
+
+    const scopes = new MemoryScopes(memoryRoot);
+    const keyA = sessionKey('conv-open');
+    scopes.setPublic(keyA, false);
+
+    // The other conversation can still search its own knowledge only.
+    const cross = await searchTool.execute({ query: '部署', scope: 'all' }, execB);
+    assert.doesNotMatch(cross, /open_doc/);
+
+    // Its own scope always sees its own data, even when closed.
+    const own = await searchTool.execute({ query: '部署', scope: 'session' }, execA);
+    assert.match(own, /open_doc/);
+
+    const status = await memory.execute({ action: 'status' }, execB);
+    assert.match(status, /另有 1 个对话未对外开放/);
+
+    const conversations = await contextTool.execute({ action: 'sessions' }, execB);
+    assert.match(conversations, /共 1 个对话/);
+    assert.match(conversations, /另有 1 个对话未对外开放/);
+
+    // Re-opening makes it visible again.
+    scopes.setPublic(keyA, true);
+    const reopened = await searchTool.execute({ query: '部署', scope: 'all' }, execB);
+    assert.match(reopened, /open_doc/);
+  } finally {
+    process.env.DSH_HOME = previousHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('config validator bounds auto settings', () => {
   const defaults = normalizeConfig({});
   assert.equal(defaults.autoEnabled, false);
   assert.equal(defaults.autoEveryRounds, 5);
   assert.equal(defaults.maxContextChars, 30000);
+  assert.equal(defaults.defaultPublic, true);
   const validator = Config['~standard'].validate;
   assert.equal(validator({ autoEnabled: true, autoEveryRounds: 3 }).value.autoEnabled, true);
+  assert.equal(validator({ defaultPublic: false }).value.defaultPublic, false);
+  assert.ok(validator({ defaultPublic: 'no' }).issues);
   assert.ok(validator({ autoEnabled: 'yes' }).issues);
   assert.ok(validator({ autoEveryRounds: 0 }).issues);
   assert.ok(validator({ autoEveryRounds: 101 }).issues);

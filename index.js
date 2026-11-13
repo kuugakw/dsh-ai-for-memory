@@ -18,7 +18,8 @@
 
 import path from 'node:path';
 
-import { MemoryStore } from './lib/store.js';
+import { MemoryScopes, sessionKey, shortSessionId } from './lib/scopes.js';
+import { markActivity } from './lib/activity.js';
 import { evaluateDecision } from './lib/decision.js';
 import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
 import { defaultRegistryDir, rememberRoot } from './lib/registry.js';
@@ -41,6 +42,8 @@ const DEFAULTS = Object.freeze({
   reviewHighRiskOnly: true,
   maxContentChars: 20000,
   maxSnapshotBytes: 262144,
+  // New conversations start open; the panel can close each one individually.
+  defaultPublic: true,
 });
 
 /**
@@ -169,7 +172,49 @@ export function rootFor(config, exec, workingDirectory) {
   return path.join(workspace, config.directoryName);
 }
 
-function storeFor(config, exec, deps = {}) {
+/** Store options shared by every scope. */
+function storeOptions(config) {
+  return {
+    maxContentChars: config.maxContentChars,
+    maxSnapshotBytes: config.maxSnapshotBytes,
+    defaultTopK: config.defaultTopK,
+  };
+}
+
+/** Conversation id of the current call, or `''` when there is none. */
+export function sessionOf(exec) {
+  const id = exec?.agent?.session?.id;
+  if (typeof id === 'string') return id;
+  if (typeof id === 'number') return String(id);
+  return '';
+}
+
+/** Facts worth persisting next to a conversation's memory. */
+export function sessionMetaFrom(exec, workspace) {
+  const header = exec?.agent?.session?.header ?? {};
+  const meta = { workspace };
+  if (typeof header.parentSession === 'string' && header.parentSession !== '') {
+    meta.parent_session_id = header.parentSession;
+  }
+  if (typeof header.agentPreset === 'string' && header.agentPreset !== '') {
+    meta.agent_preset = header.agentPreset;
+  }
+  if (typeof header.origin === 'string' && header.origin !== '') meta.origin = header.origin;
+  return meta;
+}
+
+/** Scopes wrapper for one memory root. */
+export function createScopes(root, config) {
+  return new MemoryScopes(root, storeOptions(config));
+}
+
+/**
+ * Resolve everything one tool call needs: the root, the scopes wrapper and the
+ * calling conversation.
+ *
+ * @returns {{scopes: MemoryScopes, sessionId: string, workspace: string, root: string, meta: object}}
+ */
+export function memoryContext(config, exec, deps = {}, runtime = undefined) {
   const workspace = workspaceOf(exec, deps.workingDirectory);
   const root = rootFor(config, exec, deps.workingDirectory);
   const registryDir = deps.registryDir ?? defaultRegistryDir();
@@ -179,17 +224,107 @@ function storeFor(config, exec, deps = {}) {
   } catch {
     // A read-only home must not break memory writes.
   }
-  return new MemoryStore(root, {
-    maxContentChars: config.maxContentChars,
-    maxSnapshotBytes: config.maxSnapshotBytes,
-    defaultTopK: config.defaultTopK,
-  });
+  const sessionId = sessionOf(exec);
+  if (runtime && sessionId !== '') markActivity(runtime, sessionId);
+  return { scopes: createScopes(root, config), sessionId, workspace, root, meta: sessionMetaFrom(exec, workspace) };
+}
+
+// ---- conversation activity ----------------------------------------------
+
+/** Human label for a conversation row shown next to the own conversation. */
+export function conversationLabel(row, ownKey = '') {
+  if (typeof row?.scope === 'string') return row.scope === 'shared' ? '共享' : '本对话';
+  const key = String(row?.key ?? row?.session_key ?? '');
+  const isOwn = ownKey !== '' && key === ownKey;
+  const prefix = isOwn ? '本对话' : '对话';
+  const name = String(row?.name ?? '').trim();
+  if (name !== '') return `${prefix} ${name}`;
+  const sessionId = String(row?.sessionId ?? row?.session_id ?? '');
+  if (sessionId !== '') return `${prefix} ${shortSessionId(sessionId)}`;
+  return `${prefix} ${key.slice(-6) || '未知'}`;
+}
+
+/**
+ * Every readable source for one call, in read order.
+ *
+ * `session` = only the calling conversation (falls back to shared when the call
+ * has no Session), `shared` = only the root-level layer, `all` = the calling
+ * conversation first, then every other conversation, then the shared layer.
+ *
+ * @returns {Array<{store: MemoryStore, scope: 'session'|'shared', key: string,
+ *   sessionId: string, label: string, meta: object}>}
+ */
+export function memorySources(context, scope = 'session') {
+  const { scopes, sessionId, meta } = context;
+  const ownKey = sessionId === '' ? null : sessionKey(sessionId);
+  const shared = {
+    store: scopes.sharedStore(), scope: 'shared', key: '', sessionId: '', label: '共享', meta: {},
+  };
+  if (scope === 'shared') return [shared];
+  let own = null;
+  if (ownKey !== null) {
+    const resolved = scopes.sessionStoreFor(sessionId, meta);
+    own = {
+      store: resolved.store, scope: 'session', key: ownKey, sessionId, label: '本对话', meta: resolved.meta,
+    };
+  }
+  if (scope === 'session') return own ? [own] : [shared];
+
+  const sources = own ? [own] : [];
+  for (const row of scopes.listSessions()) {
+    if (ownKey !== null && row.key === ownKey) continue;
+    // A conversation that is not open is invisible to every other conversation:
+    // no cross-conversation search, no restored contexts, no merged panel view.
+    if (row.public === false) continue;
+    sources.push({
+      store: scopes.sessionStore(row.key),
+      scope: 'session',
+      key: row.key,
+      sessionId: row.sessionId,
+      label: conversationLabel(row, ownKey),
+      meta: row,
+    });
+  }
+  if (scopes.sharedHasData()) sources.push(shared);
+  return sources;
+}
+
+/**
+ * Conversations the caller may read: its own plus every open one.
+ *
+ * Used by the status/sessions summaries so a closed conversation never leaks
+ * its name or size to another conversation.
+ */
+export function readableConversations(context) {
+  const { scopes, sessionId } = context;
+  const ownKey = sessionId === '' ? null : sessionKey(sessionId);
+  return scopes.listSessions().filter((row) => row.key === ownKey || row.public !== false);
+}
+
+/** Count of conversations hidden from this caller by their access setting. */
+export function closedConversationCount(context) {
+  const { scopes, sessionId } = context;
+  const ownKey = sessionId === '' ? null : sessionKey(sessionId);
+  return scopes.listSessions().filter((row) => row.key !== ownKey && row.public === false).length;
+}
+
+/** The one store a write targets. */
+export function writeSource(context, scope = 'session') {
+  return memorySources(context, scope === 'shared' ? 'shared' : 'session')[0];
+}
+
+/** All conversation stores plus shared, for a cross-conversation lookup. */
+export function lookupSources(context) {
+  const sources = memorySources(context, 'all');
+  if (sources.every((source) => source.scope !== 'shared')) sources.push(memorySources(context, 'shared')[0]);
+  return sources;
 }
 
 // ---- formatting ----------------------------------------------------------
 
-function formatStatus(status) {
-  const lines = [`记忆根目录：${status.root}`];
+/** Format one store's layer counts as the human summary lines. */
+function formatLayers(status) {
+  const lines = [];
   lines.push(`过程记录层：${status.staging.files} 个文件 / ${status.staging.entries} 条记录`);
   const archive = Object.entries(status.archive);
   lines.push(archive.length > 0
@@ -212,6 +347,33 @@ function formatStatus(status) {
       lines.push(`  - [${row.kind}] ${row.content}（${row.timestamp}）`);
     }
   }
+  return lines;
+}
+
+/**
+ * Status for the current scope plus a compact view of the other conversations.
+ *
+ * @param {object} status - one store's `status()`.
+ * @param {{label: string, root: string, otherRows?: Array<object>}} context
+ */
+function formatStatus(status, context) {
+  const lines = [`记忆根目录：${context.root}`, `当前范围：${context.label}`];
+  lines.push(...formatLayers(status));
+  const others = Array.isArray(context.otherRows) ? context.otherRows : [];
+  if (others.length > 0) {
+    lines.push(`其他对话：${others.length} 个（可用 aim_memory/get scope=shared、aim_search scope=all 或 aim_context sessions 访问）`);
+    for (const row of others.slice(0, 10)) {
+      const counts = row.counts ?? {};
+      lines.push(`  - ${conversationLabel(row)}：过程记录 ${counts.staging ?? 0}，归档 ${counts.archive ?? 0}，知识 ${counts.knowledge ?? 0}，上下文 ${counts.contexts ?? 0}，最近 ${row.updatedAt || '未知'}`);
+    }
+  }
+  if (context.closedCount > 0) {
+    lines.push(`另有 ${context.closedCount} 个对话未对外开放（本对话读不到）`);
+  }
+  if (context.sharedCounts) {
+    const shared = context.sharedCounts;
+    lines.push(`共享层：过程记录 ${shared.staging}，归档 ${shared.archive}，快照 ${shared.snapshots}，知识 ${shared.knowledge}，决策 ${shared.decisions}，上下文 ${shared.contexts}`);
+  }
   return lines.join('\n');
 }
 
@@ -229,7 +391,8 @@ function formatHits(query, hits, mode) {
   const lines = [`命中 ${hits.length} 条（mode=${mode}）：`];
   hits.forEach((hit, index) => {
     lines.push(`${index + 1}. [${hit.category}] ${hit.doc_id}  score=${hit.score.toFixed(4)}`
-      + `（bm25=${hit.bm25_score.toFixed(4)}，vector=${hit.vector_score.toFixed(4)}）`);
+      + `（bm25=${hit.bm25_score.toFixed(4)}，vector=${hit.vector_score.toFixed(4)}）`
+      + (hit.origin_label ? `｜来源：${hit.origin_label}` : ''));
     lines.push(`   ${clip(hit.text, 320)}`);
   });
   return lines.join('\n');
@@ -256,14 +419,15 @@ function formatDecision(result) {
  * @param {ReturnType<typeof normalizeConfig>} config
  * @returns {object[]} raw definitions (parameters still a property map).
  */
-export function createTools(config, deps = {}, runtime = { counters: new Map(), pending: new Map() }) {
+export function createTools(config, deps = {}, runtime = { counters: new Map(), pending: new Map(), activity: new Map() }) {
   return [
     {
       name: 'aim_memory',
       description:
         '分层项目管理记忆（AI for Memory）：把工作过程记进过程记录、归档成分类、保存/恢复精确状态快照、'
         + '写入可检索的知识文档、查看各层统计。数据保存在当前工作区的记忆目录，跨会话/清空上下文后可读。'
-        + '适合记录决策与理由、错误与修复、界面事实、任务状态；需要检索时用 aim_search。'
+        + '默认写入当前对话自己的独立记忆；scope=shared 时写入所有对话共用的共享层。'
+        + '适合记录决策与理由、错误与修复、界面事实、任务状态；需要检索时用 aim_search（默认跨对话）。'
         + '不要写入密钥、令牌或用户没有说过的事实。',
       parameters: {
         action: {
@@ -274,6 +438,13 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             'stage=追加一条过程记录（content 必填）；archive=按 kind 归档（可传 category 强制分类）；'
             + 'snapshot=保存 state 快照（name 必填）；restore=按 snapshot_id 恢复；list=列出快照；'
             + 'remember=写入知识文档（doc_id/text/category 必填）；status=查看统计。',
+        },
+        scope: {
+          type: 'string',
+          enum: ['session', 'shared'],
+          description:
+            '写入范围，默认 session=当前对话独立存储（其他对话看不到写入，但可被检索）；'
+            + 'shared=所有对话共用的共享层（适合跨对话约定、全局事实）。',
         },
         content: {
           type: 'string',
@@ -336,8 +507,11 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         rawInput: args,
       }),
       async execute(args, exec) {
-        const store = storeFor(config, exec, deps);
+        const context = memoryContext(config, exec, deps, runtime);
         const action = args?.action;
+        const requested = args?.scope === 'shared' ? 'shared' : 'session';
+        const source = writeSource(context, requested);
+        const store = source.store;
 
         if (action === 'stage') {
           const record = store.stage({
@@ -349,6 +523,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           });
           return [
             `已写入过程记录：${record.source_file} #${record.entry_index}`,
+            `范围：${source.label}（${source.scope === 'shared' ? '共享层' : shortSessionId(context.sessionId)}）`,
             `kind=${record.kind} → ${record.category}｜risk=${record.risk}｜verify=${record.verify}`,
             clip(record.content, 500),
           ].join('\n');
@@ -356,7 +531,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
 
         if (action === 'archive') {
           const stats = store.archive({ category: args?.category ?? null });
-          return `归档完成：archived=${stats.archived}，skipped=${stats.skipped}，failed=${stats.failed}`
+          return `归档完成（${source.label}）：archived=${stats.archived}，skipped=${stats.skipped}，failed=${stats.failed}`
             + (stats.categories.length > 0 ? `\n涉及分类：${stats.categories.join('，')}` : '');
         }
 
@@ -365,19 +540,39 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             name: args?.name,
             state: args?.state ?? {},
           });
-          return `已创建快照：${info.snapshot_id}\nstate≈${info.state_size} 字符，文件：${info.file}`;
+          return `已创建快照（${source.label}）：${info.snapshot_id}\nstate≈${info.state_size} 字符，文件：${info.file}`;
         }
 
         if (action === 'restore') {
           const id = String(args?.snapshot_id ?? '').trim();
           if (id === '') throw new Error('restore 需要 snapshot_id');
-          const state = store.restoreSnapshot(id);
-          if (state === null) throw new Error(`未找到快照：${id}`);
-          return `已恢复快照：${id}\n${clip(JSON.stringify(state, null, 2), 20000)}`;
+          // Snapshots are conversation-scoped by default, but a cross-conversation
+          // restore is exactly the "access another conversation" case.
+          const candidates = requested === 'shared' ? [source] : [source, ...lookupSources(context)];
+          let found = null;
+          for (const candidate of candidates) {
+            const state = candidate.store.restoreSnapshot(id);
+            if (state !== null) {
+              found = { state, source: candidate };
+              break;
+            }
+          }
+          if (!found) throw new Error(`未找到快照：${id}`);
+          return [
+            `已恢复快照：${id}（${found.source.label}）`,
+            clip(JSON.stringify(found.state, null, 2), 20000),
+          ].join('\n');
         }
 
         if (action === 'list') {
-          return formatSnapshotList(store.listSnapshots());
+          const own = store.listSnapshots();
+          const outside = lookupSources(context)
+            .filter((candidate) => candidate.store !== store)
+            .reduce((sum, candidate) => sum + candidate.store.listSnapshots().length, 0);
+          return formatSnapshotList(own)
+            + (outside > 0
+              ? `\n其他对话/共享层还有 ${outside} 个快照；restore 默认会跨对话查找。`
+              : '');
         }
 
         if (action === 'remember') {
@@ -386,11 +581,20 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             text: args?.text,
             category: args?.category,
           });
-          return `知识已写入：${doc.doc_id}（category=${doc.category}）\n${clip(doc.text, 300)}`;
+          return `知识已写入（${source.label}）：${doc.doc_id}（category=${doc.category}）\n${clip(doc.text, 300)}`;
         }
 
         if (action === 'status') {
-          return formatStatus(store.status());
+          const others = readableConversations(context)
+            .filter((row) => source.scope !== 'session' || row.key !== source.key)
+            .map((row) => ({ ...row, counts: context.scopes.counts(row.key) }));
+          return formatStatus(store.status(), {
+            root: context.root,
+            label: source.label,
+            otherRows: others,
+            closedCount: closedConversationCount(context),
+            sharedCounts: source.scope === 'shared' ? null : context.scopes.sharedCounts(),
+          });
         }
 
         throw new Error(`未知 action：${String(action)}`);
@@ -400,6 +604,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
       name: 'aim_search',
       description:
         '检索当前项目的 AI for Memory 知识库（BM25 关键词 + 本地哈希向量）。'
+        + '默认跨对话检索：本对话、其他对话、共享层都会命中，结果逐条标注来源对话。'
         + '需要历史约定、先前决策、错误修复记录或界面事实时先检索，不要凭空猜测。'
         + '结果按相关度排序，并过滤掉零命中的文档。',
       parameters: {
@@ -407,6 +612,13 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           type: 'string',
           required: true,
           description: '检索词或自然语言问题，中英文均可。',
+        },
+        scope: {
+          type: 'string',
+          enum: ['all', 'session', 'shared'],
+          description:
+            '检索范围，默认 all=本对话+其他对话+共享层（跨对话检索）；'
+            + 'session=只查本对话；shared=只查共享层。',
         },
         category: {
           type: 'string',
@@ -436,13 +648,36 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         const query = String(args?.query ?? '').trim();
         if (query === '') throw new Error('query 必须为非空字符串');
         const mode = args?.mode ?? 'hybrid';
-        const store = storeFor(config, exec, deps);
-        const hits = store.search(query, {
-          category: args?.category ?? null,
-          mode,
-          topK: args?.top_k ?? config.defaultTopK,
-        });
-        return formatHits(query, hits, mode);
+        const scope = ['all', 'session', 'shared'].includes(args?.scope) ? args.scope : 'all';
+        const context = memoryContext(config, exec, deps, runtime);
+        const sources = memorySources(context, scope);
+        const topK = Number.isInteger(args?.top_k) && args.top_k > 0 ? args.top_k : config.defaultTopK;
+        const merged = [];
+        for (const source of sources) {
+          const hits = source.store.search(query, {
+            category: args?.category ?? null,
+            mode,
+            topK,
+          });
+          for (const hit of hits) {
+            merged.push({
+              ...hit,
+              origin_label: source.label,
+              origin_key: source.key,
+              origin_scope: source.scope,
+            });
+          }
+        }
+        // Scores come from per-store indexes, so compare them as-is and keep the
+        // best `topK` overall; documents with identical ids stay separate because
+        // every conversation is its own namespace.
+        merged.sort((left, right) => right.score - left.score);
+        const hits = merged.slice(0, topK);
+        const header = hits.length === 0 ? '' : `检索范围：${sources.map((source) => source.label).join(' + ')}\n`;
+        if (merged.length === 0) {
+          return `没有命中「${query}」的知识文档（mode=${mode}，范围=${scope}）。`;
+        }
+        return header + formatHits(query, hits, mode);
       },
     },
     {
@@ -461,6 +696,11 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           type: 'string',
           enum: [...RISKS],
           description: '风险等级，默认 low（低风险直接放行，不浪费审查）。',
+        },
+        scope: {
+          type: 'string',
+          enum: ['session', 'shared'],
+          description: '写入范围，默认 session=本对话独立存储；shared=共享层。',
         },
         thesis: {
           type: 'string',
@@ -490,23 +730,35 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           },
           { reviewHighRiskOnly: config.reviewHighRiskOnly },
         );
-        const store = storeFor(config, exec, deps);
-        store.recordDecision(result);
-        return formatDecision(result);
+        const context = memoryContext(config, exec, deps, runtime);
+        const source = writeSource(context, args?.scope === 'shared' ? 'shared' : 'session');
+        source.store.recordDecision(result);
+        return `${formatDecision(result)}\n范围：${source.label}`;
       },
     },
     {
       name: 'aim_context',
       description:
         '上下文管理：save=把当前已完成对话整理进存储；clear=保存后压缩/清理会话上下文；'
-        + 'restore=把保存的上下文重新注入当前会话；list=列出存档；status=查看压缩服务与存档状态。'
+        + 'restore=把保存的上下文重新注入当前会话；list=列出存档；status=查看压缩服务与存档状态；'
+        + 'sessions=列出所有对话及其记忆规模。'
+        + '存档默认按对话隔离（每个对话只列出自己的），restore 默认可以跨对话找到别的对话保存过的上下文。'
         + '自动整理开启时每 N 轮会自动执行 save+clear；手动工具始终可用。清理后需要旧信息时用 restore 调回。',
       parameters: {
         action: {
           type: 'string',
           required: true,
-          enum: ['save', 'clear', 'restore', 'list', 'status'],
-          description: 'save=保存上下文；clear=保存并压缩清理；restore=恢复存档；list=列存档；status=查看状态。',
+          enum: ['save', 'clear', 'restore', 'list', 'status', 'sessions'],
+          description:
+            'save=保存当前对话上下文；clear=保存并压缩清理；restore=恢复存档（可跨对话）；'
+            + 'list=列存档；status=查看状态；sessions=列出所有对话。',
+        },
+        scope: {
+          type: 'string',
+          enum: ['session', 'all', 'shared'],
+          description:
+            'list/restore 的查找范围，默认 session=只查本对话（restore 例外：默认先本对话、再其他对话、再共享层）；'
+            + 'all=所有对话；shared=只查共享层。',
         },
         name: {
           type: 'string',
@@ -526,9 +778,11 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         rawInput: args,
       }),
       async execute(args, exec) {
-        const store = storeFor(config, exec, deps);
+        const context = memoryContext(config, exec, deps, runtime);
         const action = args?.action;
         const session = exec?.agent?.session;
+        const source = writeSource(context, 'session');
+        const store = source.store;
 
         const snapshot = () => {
           if (!session || typeof session.ownEvents !== 'function') {
@@ -546,7 +800,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             sessionId: String(session.id),
             ...built,
           });
-          return `已保存上下文：${saved.context_id}\n`
+          return `已保存上下文（${source.label}）：${saved.context_id}\n`
             + `标签：${saved.label}\n`
             + `第 ${saved.turn_from}-${saved.turn_to} 轮，${saved.turn_count} 轮，约 ${saved.chars} 字符\n`
             + `文件：${saved.file}`;
@@ -561,45 +815,76 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           });
           const compaction = deps.getService?.('compaction');
           if (!compaction || typeof compaction.compactNow !== 'function') {
-            return `已保存上下文 ${saved.context_id}，但当前 profile 未启用 compaction 服务，无法清理会话上下文。`
+            return `已保存上下文 ${saved.context_id}（${source.label}），但当前 profile 未启用 compaction 服务，无法清理会话上下文。`
               + '请在 DSH 插件中启用 @deepseek-ai/dsh-compaction-basic。';
           }
-          runtime.pending.set(String(session.id), saved.context_id);
-          return `已保存上下文 ${saved.context_id}（第 ${saved.turn_from}-${saved.turn_to} 轮）。\n`
+          if (session && session.id) runtime.pending.set(String(session.id), saved.context_id);
+          return `已保存上下文 ${saved.context_id}（${source.label}，第 ${saved.turn_from}-${saved.turn_to} 轮）。\n`
             + '将在本轮结束后压缩/清理会话上下文；需要时可执行 restore 调回。';
         }
 
         if (action === 'restore') {
           const id = String(args?.context_id ?? '').trim();
           if (id === '') throw new Error('restore 需要 context_id');
-          const record = store.loadContext(id);
-          if (!record) throw new Error(`未找到上下文：${id}`);
+          const requested = args?.scope === undefined ? null : args.scope;
+          const candidates = requested === 'shared'
+            ? [memorySources(context, 'shared')[0]]
+            : requested === 'session'
+              ? [source]
+              : [source, ...lookupSources(context).filter((item) => item !== source)];
+          let found = null;
+          for (const candidate of candidates) {
+            const record = candidate.store.loadContext(id);
+            if (record) {
+              found = { record, source: candidate };
+              break;
+            }
+          }
+          if (!found) throw new Error(`未找到上下文：${id}`);
           if (!exec.agent || typeof exec.agent.inject !== 'function') {
             throw new Error('当前调用没有可注入的 agent');
           }
           await exec.agent.inject({
-            content: [{ type: 'text', text: formatRestoreContext(record) }],
+            content: [{ type: 'text', text: formatRestoreContext(found.record) }],
             source: { kind: 'ai-for-memory' },
           });
-          return `已恢复上下文 ${record.context_id}（第 ${record.turn_from}-${record.turn_to} 轮），将在下一步生效。`;
+          return `已恢复上下文 ${found.record.context_id}（${found.source.label}，第 ${found.record.turn_from}-${found.record.turn_to} 轮），将在下一步生效。`;
         }
 
         if (action === 'list') {
-          const rows = store.listContexts();
-          if (rows.length === 0) return '暂无上下文存档。';
-          return [`共 ${rows.length} 个上下文存档：`, ...rows.map((row) => (
-            `- ${row.context_id}｜${row.label}｜第 ${row.turn_from}-${row.turn_to} 轮｜${row.turn_count} 轮｜${row.chars} 字符｜${row.created_at}`
+          const requested = args?.scope === 'all' ? 'all' : args?.scope === 'shared' ? 'shared' : 'session';
+          const rows = [];
+          for (const candidate of memorySources(context, requested)) {
+            for (const row of candidate.store.listContexts()) {
+              rows.push({ ...row, origin_label: candidate.label });
+            }
+          }
+          if (rows.length === 0) {
+            return requested === 'session'
+              ? '本对话暂无上下文存档（可用 scope=all 查看其他对话）。'
+              : '暂无上下文存档。';
+          }
+          rows.sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)));
+          return [`共 ${rows.length} 个上下文存档${requested === 'all' ? '（所有对话）' : ''}：`, ...rows.map((row) => (
+            `- ${row.context_id}｜${row.label}｜${row.origin_label}｜第 ${row.turn_from}-${row.turn_to} 轮｜${row.turn_count} 轮｜${row.chars} 字符｜${row.created_at}`
           ))].join('\n');
         }
 
         if (action === 'status') {
           const compaction = deps.getService?.('compaction');
+          const rows = readableConversations(context)
+            .map((row) => ({ ...row, counts: context.scopes.counts(row.key) }));
+          const shared = context.scopes.sharedCounts();
+          const totalContexts = rows.reduce((sum, row) => sum + row.counts.contexts, 0) + shared.contexts;
+          const closed = closedConversationCount(context);
           return [
             `compaction 服务：${compaction && typeof compaction.compactNow === 'function' ? '可用' : '不可用'}`,
             `自动整理：${config.autoEnabled ? `开启（每 ${config.autoEveryRounds} 轮）` : '关闭'}`,
             `手动工具：始终可用`,
-            `上下文存档：${store.listContexts().length} 个`,
-            `待压缩：${runtime.pending.has(String(session?.id)) ? '是' : '否'}`,
+            `当前对话：${source.label}${context.sessionId ? `（${shortSessionId(context.sessionId)}）` : ''}`,
+            `上下文存档：${store.listContexts().length} 个（本对话），可见对话共 ${totalContexts} 个`,
+            `对话数量：${rows.length} 个${closed > 0 ? `（另有 ${closed} 个未对外开放）` : ''}`,
+            `待压缩：${session && session.id && runtime.pending.has(String(session.id)) ? '是' : '否'}`,
             (() => {
               const last = store.readCompactionStatus();
               if (!last) return '最近压缩：无记录';
@@ -609,6 +894,24 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
                 + `${last.at ? ` @ ${last.at}` : ''}`;
             })(),
           ].join('\n');
+        }
+
+        if (action === 'sessions') {
+          const rows = readableConversations(context)
+            .map((row) => ({ ...row, counts: context.scopes.counts(row.key) }));
+          if (rows.length === 0) return '还没有任何对话的记忆。';
+          const lines = [`共 ${rows.length} 个对话（按最近活动排序）：`];
+          for (const row of rows) {
+            const counts = row.counts;
+            lines.push(`- ${conversationLabel(row, source.scope === 'session' ? source.key : '')}｜${row.key}`
+              + `｜过程记录 ${counts.staging}，归档 ${counts.archive}，快照 ${counts.snapshots}，知识 ${counts.knowledge}，决策 ${counts.decisions}，上下文 ${counts.contexts}`
+              + `｜最近 ${row.updatedAt || '未知'}${row.public === false ? '｜未对外开放' : ''}`);
+          }
+          const shared = context.scopes.sharedCounts();
+          lines.push(`共享层：过程记录 ${shared.staging}，归档 ${shared.archive}，知识 ${shared.knowledge}，上下文 ${shared.contexts}`);
+          const closed = closedConversationCount(context);
+          if (closed > 0) lines.push(`另有 ${closed} 个对话未对外开放（本对话读不到）`);
+          return lines.join('\n');
         }
 
         throw new Error(`未知 action：${String(action)}`);
@@ -633,13 +936,55 @@ export function installContextManagement(ctx, config, deps, runtime) {
   const pending = runtime?.pending ?? new Map();
   const getService = deps.getService ?? (() => undefined);
 
+  /** Latest DSH-generated title for one live session, or `''`. */
+  const titleOfSession = (session) => {
+    try {
+      const titles = getService('sessionTitle');
+      const snapshot = titles && typeof titles.get === 'function' ? titles.get(session) : undefined;
+      return snapshot && typeof snapshot.title === 'string' ? snapshot.title : '';
+    } catch {
+      return '';
+    }
+  };
+
+  /**
+   * Make sure one conversation has its own memory directory, and keep its name
+   * and the DSH-generated title in sync.
+   *
+   * Called for every new conversation (layers pre-created) and again after each
+   * turn (cheap fallback that also picks up a generated title).
+   *
+   * @returns {string|null} the conversation key.
+   */
+  const rememberConversation = (session, options = {}) => {
+    try {
+      const context = memoryContext(config, { agent: { session } }, deps, runtime);
+      const key = sessionKey(String(session.id));
+      if (key === null) return null;
+      const existing = context.scopes.readMeta(key);
+      const patch = { ...context.meta };
+      // Access is a per-conversation user setting: only seed it on creation.
+      if (existing === null) patch.public = config.defaultPublic !== false;
+      context.scopes.ensureSession(String(session.id), patch);
+      if (options.initLayers === true) context.scopes.sessionStore(key).init();
+      const title = titleOfSession(session);
+      if (title !== '') context.scopes.setTitle(key, title);
+      return key;
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn(`[ai-for-memory] 创建对话记忆目录失败：${error?.message ?? error}`);
+      return null;
+    }
+  };
+
   const runCompaction = (session) => {
     const agents = getService('agents');
     const agent = agents && typeof agents.get === 'function' ? agents.get(session.id) : undefined;
     const compaction = getService('compaction');
     let store;
     try {
-      store = storeFor(config, { agent: { session } }, deps);
+      const context = memoryContext(config, { agent: { session } }, deps, runtime);
+      store = writeSource(context, 'session').store;
     } catch {
       store = undefined;
     }
@@ -685,6 +1030,15 @@ export function installContextManagement(ctx, config, deps, runtime) {
     const id = String(session.id);
     const isSubagent = Boolean(session.header?.parentSession);
 
+    // Conversations are the unit of independence, so activity is recorded for
+    // every one of them; the panel uses it to default to "the conversation in use".
+    if (!isSubagent) {
+      markActivity(runtime, id);
+      // Fallback for conversations that predate this plugin load: ensure the
+      // directory exists and refresh the generated title.
+      rememberConversation(session);
+    }
+
     // Automatic archiving never runs for subagents; a manual `clear` still
     // honors its pending request below.
     if (!isSubagent && config.autoEnabled) {
@@ -695,7 +1049,8 @@ export function installContextManagement(ctx, config, deps, runtime) {
         counters.delete(id);
         try {
           const events = session.ownEvents();
-          const store = storeFor(config, { agent: { session } }, deps);
+          const context = memoryContext(config, { agent: { session } }, deps, runtime);
+          const store = writeSource(context, 'session').store;
           const digest = collectTurnDigest(events, config.autoEveryRounds);
           if (digest) {
             store.stage({ content: digest, kind: 'digest', source: 'auto' });
@@ -710,7 +1065,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
             });
             pending.set(id, saved.context_id);
             // eslint-disable-next-line no-console
-            console.log(`[ai-for-memory] 自动档：已归档上下文 ${saved.context_id}（第 ${saved.turn_from}-${saved.turn_to} 轮）`);
+            console.log(`[ai-for-memory] 自动整理：已归档上下文 ${saved.context_id}（第 ${saved.turn_from}-${saved.turn_to} 轮）`);
           }
         } catch (error) {
           // eslint-disable-next-line no-console
@@ -730,6 +1085,10 @@ export function installContextManagement(ctx, config, deps, runtime) {
     const id = String(session?.id);
     counters.delete(id);
     pending.delete(id);
+  }));
+  ctx.effect(() => ctx.on('session/created', (session) => {
+    if (!session || Boolean(session.header?.parentSession)) return;
+    rememberConversation(session, { initLayers: true });
   }));
 }
 
@@ -757,7 +1116,7 @@ export function apply(ctx, config) {
     }
   };
   const deps = { workingDirectory, registryDir, getService };
-  const runtime = { counters: new Map(), pending: new Map() };
+  const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
 
   try {
     installContextManagement(ctx, resolved, deps, runtime);
@@ -793,6 +1152,8 @@ export function apply(ctx, config) {
       entry: ctx?.fiber?.entry,
       editor,
       registryDir,
+      runtime,
+      getService,
     });
   } catch (error) {
     // eslint-disable-next-line no-console
