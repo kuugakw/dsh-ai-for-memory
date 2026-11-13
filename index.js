@@ -19,6 +19,7 @@ import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
 import { defaultRegistryDir, rememberRoot } from './lib/registry.js';
 import { installApi } from './lib/api.js';
 import { collectTurnDigest } from './lib/auto.js';
+import { buildContextSnapshot, formatRestoreContext } from './lib/context.js';
 
 export const name = 'dsh-ai-for-memory';
 
@@ -30,6 +31,7 @@ const DEFAULTS = Object.freeze({
   root: '',
   usageMode: 'manual',
   autoEveryRounds: 5,
+  maxContextChars: 30000,
   defaultTopK: 5,
   reviewHighRiskOnly: true,
   maxContentChars: 20000,
@@ -64,6 +66,14 @@ export const Config = Object.freeze({
         if (key === 'autoEveryRounds') {
           if (!Number.isInteger(input[key]) || input[key] < 1 || input[key] > 100) {
             issues.push({ message: 'autoEveryRounds 必须是 1~100 的整数', path: [key] });
+          } else {
+            value[key] = input[key];
+          }
+          continue;
+        }
+        if (key === 'maxContextChars') {
+          if (!Number.isInteger(input[key]) || input[key] < 1000 || input[key] > 200000) {
+            issues.push({ message: 'maxContextChars 必须是 1000~200000 的整数', path: [key] });
           } else {
             value[key] = input[key];
           }
@@ -249,7 +259,7 @@ function formatDecision(result) {
  * @param {ReturnType<typeof normalizeConfig>} config
  * @returns {object[]} raw definitions (parameters still a property map).
  */
-export function createTools(config, deps = {}) {
+export function createTools(config, deps = {}, runtime = { counters: new Map(), pending: new Map() }) {
   return [
     {
       name: 'aim_memory',
@@ -488,49 +498,210 @@ export function createTools(config, deps = {}) {
         return formatDecision(result);
       },
     },
+    {
+      name: 'aim_context',
+      description:
+        '上下文管理：save=把当前已完成对话整理进存储；clear=保存后压缩/清理会话上下文；'
+        + 'restore=把保存的上下文重新注入当前会话；list=列出存档；status=查看压缩服务与存档状态。'
+        + '自动挡每 N 轮会自动执行 save+clear。清理后需要旧信息时用 restore 调回。',
+      parameters: {
+        action: {
+          type: 'string',
+          required: true,
+          enum: ['save', 'clear', 'restore', 'list', 'status'],
+          description: 'save=保存上下文；clear=保存并压缩清理；restore=恢复存档；list=列存档；status=查看状态。',
+        },
+        name: {
+          type: 'string',
+          description: 'save 用：存档标签，默认 manual。',
+        },
+        context_id: {
+          type: 'string',
+          description: 'restore 用：上下文 id（也接受 id 前缀）。',
+        },
+      },
+      output: TEXT_OUTPUT,
+      isConcurrencySafe: () => false,
+      presentCall: (args) => ({
+        card: 'generic',
+        title: `AI for Memory · context ${String(args?.action ?? '')}`,
+        kind: 'other',
+        rawInput: args,
+      }),
+      async execute(args, exec) {
+        const store = storeFor(config, exec, deps);
+        const action = args?.action;
+        const session = exec?.agent?.session;
+
+        const snapshot = () => {
+          if (!session || typeof session.ownEvents !== 'function') {
+            throw new Error('当前调用没有可用的会话上下文');
+          }
+          const built = buildContextSnapshot(session.ownEvents(), { maxChars: config.maxContextChars });
+          if (!built) throw new Error('还没有可保存的已完成对话');
+          return built;
+        };
+
+        if (action === 'save') {
+          const built = snapshot();
+          const saved = store.saveContext({
+            label: args?.name ?? 'manual',
+            sessionId: String(session.id),
+            ...built,
+          });
+          return `已保存上下文：${saved.context_id}\n`
+            + `标签：${saved.label}\n`
+            + `第 ${saved.turn_from}-${saved.turn_to} 轮，${saved.turn_count} 轮，约 ${saved.chars} 字符\n`
+            + `文件：${saved.file}`;
+        }
+
+        if (action === 'clear') {
+          const built = snapshot();
+          const saved = store.saveContext({
+            label: args?.name ?? 'before-clear',
+            sessionId: String(session.id),
+            ...built,
+          });
+          const compaction = deps.getService?.('compaction');
+          if (!compaction || typeof compaction.compactNow !== 'function') {
+            return `已保存上下文 ${saved.context_id}，但当前 profile 未启用 compaction 服务，无法清理会话上下文。`
+              + '请在 DSH 插件中启用 @deepseek-ai/dsh-compaction-basic。';
+          }
+          runtime.pending.set(String(session.id), saved.context_id);
+          return `已保存上下文 ${saved.context_id}（第 ${saved.turn_from}-${saved.turn_to} 轮）。\n`
+            + '将在本轮结束后压缩/清理会话上下文；需要时可执行 restore 调回。';
+        }
+
+        if (action === 'restore') {
+          const id = String(args?.context_id ?? '').trim();
+          if (id === '') throw new Error('restore 需要 context_id');
+          const record = store.loadContext(id);
+          if (!record) throw new Error(`未找到上下文：${id}`);
+          if (!exec.agent || typeof exec.agent.inject !== 'function') {
+            throw new Error('当前调用没有可注入的 agent');
+          }
+          await exec.agent.inject({
+            content: [{ type: 'text', text: formatRestoreContext(record) }],
+            source: { kind: 'ai-for-memory' },
+          });
+          return `已恢复上下文 ${record.context_id}（第 ${record.turn_from}-${record.turn_to} 轮），将在下一步生效。`;
+        }
+
+        if (action === 'list') {
+          const rows = store.listContexts();
+          if (rows.length === 0) return '暂无上下文存档。';
+          return [`共 ${rows.length} 个上下文存档：`, ...rows.map((row) => (
+            `- ${row.context_id}｜${row.label}｜第 ${row.turn_from}-${row.turn_to} 轮｜${row.turn_count} 轮｜${row.chars} 字符｜${row.created_at}`
+          ))].join('\n');
+        }
+
+        if (action === 'status') {
+          const compaction = deps.getService?.('compaction');
+          return [
+            `compaction 服务：${compaction && typeof compaction.compactNow === 'function' ? '可用' : '不可用'}`,
+            `自动挡：${config.usageMode === 'auto' ? `开启（每 ${config.autoEveryRounds} 轮）` : '关闭'}`,
+            `上下文存档：${store.listContexts().length} 个`,
+            `待压缩：${runtime.pending.has(String(session?.id)) ? '是' : '否'}`,
+          ].join('\n');
+        }
+
+        throw new Error(`未知 action：${String(action)}`);
+      },
+    },
   ];
 }
 
 // ---- plugin entry --------------------------------------------------------
 
 /**
- * Automatic mode: every N completed turns, write a digest of the last N turns
- * into the memory store and archive it. Manual mode registers no listener and
- * only reacts to explicit `aim_*` tool calls.
+ * Context management: archive the conversation window and, when possible,
+ * compact it. Auto mode also does this every N turns; manual mode only reacts
+ * to explicit `aim_context` tool calls. The listener is always installed so a
+ * manual `clear` can finish after the current turn closes.
  *
- * Subagent sessions are skipped: they would duplicate the parent's memory.
+ * Compaction must run while the agent is idle, so it is deferred to `turn/end`
+ * and awaited through `agent.whenIdle()`. Subagents are skipped.
  */
-export function installAutoMode(ctx, config, deps) {
-  if (config.usageMode !== 'auto') return;
-  const rounds = config.autoEveryRounds;
-  const counters = new Map();
+export function installContextManagement(ctx, config, deps, runtime) {
+  const counters = runtime?.counters ?? new Map();
+  const pending = runtime?.pending ?? new Map();
+  const getService = deps.getService ?? (() => undefined);
+
+  const runCompaction = (session) => {
+    const agents = getService('agents');
+    const agent = agents && typeof agents.get === 'function' ? agents.get(session.id) : undefined;
+    const compaction = getService('compaction');
+    if (!agent || !compaction || typeof compaction.compactNow !== 'function') {
+      // eslint-disable-next-line no-console
+      console.warn('[ai-for-memory] 上下文已归档，但当前 profile 未启用 compaction，无法清理会话上下文');
+      return;
+    }
+    void (async () => {
+      try {
+        if (typeof agent.whenIdle === 'function') await agent.whenIdle();
+        const result = await compaction.compactNow(agent, new AbortController().signal);
+        if (result) {
+          // eslint-disable-next-line no-console
+          console.log(`[ai-for-memory] 上下文已压缩：${result.shadowedSeqs?.length ?? 0} 条历史，约 ${result.shadowedTokenCount ?? 0} tokens`);
+        }
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error(`[ai-for-memory] 上下文压缩失败：${error?.message ?? error}`);
+      }
+    })();
+  };
 
   const onSessionEvent = (session, event) => {
     if (!session || !event || event.type !== 'turn/end') return;
-    if (session.header?.parentSession) return;
     const id = String(session.id);
-    const count = (counters.get(id) ?? 0) + 1;
-    if (count < rounds) {
-      counters.set(id, count);
-      return;
+    const isSubagent = Boolean(session.header?.parentSession);
+
+    // Automatic archiving never runs for subagents; a manual `clear` still
+    // honors its pending request below.
+    if (!isSubagent && config.usageMode === 'auto') {
+      const count = (counters.get(id) ?? 0) + 1;
+      if (count < config.autoEveryRounds) {
+        counters.set(id, count);
+      } else {
+        counters.delete(id);
+        try {
+          const events = session.ownEvents();
+          const store = storeFor(config, { agent: { session } }, deps);
+          const digest = collectTurnDigest(events, config.autoEveryRounds);
+          if (digest) {
+            store.stage({ content: digest, kind: 'digest', source: 'auto' });
+            store.archive();
+          }
+          const snapshot = buildContextSnapshot(events, { maxChars: config.maxContextChars });
+          if (snapshot) {
+            const saved = store.saveContext({
+              label: `auto-${config.autoEveryRounds}rounds`,
+              sessionId: id,
+              ...snapshot,
+            });
+            pending.set(id, saved.context_id);
+            // eslint-disable-next-line no-console
+            console.log(`[ai-for-memory] 自动档：已归档上下文 ${saved.context_id}（第 ${saved.turn_from}-${saved.turn_to} 轮）`);
+          }
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.error(`[ai-for-memory] 自动归档上下文失败：${error?.message ?? error}`);
+        }
+      }
     }
-    counters.delete(id);
-    try {
-      const content = collectTurnDigest(session.ownEvents(), rounds);
-      if (!content) return;
-      const store = storeFor(config, { agent: { session } }, deps);
-      store.stage({ content, kind: 'digest', source: 'auto' });
-      const stats = store.archive();
-      // eslint-disable-next-line no-console
-      console.log(`[ai-for-memory] 自动记忆：已写入最近 ${rounds} 轮摘要（归档 ${stats.archived} 条）`);
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error(`[ai-for-memory] 自动记忆失败：${error?.message ?? error}`);
+
+    if (pending.has(id)) {
+      pending.delete(id);
+      runCompaction(session);
     }
   };
 
   ctx.effect(() => ctx.on('session/event', onSessionEvent));
-  ctx.effect(() => ctx.on('session/disposed', (session) => counters.delete(String(session?.id))));
+  ctx.effect(() => ctx.on('session/disposed', (session) => {
+    const id = String(session?.id);
+    counters.delete(id);
+    pending.delete(id);
+  }));
 }
 
 /**
@@ -549,18 +720,24 @@ export function apply(ctx, config) {
     workingDirectory = undefined;
   }
   const registryDir = defaultRegistryDir();
-  const deps = { workingDirectory, registryDir };
-
-  if (resolved.usageMode === 'auto') {
+  const getService = (serviceName) => {
     try {
-      installAutoMode(ctx, resolved, deps);
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error(`[ai-for-memory] 自动模式注册失败：${error?.message ?? error}`);
+      return typeof ctx?.get === 'function' ? ctx.get(serviceName) : undefined;
+    } catch {
+      return undefined;
     }
+  };
+  const deps = { workingDirectory, registryDir, getService };
+  const runtime = { counters: new Map(), pending: new Map() };
+
+  try {
+    installContextManagement(ctx, resolved, deps, runtime);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(`[ai-for-memory] 上下文管理注册失败：${error?.message ?? error}`);
   }
 
-  for (const raw of createTools(resolved, deps)) {
+  for (const raw of createTools(resolved, deps, runtime)) {
     const tool = toRegistrableTool(raw);
     try {
       if (typeof ctx?.effect === 'function') {

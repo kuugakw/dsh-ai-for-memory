@@ -43,11 +43,14 @@ window.__ModuleLoader__.load({
         tabSnapshots: '快照',
         tabKnowledge: '知识',
         tabDecisions: '决策',
+        tabContexts: '上下文',
         emptyStaging: '还没有流水记录。',
         emptyArchive: '还没有归档记录。',
         emptySnapshots: '还没有快照。',
         emptyKnowledge: '还没有知识文档。',
         emptyDecisions: '还没有决策审查记录。',
+        emptyContexts: '还没有上下文存档。',
+        contextRestoreHint: '需要恢复时，在对话里让我执行 aim_context restore。',
         searchPlaceholder: '搜索知识（标题/正文/分类）',
         clearSearch: '清空',
         state: '状态',
@@ -65,9 +68,12 @@ window.__ModuleLoader__.load({
         storageHint: '固定目录：所有项目共用这个文件夹（绝对路径）；留空则每个项目各自保存在工作区下的目录里。保存后插件会自动重载。',
         modeManual: '手动挡',
         modeAuto: '自动挡',
+        autoMode: '自动挡',
+        switchOn: '开',
+        switchOff: '关',
         modeRounds: '每几轮触发（自动挡）',
-        modeHintManual: '手动挡：在对话框里让我调用 aim_memory / aim_search / aim_decide 来读写记忆。',
-        modeHintAuto: '自动挡：每 N 轮对话结束后，自动把最近 N 轮摘要写入流水并归档，不需要手动触发。',
+        modeHintManual: '自动挡已关闭：在对话里让我调用 aim_context 归档/清理/恢复上下文，或调用 aim_memory / aim_search / aim_decide 读写记忆。',
+        modeHintAuto: '自动挡开启：每 N 轮自动把对话归档进存储，并调用 compaction 压缩/清理会话上下文；需要旧信息时用 aim_context restore 调回。',
         fixedPath: '记忆地址（绝对路径，留空=跟随项目）',
         dirName: '目录名（跟随项目时使用）',
         save: '保存设置',
@@ -80,6 +86,7 @@ window.__ModuleLoader__.load({
           snapshots: '快照',
           knowledge: '知识',
           decisions: '决策',
+          contexts: '上下文',
         },
         decisionsSummary: '审查结果',
         details: '查看详情',
@@ -107,11 +114,14 @@ window.__ModuleLoader__.load({
         tabSnapshots: 'Snapshots',
         tabKnowledge: 'Knowledge',
         tabDecisions: 'Decisions',
+        tabContexts: 'Contexts',
         emptyStaging: 'No staged records yet.',
         emptyArchive: 'Nothing archived yet.',
         emptySnapshots: 'No snapshots yet.',
         emptyKnowledge: 'No knowledge documents yet.',
         emptyDecisions: 'No decision reviews yet.',
+        emptyContexts: 'No archived contexts yet.',
+        contextRestoreHint: 'To restore one, ask me in the chat to run aim_context restore.',
         searchPlaceholder: 'Search knowledge (id, text, category)',
         clearSearch: 'Clear',
         state: 'State',
@@ -129,9 +139,12 @@ window.__ModuleLoader__.load({
         storageHint: 'Fixed directory: every project shares this folder (absolute path). Leave empty to keep one memory directory inside each workspace. The plugin reloads after saving.',
         modeManual: 'Manual',
         modeAuto: 'Automatic',
+        autoMode: 'Automatic mode',
+        switchOn: 'On',
+        switchOff: 'Off',
         modeRounds: 'Trigger every N rounds (automatic)',
-        modeHintManual: 'Manual: ask the assistant in the chat to call aim_memory / aim_search / aim_decide.',
-        modeHintAuto: 'Automatic: after every N turns, the last N turns are summarized into the log and archived without a manual call.',
+        modeHintManual: 'Automatic mode is off: ask me in the chat to run aim_context to archive, clear or restore context, or aim_memory / aim_search / aim_decide for memory.',
+        modeHintAuto: 'Automatic mode: every N turns the conversation is archived, then compaction condenses the live context. Use aim_context restore to bring an archive back.',
         fixedPath: 'Memory path (absolute, empty = follow project)',
         dirName: 'Directory name (used when following the project)',
         save: 'Save settings',
@@ -144,6 +157,7 @@ window.__ModuleLoader__.load({
           snapshots: 'Snapshots',
           knowledge: 'Knowledge',
           decisions: 'Decisions',
+          contexts: 'Contexts',
         },
         decisionsSummary: 'Reviews',
         details: 'Details',
@@ -457,6 +471,7 @@ window.__ModuleLoader__.load({
         { id: 'snapshots', label: t.tabSnapshots, count: counts.snapshots },
         { id: 'knowledge', label: t.tabKnowledge, count: counts.knowledge },
         { id: 'decisions', label: t.tabDecisions, count: counts.decisions },
+        { id: 'contexts', label: t.tabContexts, count: counts.contexts },
       ];
 
       const knowledge = (data?.knowledge ?? []).filter((doc) => {
@@ -528,6 +543,20 @@ window.__ModuleLoader__.load({
                 row.thesis ? h('span', null, `${t.thesis}: ${row.thesis}`) : null,
                 row.antithesis ? h('span', null, `${t.antithesis}: ${row.antithesis}`) : null)
               : null)));
+      } else if (tab === 'contexts') {
+        const rows = data?.contexts ?? [];
+        content = rows.length === 0
+          ? h(Empty, { text: t.emptyContexts })
+          : h('div', { style: styles.list }, rows.map((row) => h('div', { key: row.context_id, style: styles.row },
+            h('div', { style: styles.rowHead },
+              h('span', { style: { fontWeight: 600 } }, row.context_id),
+              h('span', { style: badgeStyle('pending') }, row.label),
+              h('span', { style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.created_at))),
+            h('div', { style: styles.meta },
+              h('span', null, `第 ${row.turn_from}-${row.turn_to} 轮`),
+              h('span', null, `${row.turn_count} 轮`),
+              h('span', null, `${row.chars} 字符`)),
+            h('p', { style: styles.hint }, t.contextRestoreHint))));
       }
 
       return h('div', { style: styles.page },
@@ -583,7 +612,8 @@ window.__ModuleLoader__.load({
           h(Tile, { label: t.counts.archive, value: counts.archive }),
           h(Tile, { label: t.counts.snapshots, value: counts.snapshots }),
           h(Tile, { label: t.counts.knowledge, value: counts.knowledge }),
-          h(Tile, { label: t.counts.decisions, value: counts.decisions })),
+          h(Tile, { label: t.counts.decisions, value: counts.decisions }),
+          h(Tile, { label: t.counts.contexts, value: counts.contexts })),
 
         h('div', { style: styles.tabs }, tabs.map((item) => h('button', {
           key: item.id,
@@ -597,16 +627,21 @@ window.__ModuleLoader__.load({
         h('section', { style: styles.card },
           h('h3', { style: styles.cardTitle }, t.storageSettings),
           h('div', { style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.autoMode),
             h('button', {
               type: 'button',
-              style: { ...styles.tab, ...(formMode === 'manual' ? styles.tabOn : {}) },
-              onClick: () => setFormMode('manual'),
-            }, t.modeManual),
-            h('button', {
-              type: 'button',
+              role: 'switch',
+              'aria-checked': formMode === 'auto',
               style: { ...styles.tab, ...(formMode === 'auto' ? styles.tabOn : {}) },
               onClick: () => setFormMode('auto'),
-            }, t.modeAuto)),
+            }, t.switchOn),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': formMode === 'manual',
+              style: { ...styles.tab, ...(formMode === 'manual' ? styles.tabOn : {}) },
+              onClick: () => setFormMode('manual'),
+            }, t.switchOff)),
           h('p', { style: styles.hint }, formMode === 'auto' ? t.modeHintAuto : t.modeHintManual),
           formMode === 'auto'
             ? h('label', { style: { ...styles.label, maxWidth: '220px' } },

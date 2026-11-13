@@ -10,8 +10,9 @@ import { search, tokenize } from '../lib/retrieval.js';
 import { CATEGORIES, hourKey } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { collectTurnDigest } from '../lib/auto.js';
+import { buildContextSnapshot } from '../lib/context.js';
 import { listRootRows, readRoots, rememberRoot, resolveRegisteredRoot } from '../lib/registry.js';
-import { apply, compileParameterSchema, Config, createTools, installAutoMode, normalizeConfig, workspaceOf } from '../index.js';
+import { apply, compileParameterSchema, Config, createTools, installContextManagement, normalizeConfig, workspaceOf } from '../index.js';
 
 function tempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agm-test-'));
@@ -158,9 +159,11 @@ test('tools are registered and executable against the session workspace', async 
     const ctx = {
       tools: { register: (tool) => { registered.push(tool); return () => {}; } },
       effect: (fn) => fn(),
+      on: () => () => {},
+      get: () => undefined,
     };
     apply(ctx, {});
-    assert.deepEqual(registered.map((tool) => tool.name), ['aim_memory', 'aim_search', 'aim_decide']);
+    assert.deepEqual(registered.map((tool) => tool.name), ['aim_memory', 'aim_search', 'aim_decide', 'aim_context']);
     for (const tool of registered) {
       assert.equal(tool.parameters.type, 'object');
       assert.ok(tool.output.render);
@@ -301,7 +304,7 @@ test('turn digest keeps the last completed turns', () => {
   assert.equal(collectTurnDigest([], 2), null);
 });
 
-test('auto mode triggers after the configured number of turns', () => {
+test('auto mode triggers after the configured number of turns', async () => {
   const root = tempRoot();
   const workspace = path.join(root, 'workspace');
   fs.mkdirSync(workspace, { recursive: true });
@@ -319,16 +322,26 @@ test('auto mode triggers after the configured number of turns', () => {
       ],
     };
     const handlers = new Map();
+    let compacted = 0;
+    const agent = { whenIdle: async () => {} };
     const ctx = {
       effect: (fn) => fn(),
       on: (event, handler) => { handlers.set(event, handler); return () => {}; },
+      get: (service) => {
+        if (service === 'agents') return { get: () => agent };
+        if (service === 'compaction') {
+          return { compactNow: async () => { compacted += 1; return { shadowedSeqs: [1], shadowedTokenCount: 10 }; } };
+        }
+        return undefined;
+      },
     };
     const config = normalizeConfig({
       usageMode: 'auto',
       autoEveryRounds: 2,
       root: memoryRoot,
     });
-    installAutoMode(ctx, config, { registryDir });
+    const runtime = { counters: new Map(), pending: new Map() };
+    installContextManagement(ctx, config, { registryDir, getService: ctx.get }, runtime);
     const onSessionEvent = handlers.get('session/event');
     assert.equal(typeof onSessionEvent, 'function');
 
@@ -341,6 +354,110 @@ test('auto mode triggers after the configured number of turns', () => {
     assert.equal(records[0].kind, 'digest');
     assert.match(records[0].content, /自动记忆/);
     assert.equal(new MemoryStore(memoryRoot).archivedCount('action_logs'), 1);
+    assert.equal(new MemoryStore(memoryRoot).listContexts().length, 1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(compacted, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('context tool saves, lists and restores a context', async () => {
+  const root = tempRoot();
+  try {
+    const memoryRoot = path.join(root, 'memory');
+    const registered = [];
+    const ctx = {
+      tools: { register: (tool) => { registered.push(tool); return () => {}; } },
+      effect: (fn) => fn(),
+      on: () => () => {},
+      get: () => undefined,
+    };
+    apply(ctx, { root: memoryRoot });
+    const contextTool = registered.find((tool) => tool.name === 'aim_context');
+    assert.ok(contextTool);
+
+    let injected = null;
+    const session = {
+      id: 'session-context',
+      header: { cwd: root },
+      ownEvents: () => [
+        { type: 'turn/start', data: { turn: 1 } },
+        { type: 'user/message', data: { content: [{ type: 'text', text: '需要记住的上下文' }] } },
+        { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '收到' }] } } },
+        { type: 'turn/end', data: { turn: 1 } },
+      ],
+    };
+    const exec = {
+      agent: {
+        session,
+        inject: async (message) => { injected = message; },
+      },
+    };
+
+    const saved = await contextTool.execute({ action: 'save', name: 'checkpoint' }, exec);
+    const match = saved.match(/context_[0-9_]+_[0-9a-f]+/);
+    assert.ok(match, saved);
+    const contextId = match[0];
+    assert.match(saved, /checkpoint/);
+
+    const listed = await contextTool.execute({ action: 'list' }, exec);
+    assert.match(listed, new RegExp(contextId));
+    assert.match(listed, /checkpoint/);
+
+    const restored = await contextTool.execute({ action: 'restore', context_id: contextId }, exec);
+    assert.match(restored, /将在下一步生效/);
+    assert.ok(injected);
+    assert.match(injected.content[0].text, /需要记住的上下文/);
+    assert.equal(injected.source.kind, 'ai-for-memory');
+
+    const status = await contextTool.execute({ action: 'status' }, exec);
+    assert.match(status, /compaction 服务：不可用/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('context snapshot captures completed turns and restores text', () => {
+  const events = [
+    { type: 'turn/start', data: { turn: 3 } },
+    { type: 'user/message', data: { content: [{ type: 'text', text: '第三轮问题' }] } },
+    { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '第三轮回答' }] } } },
+    { type: 'turn/end', data: { turn: 3 } },
+    { type: 'turn/start', data: { turn: 4 } },
+    { type: 'user/message', data: { content: [{ type: 'text', text: '第四轮问题' }] } },
+    { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '第四轮回答' }] } } },
+    { type: 'turn/end', data: { turn: 4 } },
+  ];
+  const snapshot = buildContextSnapshot(events, { maxChars: 1000 });
+  assert.equal(snapshot.turnFrom, 3);
+  assert.equal(snapshot.turnTo, 4);
+  assert.equal(snapshot.turnCount, 2);
+  assert.match(snapshot.text, /第三轮问题/);
+  assert.match(snapshot.text, /第四轮回答/);
+
+  const inFlight = buildContextSnapshot([
+    { type: 'turn/start', data: { turn: 1 } },
+    { type: 'user/message', data: { content: [{ type: 'text', text: '首轮进行中' }] } },
+    { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '正在处理' }] } } },
+  ], { maxChars: 1000 });
+  assert.ok(inFlight);
+  assert.equal(inFlight.turnCount, 1);
+  assert.match(inFlight.text, /首轮进行中/);
+  assert.match(inFlight.text, /正在处理/);
+
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    const saved = store.saveContext({ label: 'test', sessionId: 's1', ...snapshot });
+    assert.match(saved.context_id, /^context_/);
+    const rows = store.listContexts();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].context_id, saved.context_id);
+    const loaded = store.loadContext(saved.context_id);
+    assert.equal(loaded.turn_from, 3);
+    assert.match(loaded.text, /第四轮回答/);
+    assert.equal(store.loadContext('missing'), null);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -350,11 +467,13 @@ test('config validator accepts only manual/auto and bounded rounds', () => {
   const defaults = normalizeConfig({});
   assert.equal(defaults.usageMode, 'manual');
   assert.equal(defaults.autoEveryRounds, 5);
+  assert.equal(defaults.maxContextChars, 30000);
   const validator = Config['~standard'].validate;
   assert.equal(validator({ usageMode: 'auto', autoEveryRounds: 3 }).value.usageMode, 'auto');
   assert.ok(validator({ usageMode: 'sometimes' }).issues);
   assert.ok(validator({ autoEveryRounds: 0 }).issues);
   assert.ok(validator({ autoEveryRounds: 101 }).issues);
+  assert.ok(validator({ maxContextChars: 500 }).issues);
 });
 
 test('config validator accepts defaults and rejects wrong types', () => {

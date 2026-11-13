@@ -1,6 +1,6 @@
 {
   "name": "dsh-ai-for-memory",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Layered project memory for DeepSeek Harness: staging log, archive, snapshots, local BM25 search, risk-reviewed decisions and a Web panel. Early preview (v0.1.0).",
