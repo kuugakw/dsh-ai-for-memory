@@ -336,7 +336,7 @@ test('auto mode triggers after the configured number of turns', async () => {
       },
     };
     const config = normalizeConfig({
-      usageMode: 'auto',
+      autoEnabled: true,
       autoEveryRounds: 2,
       root: memoryRoot,
     });
@@ -463,14 +463,14 @@ test('context snapshot captures completed turns and restores text', () => {
   }
 });
 
-test('config validator accepts only manual/auto and bounded rounds', () => {
+test('config validator bounds auto settings', () => {
   const defaults = normalizeConfig({});
-  assert.equal(defaults.usageMode, 'manual');
+  assert.equal(defaults.autoEnabled, false);
   assert.equal(defaults.autoEveryRounds, 5);
   assert.equal(defaults.maxContextChars, 30000);
   const validator = Config['~standard'].validate;
-  assert.equal(validator({ usageMode: 'auto', autoEveryRounds: 3 }).value.usageMode, 'auto');
-  assert.ok(validator({ usageMode: 'sometimes' }).issues);
+  assert.equal(validator({ autoEnabled: true, autoEveryRounds: 3 }).value.autoEnabled, true);
+  assert.ok(validator({ autoEnabled: 'yes' }).issues);
   assert.ok(validator({ autoEveryRounds: 0 }).issues);
   assert.ok(validator({ autoEveryRounds: 101 }).issues);
   assert.ok(validator({ maxContextChars: 500 }).issues);

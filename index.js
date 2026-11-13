@@ -29,7 +29,7 @@ export const inject = ['tools'];
 const DEFAULTS = Object.freeze({
   directoryName: '.ai-for-memory',
   root: '',
-  usageMode: 'manual',
+  autoEnabled: false,
   autoEveryRounds: 5,
   maxContextChars: 30000,
   defaultTopK: 5,
@@ -55,14 +55,6 @@ export const Config = Object.freeze({
       const value = { ...DEFAULTS };
       for (const key of Object.keys(DEFAULTS)) {
         if (!Object.hasOwn(input, key) || input[key] === undefined) continue;
-        if (key === 'usageMode') {
-          if (!['manual', 'auto'].includes(input[key])) {
-            issues.push({ message: 'usageMode 必须是 manual 或 auto', path: [key] });
-          } else {
-            value[key] = input[key];
-          }
-          continue;
-        }
         if (key === 'autoEveryRounds') {
           if (!Number.isInteger(input[key]) || input[key] < 1 || input[key] > 100) {
             issues.push({ message: 'autoEveryRounds 必须是 1~100 的整数', path: [key] });
@@ -503,7 +495,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
       description:
         '上下文管理：save=把当前已完成对话整理进存储；clear=保存后压缩/清理会话上下文；'
         + 'restore=把保存的上下文重新注入当前会话；list=列出存档；status=查看压缩服务与存档状态。'
-        + '自动挡每 N 轮会自动执行 save+clear。清理后需要旧信息时用 restore 调回。',
+        + '自动整理开启时每 N 轮会自动执行 save+clear；手动工具始终可用。清理后需要旧信息时用 restore 调回。',
       parameters: {
         action: {
           type: 'string',
@@ -599,9 +591,18 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           const compaction = deps.getService?.('compaction');
           return [
             `compaction 服务：${compaction && typeof compaction.compactNow === 'function' ? '可用' : '不可用'}`,
-            `自动挡：${config.usageMode === 'auto' ? `开启（每 ${config.autoEveryRounds} 轮）` : '关闭'}`,
+            `自动整理：${config.autoEnabled ? `开启（每 ${config.autoEveryRounds} 轮）` : '关闭'}`,
+            `手动工具：始终可用`,
             `上下文存档：${store.listContexts().length} 个`,
             `待压缩：${runtime.pending.has(String(session?.id)) ? '是' : '否'}`,
+            (() => {
+              const last = store.readCompactionStatus();
+              if (!last) return '最近压缩：无记录';
+              return `最近压缩：${last.state}${last.error ? `（${last.error}）` : ''}`
+                + `${Number.isInteger(last.compacted) ? `，${last.compacted} 条 / ${last.tokens ?? 0} tokens` : ''}`
+                + `${last.noop ? '，无可压缩历史' : ''}`
+                + `${last.at ? ` @ ${last.at}` : ''}`;
+            })(),
           ].join('\n');
         }
 
@@ -631,20 +632,43 @@ export function installContextManagement(ctx, config, deps, runtime) {
     const agents = getService('agents');
     const agent = agents && typeof agents.get === 'function' ? agents.get(session.id) : undefined;
     const compaction = getService('compaction');
+    let store;
+    try {
+      store = storeFor(config, { agent: { session } }, deps);
+    } catch {
+      store = undefined;
+    }
+    const record = (data) => {
+      try {
+        store?.writeCompactionStatus(data);
+      } catch {
+        // Status is diagnostics only; never fail compaction because of it.
+      }
+    };
     if (!agent || !compaction || typeof compaction.compactNow !== 'function') {
+      record({ state: 'unavailable', error: 'compaction 服务不可用' });
       // eslint-disable-next-line no-console
       console.warn('[ai-for-memory] 上下文已归档，但当前 profile 未启用 compaction，无法清理会话上下文');
       return;
     }
     void (async () => {
       try {
+        record({ state: 'started', session: String(session.id) });
         if (typeof agent.whenIdle === 'function') await agent.whenIdle();
         const result = await compaction.compactNow(agent, new AbortController().signal);
+        record({
+          state: 'done',
+          session: String(session.id),
+          compacted: result ? (result.shadowedSeqs?.length ?? 0) : 0,
+          tokens: result ? (result.shadowedTokenCount ?? 0) : 0,
+          noop: result === null,
+        });
         if (result) {
           // eslint-disable-next-line no-console
           console.log(`[ai-for-memory] 上下文已压缩：${result.shadowedSeqs?.length ?? 0} 条历史，约 ${result.shadowedTokenCount ?? 0} tokens`);
         }
       } catch (error) {
+        record({ state: 'error', session: String(session.id), error: String(error?.message ?? error) });
         // eslint-disable-next-line no-console
         console.error(`[ai-for-memory] 上下文压缩失败：${error?.message ?? error}`);
       }
@@ -658,7 +682,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
 
     // Automatic archiving never runs for subagents; a manual `clear` still
     // honors its pending request below.
-    if (!isSubagent && config.usageMode === 'auto') {
+    if (!isSubagent && config.autoEnabled) {
       const count = (counters.get(id) ?? 0) + 1;
       if (count < config.autoEveryRounds) {
         counters.set(id, count);

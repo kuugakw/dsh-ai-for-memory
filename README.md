@@ -1,10 +1,10 @@
 # AI for Memory — DSH 插件
 
-[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](package.json)
 [![Status](https://img.shields.io/badge/status-early%20preview-orange.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **这是初版（当前 v0.3.0）。** 核心功能已可用、已实测，但仍在早期阶段；接口、存储格式和界面后续都可能
+> **这是初版（当前 v0.4.0）。** 核心功能已可用、已实测，但仍在早期阶段；接口、存储格式和界面后续都可能
 > 继续调整与优化（见 [路线图](#路线图)）。欢迎试用和提建议，不建议直接用于关键生产数据。
 
 把一套分层记忆思路做成 DeepSeek Harness 的**项目级记忆插件**：流水、归档、快照、本地检索、
@@ -34,11 +34,14 @@ aim_search  query="超时怎么处理" mode=hybrid
 aim_decide  decision="删除全部临时文件" risk=high thesis="释放空间" antithesis="可能丢失未归档流水"
 ```
 
-## 使用模式（手动挡 / 自动挡）
+## 使用方式：手动工具 + 自动整理（共存）
 
-### 手动挡（默认）
+**手动工具始终可用，和自动整理的开关无关。** 自动整理只是额外的自动整理层；开启或关闭它都不会禁用
+`aim_memory` / `aim_search` / `aim_decide` / `aim_context`。
 
-自动挡关闭时，由对话框里的明确指令驱动：
+### 手动工具（始终可用）
+
+在对话框里直接让 agent 调用：
 
 ```text
 把当前对话整理进上下文存储       → aim_context save
@@ -51,19 +54,20 @@ aim_decide  decision="删除全部临时文件" risk=high thesis="释放空间" 
 `aim_context clear` 会先保存完整上下文，再交给 DSH 的 `compaction` 服务压缩当前会话；
 压缩必须等本轮结束、agent 空闲时执行，因此它是**本轮结束后生效**。
 
-### 自动挡
+### 自动整理（可开关）
 
-面板「使用与存储设置」里把「自动挡」切到 **开**，设置 **每 N 轮触发**：
+面板「使用与存储设置」里把「自动整理」切到 **开**，设置 **每 N 轮自动整理**：
 
-- 每 N 个对话轮结束后，自动把当前对话归档成一条 `context` 记录（同时写一条 `digest` 流水并归档）；
+- 每 N 个对话轮结束后，自动把当前对话归档成一条 `context` 记录，同时写 `digest` 流水并归档；
 - 然后调用 `compaction.compactNow()` 压缩/清理会话上下文，给后续对话腾出窗口；
+- 自动整理开启时，手动工具**仍然可用**；关闭自动整理也不会影响任何手动工具；
 - 需要旧信息时，用 `aim_context restore <id>` 把归档上下文重新注入；
-- 子会话（subagent）不会触发，避免重复归档；
+- 子会话（subagent）不会触发自动整理，但子会话里的手动 `clear` 仍会生效；
 - 计数是内存态：插件重载 / 进程重启后从 0 开始计。
 
 > **依赖**：清理上下文依赖 DSH 的 `compaction` 服务。本插件会检测它；如果没有启用
 > `@deepseek-ai/dsh-compaction-basic`，`clear` 会保存上下文但跳过压缩，并在 `aim_context status` 里显示“不可用”。
-> 自动挡的摘要本身是本地文本压缩（截断 + 拼接），不是模型生成的摘要。
+> 自动整理的摘要是本地文本压缩（截断 + 拼接），不是模型生成的摘要。
 
 ## Web 面板
 
@@ -73,7 +77,7 @@ aim_decide  decision="删除全部临时文件" risk=high thesis="释放空间" 
 - **路径操作**：显示当前目录、一键复制、在系统文件管理器中打开。
 - **六层视图**：流水 / 归档 / 快照 / 知识 / 决策 / 上下文，各自的统计和最近条目。
 - **知识检索**：面板内按 id / 正文 / 分类过滤。
-- **使用与存储设置**：自动挡开关、每 N 轮触发、记忆地址、目录名，保存后插件自动重载。
+- **使用与存储设置**：自动整理开关、每 N 轮自动整理、记忆地址、目录名，保存后插件自动重载；手动工具不受开关影响。
 
 > 面板数据通过 Host 的只读 HTTP API（`/ai-for-memory/api/state`）读取；只允许访问
 > 插件登记过的记忆目录，不会变成任意文件读取器。写操作要求同源 + 回环来源。
@@ -106,8 +110,8 @@ aim_decide  decision="删除全部临时文件" risk=high thesis="释放空间" 
 |------|--------|------|
 | `directoryName` | `.ai-for-memory` | 工作区下的记忆目录名（`root` 为空时生效） |
 | `root` | `""` | 固定记忆目录（绝对路径）；非空时所有项目共用 |
-| `usageMode` | `"manual"` | `manual` 自动挡关闭 / `auto` 自动挡开启 |
-| `autoEveryRounds` | `5` | 自动挡每 N 轮触发一次（1~100） |
+| `autoEnabled` | `false` | 自动整理开关；手动工具始终可用 |
+| `autoEveryRounds` | `5` | 自动整理每 N 轮触发一次（1~100） |
 | `maxContextChars` | `30000` | 单份上下文存档的最大字符数（1000~200000） |
 | `defaultTopK` | `5` | 检索默认返回条数 |
 | `reviewHighRiskOnly` | `true` | `true` 时中风险决策直接放行，只审查高风险 |
@@ -158,14 +162,14 @@ node --test test/
 
 测试覆盖：流水去重、归档幂等与路由、半行修复、快照脱敏/恢复、三种检索模式、
 决策三种结果、工具注册与端到端执行、面板数据组装、记忆根目录登记与解析、
-上下文轮次归档、自动挡触发、上下文保存/列表/恢复。
+上下文轮次归档、自动整理触发、上下文保存/列表/恢复。
 
 ## 路线图
 
 v0.3.0 仍是**初版**，以下方向会继续优化：
 
 - [ ] 面板内直接编辑 / 删除 / 归档单条记忆
-- [ ] 自动挡支持按 token 压力而不是固定轮数触发
+- [ ] 自动整理支持按 token 压力而不是固定轮数触发
 - [ ] 上下文存档支持增量与去重，避免重复保存
 - [ ] 接入真实 embedding（本地小模型），替换 hashing 词袋向量
 - [ ] 检索索引缓存，避免每次全量重建

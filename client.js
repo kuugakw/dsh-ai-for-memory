@@ -66,14 +66,12 @@ window.__ModuleLoader__.load({
         antithesis: '反',
         storageSettings: '使用与存储设置',
         storageHint: '固定目录：所有项目共用这个文件夹（绝对路径）；留空则每个项目各自保存在工作区下的目录里。保存后插件会自动重载。',
-        modeManual: '手动挡',
-        modeAuto: '自动挡',
-        autoMode: '自动挡',
+        autoMode: '自动整理',
         switchOn: '开',
         switchOff: '关',
-        modeRounds: '每几轮触发（自动挡）',
-        modeHintManual: '自动挡已关闭：在对话里让我调用 aim_context 归档/清理/恢复上下文，或调用 aim_memory / aim_search / aim_decide 读写记忆。',
-        modeHintAuto: '自动挡开启：每 N 轮自动把对话归档进存储，并调用 compaction 压缩/清理会话上下文；需要旧信息时用 aim_context restore 调回。',
+        modeRounds: '每几轮自动整理',
+        modeHintManual: '自动整理已关闭；手动工具始终可用：aim_memory / aim_search / aim_decide / aim_context。',
+        modeHintAuto: '自动整理已开启：每 N 轮自动执行 摘要→归档→上下文存档→压缩清理；手动工具仍然可用。',
         fixedPath: '记忆地址（绝对路径，留空=跟随项目）',
         dirName: '目录名（跟随项目时使用）',
         save: '保存设置',
@@ -137,14 +135,12 @@ window.__ModuleLoader__.load({
         antithesis: 'Antithesis',
         storageSettings: 'Usage and storage settings',
         storageHint: 'Fixed directory: every project shares this folder (absolute path). Leave empty to keep one memory directory inside each workspace. The plugin reloads after saving.',
-        modeManual: 'Manual',
-        modeAuto: 'Automatic',
-        autoMode: 'Automatic mode',
+        autoMode: 'Auto tidy',
         switchOn: 'On',
         switchOff: 'Off',
-        modeRounds: 'Trigger every N rounds (automatic)',
-        modeHintManual: 'Automatic mode is off: ask me in the chat to run aim_context to archive, clear or restore context, or aim_memory / aim_search / aim_decide for memory.',
-        modeHintAuto: 'Automatic mode: every N turns the conversation is archived, then compaction condenses the live context. Use aim_context restore to bring an archive back.',
+        modeRounds: 'Auto tidy every N rounds',
+        modeHintManual: 'Auto tidy is off; manual tools are always available: aim_memory / aim_search / aim_decide / aim_context.',
+        modeHintAuto: 'Auto tidy is on: every N turns it digests, archives, saves context and compacts it. Manual tools remain available.',
         fixedPath: 'Memory path (absolute, empty = follow project)',
         dirName: 'Directory name (used when following the project)',
         save: 'Save settings',
@@ -405,7 +401,8 @@ window.__ModuleLoader__.load({
           setError(null);
           if (typeof payload.fixedRoot === 'string') setFormRoot(payload.fixedRoot);
           if (typeof payload.directoryName === 'string') setFormDir(payload.directoryName);
-          if (payload.mode === 'manual' || payload.mode === 'auto') setFormMode(payload.mode);
+          if (typeof payload.autoEnabled === 'boolean') setFormMode(payload.autoEnabled ? 'auto' : 'manual');
+          else if (payload.mode === 'manual' || payload.mode === 'auto') setFormMode(payload.mode);
           if (Number.isInteger(payload.autoEveryRounds)) setFormRounds(payload.autoEveryRounds);
         } catch (fetchError) {
           setError(String(fetchError?.message ?? fetchError));
@@ -452,7 +449,7 @@ window.__ModuleLoader__.load({
             body: {
               root: formRoot.trim(),
               directoryName: formDir.trim(),
-              usageMode: formMode,
+              autoEnabled: formMode === 'auto',
               autoEveryRounds: Number(formRounds) || 5,
             },
           });
