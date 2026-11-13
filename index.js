@@ -1,9 +1,14 @@
 /**
  * AI for Memory — layered project memory for DeepSeek Harness.
  *
- * Based on the AI for Memory prototype: a rolling staging log, an
- * idempotent categorized archive, exact state snapshots, a local BM25 +
- * hashing-vector knowledge search, and risk-reviewed decisions.
+ * Rewritten from the Python project `ai-game-for-memory` (originally
+ * MemoryLayer): a rolling process log, an idempotent categorized archive,
+ * exact state snapshots, a local BM25 + hashing-vector knowledge search, and
+ * risk-reviewed decisions.
+ *
+ * On top of that, this plugin connects to DSH's `compaction` service so a
+ * conversation can be archived, compacted out of the live window, and later
+ * restored through `agent.inject()`.
  *
  * The plugin is dependency-free on purpose: it only imports Node builtins and
  * its own modules, then registers plain tool definition objects on `ctx.tools`.
@@ -185,7 +190,7 @@ function storeFor(config, exec, deps = {}) {
 
 function formatStatus(status) {
   const lines = [`记忆根目录：${status.root}`];
-  lines.push(`流水层：${status.staging.files} 个文件 / ${status.staging.entries} 条记录`);
+  lines.push(`过程记录层：${status.staging.files} 个文件 / ${status.staging.entries} 条记录`);
   const archive = Object.entries(status.archive);
   lines.push(archive.length > 0
     ? `归档层：${archive.map(([category, count]) => `${category}=${count}`).join('，')}`
@@ -202,7 +207,7 @@ function formatStatus(status) {
       ? `（${Object.entries(status.decisions.byOutcome).map(([outcome, count]) => `${outcome}=${count}`).join('，')}）`
       : ''));
   if (status.recent.length > 0) {
-    lines.push('最近流水：');
+    lines.push('最近过程记录：');
     for (const row of status.recent) {
       lines.push(`  - [${row.kind}] ${row.content}（${row.timestamp}）`);
     }
@@ -256,7 +261,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
     {
       name: 'aim_memory',
       description:
-        '分层项目管理记忆（AI for Memory）：把工作过程写进流水、归档成分类、保存/恢复精确状态快照、'
+        '分层项目管理记忆（AI for Memory）：把工作过程记进过程记录、归档成分类、保存/恢复精确状态快照、'
         + '写入可检索的知识文档、查看各层统计。数据保存在当前工作区的记忆目录，跨会话/清空上下文后可读。'
         + '适合记录决策与理由、错误与修复、界面事实、任务状态；需要检索时用 aim_search。'
         + '不要写入密钥、令牌或用户没有说过的事实。',
@@ -266,13 +271,13 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           required: true,
           enum: ['stage', 'archive', 'snapshot', 'restore', 'list', 'remember', 'status'],
           description:
-            'stage=追加一条流水（content 必填）；archive=按 kind 归档（可传 category 强制分类）；'
+            'stage=追加一条过程记录（content 必填）；archive=按 kind 归档（可传 category 强制分类）；'
             + 'snapshot=保存 state 快照（name 必填）；restore=按 snapshot_id 恢复；list=列出快照；'
             + 'remember=写入知识文档（doc_id/text/category 必填）；status=查看统计。',
         },
         content: {
           type: 'string',
-          description: 'stage 用：一条简洁的流水内容（决策、错误、界面事实或状态）。',
+          description: 'stage 用：一条简洁的过程记录内容（决策、错误、界面事实或状态）。',
         },
         kind: {
           type: 'string',
@@ -318,7 +323,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         },
         text: {
           type: 'string',
-          description: 'remember 用：知识正文，一句话一条，避免流水账。',
+          description: 'remember 用：知识正文，一句话一条，避免罗列琐碎条目。',
         },
       },
       output: TEXT_OUTPUT,
@@ -343,7 +348,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             verify: args?.verify,
           });
           return [
-            `已写入流水：${record.source_file} #${record.entry_index}`,
+            `已写入过程记录：${record.source_file} #${record.entry_index}`,
             `kind=${record.kind} → ${record.category}｜risk=${record.risk}｜verify=${record.verify}`,
             clip(record.content, 500),
           ].join('\n');

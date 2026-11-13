@@ -120,7 +120,7 @@ test('decision review follows the documented thresholds', () => {
     decision: '删除全部文件',
     risk: 'high',
     thesis: '释放磁盘空间',
-    antithesis: '可能丢失未归档的流水记录，需要先确认备份',
+    antithesis: '可能丢失未归档的过程记录，需要先确认备份',
   });
   assert.equal(rejected.outcome, 'rejected');
   assert.equal(rejected.approved, false);
@@ -175,10 +175,10 @@ test('tools are registered and executable against the session workspace', async 
     const exec = fakeExec(root);
 
     const staged = await memory.execute({ action: 'stage', content: '用户点击设置', kind: 'action' }, exec);
-    assert.match(staged, /已写入流水/);
+    assert.match(staged, /已写入过程记录/);
 
     const status = await memory.execute({ action: 'status' }, exec);
-    assert.match(status, /流水层：1 个文件 \/ 1 条记录/);
+    assert.match(status, /过程记录层：1 个文件 \/ 1 条记录/);
     assert.match(status, /记忆根目录/);
 
     const archived = await memory.execute({ action: 'archive' }, exec);

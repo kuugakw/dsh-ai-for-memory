@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "AI for Memory",
-    "description": "Layered project memory: staging log, categorized archive, exact snapshots, local search and risk-reviewed decisions."
+    "description": "Layered project memory: process log, archive, snapshots, local search, risk-reviewed decisions, context compaction and restore."
   }
 }
