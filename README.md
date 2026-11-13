@@ -1,11 +1,12 @@
 # AI for Memory — DSH 插件
 
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](package.json)
-[![Status](https://img.shields.io/badge/status-early%20preview-orange.svg)]()
+[![Status](https://img.shields.io/badge/status-test%20build%200.1-orange.svg)]()
+[![Version](https://img.shields.io/badge/version-0.1-lightgrey.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **初版（v0.5.0）**：核心链路已实测可用，但接口、存储格式、面板布局后续都可能调整。
-> 欢迎试用和提意见，但不建议直接用于关键生产数据；升级前请备份记忆目录。
+> **这是测试版 0.1，不是正式版。** 核心链路已实测可用，但接口、存储格式、面板布局都还会改。
+> 测试期间统一标 **0.1**，不按功能拆分版本号；正式发布后再启用语义化版本号。
+> 不建议直接用于关键生产数据；升级前请备份记忆目录。
 
 一个给 **DeepSeek Harness** 用的**项目级分层记忆插件**，同时解决两个层面的问题：
 
@@ -444,15 +445,11 @@ dsh-ai-for-memory/
 
 ---
 
-## 版本历史
+## 版本策略
 
-| 版本 | 内容 |
-|---|---|
-| 0.1.0 | 首次发布：三工具（记忆/检索/决策）、六层存储、侧栏面板 |
-| 0.2.0 | 手动挡 / 自动挡（互斥） |
-| 0.3.0 | 上下文存档、compaction 压缩、restore 恢复；`aim_context` 工具 |
-| 0.4.0 | 改为**自动整理与手动工具共存**；压缩结果落盘；修首轮无 `turn/end`、子会话手动清理被跳过 |
-| 0.5.0 | 「流水」统一改为「过程记录」；README 重写并补充血统、文件格式、完整参数表 |
+- **测试期间**：所有改动统一标 **0.1**，不按功能拆分版本号（避免"测试版却一路涨版本"的误导）。
+- **正式发布后**：启用语义化版本号，并在本节之下记录每个版本的变更。
+- 升级插件时（`remove_bundle` → `install_bundle`）请先备份记忆目录；本插件的数据格式会随之演进。
 
 ---
 
