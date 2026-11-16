@@ -16,6 +16,7 @@
  * be tested with `node --test` without booting the Harness.
  */
 
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import { MemoryScopes, sessionKey, shortSessionId } from './lib/scopes.js';
@@ -25,7 +26,10 @@ import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
 import { defaultRegistryDir, rememberRoot } from './lib/registry.js';
 import { installApi } from './lib/api.js';
 import { collectTurnDigest } from './lib/auto.js';
-import { buildContextSnapshot, formatRestoreContext } from './lib/context.js';
+import {
+  buildContextSnapshot, collectTurns, formatRestoreContext, snapshotOfTurns,
+} from './lib/context.js';
+import { SIMILARITY_DEFAULT, describeTurns, selectTurnsByTopic } from './lib/similarity.js';
 
 export const name = 'dsh-ai-for-memory';
 
@@ -44,6 +48,31 @@ const DEFAULTS = Object.freeze({
   maxSnapshotBytes: 262144,
   // New conversations start open; the panel can close each one individually.
   defaultPublic: true,
+  // Clearing policy. A similarity-aware clear keeps the turns that still share
+  // the current topic and removes only the ones the conversation has left
+  // behind, instead of trimming by recency alone.
+  topicalClear: true,
+  similarityThreshold: SIMILARITY_DEFAULT,
+  keepRecentTurns: 2,
+  maxClearTurns: 8,
+  minClearChars: 600,
+  maxClearChars: 120000,
+  // Text knowledge is mined from the three layers during automatic tidying so
+  // the knowledge base grows without an extra prompt from the user.
+  autoKnowledge: true,
+  autoKnowledgeLimit: 10,
+});
+
+/** Integer bounds for the numeric settings; `null` marks a float setting. */
+const NUMERIC_BOUNDS = Object.freeze({
+  autoEveryRounds: [1, 100],
+  maxContextChars: [1000, 200000],
+  keepRecentTurns: [1, 20],
+  maxClearTurns: [1, 50],
+  minClearChars: [0, 20000],
+  maxClearChars: [1000, 1000000],
+  autoKnowledgeLimit: [1, 100],
+  similarityThreshold: [0.01, 0.95, 'float'],
 });
 
 /**
@@ -63,19 +92,19 @@ export const Config = Object.freeze({
       const value = { ...DEFAULTS };
       for (const key of Object.keys(DEFAULTS)) {
         if (!Object.hasOwn(input, key) || input[key] === undefined) continue;
-        if (key === 'autoEveryRounds') {
-          if (!Number.isInteger(input[key]) || input[key] < 1 || input[key] > 100) {
-            issues.push({ message: 'autoEveryRounds 必须是 1~100 的整数', path: [key] });
+        if (Object.hasOwn(NUMERIC_BOUNDS, key)) {
+          const [low, high, kind] = NUMERIC_BOUNDS[key];
+          const raw = input[key];
+          const isFloat = kind === 'float';
+          const shapeOk = typeof raw === 'number' && Number.isFinite(raw)
+            && (isFloat || Number.isInteger(raw));
+          if (!shapeOk || raw < low || raw > high) {
+            issues.push({
+              message: `${key} 必须是 ${low}~${high} 的${isFloat ? '数字' : '整数'}`,
+              path: [key],
+            });
           } else {
-            value[key] = input[key];
-          }
-          continue;
-        }
-        if (key === 'maxContextChars') {
-          if (!Number.isInteger(input[key]) || input[key] < 1000 || input[key] > 200000) {
-            issues.push({ message: 'maxContextChars 必须是 1000~200000 的整数', path: [key] });
-          } else {
-            value[key] = input[key];
+            value[key] = raw;
           }
           continue;
         }
@@ -337,6 +366,11 @@ function formatLayers(status) {
   lines.push(knowledgeCategories.length > 0
     ? `知识库：${status.knowledge.documents} 篇（${knowledgeCategories.map(([category, count]) => `${category}=${count}`).join('，')}）`
     : '知识库：空');
+  const knowledgeSources = Object.entries(status.knowledge.sources ?? {});
+  if (knowledgeSources.length > 0) {
+    lines.push(`知识来源：${knowledgeSources.map(([from, count]) => `${from}=${count}`).join('，')}`);
+  }
+  lines.push(`待提炼：约 ${status.knowledge.pending ?? 0} 条（promote 预览/写入，learn 直接写知识）`);
   lines.push(`决策记录：${status.decisions.total} 条`
     + (status.decisions.total > 0
       ? `（${Object.entries(status.decisions.byOutcome).map(([outcome, count]) => `${outcome}=${count}`).join('，')}）`
@@ -392,9 +426,48 @@ function formatHits(query, hits, mode) {
   hits.forEach((hit, index) => {
     lines.push(`${index + 1}. [${hit.category}] ${hit.doc_id}  score=${hit.score.toFixed(4)}`
       + `（bm25=${hit.bm25_score.toFixed(4)}，vector=${hit.vector_score.toFixed(4)}）`
-      + (hit.origin_label ? `｜来源：${hit.origin_label}` : ''));
+      + (hit.source && hit.source !== 'unknown' ? `｜知识来源：${hit.source}` : '')
+      + (hit.origin_label ? `｜对话：${hit.origin_label}` : ''));
     lines.push(`   ${clip(hit.text, 320)}`);
   });
+  return lines.join('\n');
+}
+
+/** Format one `promote` result for the model. */
+/**
+ * Report a blocked knowledge write: the fact was **not** stored because it may
+ * contradict something already known, so the user has to decide first.
+ */
+function formatConflict(result) {
+  const pending = result?.pending ?? {};
+  const conflicts = Array.isArray(result?.conflicts) ? result.conflicts : [];
+  const lines = [
+    '未写入：这条知识可能与已有知识冲突，需要先问用户。',
+    `待写入：${clip(pending.text ?? '', 300)}`,
+  ];
+  for (const row of conflicts.slice(0, 3)) {
+    lines.push(`- 已有 [${row.category || '未分类'}] ${row.doc_id}（相似度 ${row.similarity}）：${clip(row.text, 160)}`);
+  }
+  lines.push('请向用户确认三件事：以哪条为准、是否覆盖旧条目（给旧条目 doc_id）、是否只是补充；');
+  lines.push('用户同意后再用 confirm=true 重新调用（同意覆盖时同时传旧条目的 doc_id）。用户不同意就不要写入。');
+  return lines.join('\n');
+}
+
+function formatPromotion(result) {
+  const scanned = result.scanned ?? {};
+  const lines = [
+    `${result.dryRun ? '提炼预览（未写入）' : '已从三层提炼知识'}：`
+      + `过程记录 ${scanned.staging ?? 0}，归档 ${scanned.archive ?? 0}，`
+      + `上下文轮次 ${scanned.contexts ?? 0}，决策 ${scanned.decisions ?? 0}`,
+    `${result.dryRun ? '将新增' : '新增'} ${result.added.length} 篇，合并 ${result.merged.length} 篇，`
+      + `剩余 ${result.remaining} 条待下次`,
+  ];
+  for (const row of result.added.slice(0, 20)) {
+    lines.push(`- [${row.category}] ${row.doc_id}（${row.source}）：${clip(row.text, 160)}`);
+  }
+  for (const row of result.merged.slice(0, 10)) {
+    lines.push(`- 已合并进 ${row.doc_id}：${clip(row.text, 120)}`);
+  }
   return lines.join('\n');
 }
 
@@ -425,19 +498,25 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
       name: 'aim_memory',
       description:
         '分层项目管理记忆（AI for Memory）：把工作过程记进过程记录、归档成分类、保存/恢复精确状态快照、'
-        + '写入可检索的知识文档、查看各层统计。数据保存在当前工作区的记忆目录，跨会话/清空上下文后可读。'
+        + '写入与检索知识、查看各层统计。数据保存在当前工作区的记忆目录，跨会话/清空上下文后可读。'
+        + '知识分两类来源：你从网页或推理得到的、用户给你的，用 remember/learn 写；'
+        + '过程记录、归档、上下文这三层里的用户规则、错误修复、决策理由，用 promote 提炼。'
+        + '每条知识只写一句可复用的结论，必须带分类，并尽量给出处（url 或 source）。'
         + '默认写入当前对话自己的独立记忆；scope=shared 时写入所有对话共用的共享层。'
-        + '适合记录决策与理由、错误与修复、界面事实、任务状态；需要检索时用 aim_search（默认跨对话）。'
-        + '不要写入密钥、令牌或用户没有说过的事实。',
+        + '冲突规则：新知识与已有知识、或与你自己的认知不一致时，先询问用户，得到同意后再带 confirm=true 写入；'
+        + '不带 confirm 的写入若与已有知识相近但不同，会返回 needs_confirm 并列出冲突条目，此时必须先问用户，不要擅自覆盖。'
+        + '需要检索时用 aim_search（默认跨对话）。不要写入密钥、令牌或用户没有说过的事实。',
       parameters: {
         action: {
           type: 'string',
           required: true,
-          enum: ['stage', 'archive', 'snapshot', 'restore', 'list', 'remember', 'status'],
+          enum: ['stage', 'archive', 'snapshot', 'restore', 'list', 'remember', 'learn', 'promote', 'forget', 'status'],
           description:
             'stage=追加一条过程记录（content 必填）；archive=按 kind 归档（可传 category 强制分类）；'
             + 'snapshot=保存 state 快照（name 必填）；restore=按 snapshot_id 恢复；list=列出快照；'
-            + 'remember=写入知识文档（doc_id/text/category 必填）；status=查看统计。',
+            + 'remember=写入一条知识（text 必填，doc_id 可省）；learn=批量写知识（items 必填）；'
+            + 'promote=从过程记录/归档/上下文提炼知识（dry_run 可预览）；forget=删除一条错误知识（doc_id 必填）；'
+            + 'status=查看统计。',
         },
         scope: {
           type: 'string',
@@ -490,11 +569,47 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         },
         doc_id: {
           type: 'string',
-          description: 'remember 用：知识文档唯一 id，重复写入即覆盖。',
+          description: 'remember 用：知识文档 id，可省略——省略时按正文生成稳定 id，同一条知识重复写入会合并。',
         },
         text: {
           type: 'string',
-          description: 'remember 用：知识正文，一句话一条，避免罗列琐碎条目。',
+          description: 'remember 用：知识正文，一句话一条结论，避免罗列琐碎条目。',
+        },
+        items: {
+          type: 'array',
+          items: { type: 'object', additionalProperties: true },
+          description:
+            'learn 用：批量知识条目，每项 {text, category?, tags?, url?, source?, confidence?}；'
+            + '适合一次写入多轮对话里得到的若干条结论。',
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'remember/learn 用：标签（最多 8 个），便于按主题过滤。',
+        },
+        url: {
+          type: 'string',
+          description: 'remember/learn 用：出处链接。网页得来的知识必须带上，分类会归到 external_sources。',
+        },
+        confidence: {
+          type: 'number',
+          description: 'remember/learn 用：置信度 0~1，默认 0.8；网页单源事实建议 0.6~0.7。',
+        },
+        confirm: {
+          type: 'boolean',
+          description:
+            'remember/learn 用：默认 false。与已有知识相近但内容不同时，写入会被拦下并返回冲突，'
+            + '此时必须先向用户确认；用户同意后再带 confirm=true 重试，同意"以新为准"就再传旧条目的 doc_id。',
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'promote 用：只预览会提炼出什么，不写盘。',
+        },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 200,
+          description: 'promote 用：单次最多写入多少条，默认 20。',
         },
       },
       output: TEXT_OUTPUT,
@@ -580,8 +695,80 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             doc_id: args?.doc_id,
             text: args?.text,
             category: args?.category,
+            source: args?.source,
+            tags: args?.tags,
+            url: args?.url,
+            confidence: args?.confidence,
+            evidence: [{ kind: 'authored', ref: String(args?.source ?? 'authored') }],
+          }, { confirm: args?.confirm === true });
+          if (doc && doc.needs_confirm) return formatConflict(doc);
+          return [
+            `${doc.merged ? '知识已合并' : '知识已写入'}（${source.label}）：${doc.doc_id}`,
+            `分类：${doc.category}｜来源：${doc.source}`
+              + (doc.tags.length > 0 ? `｜标签：${doc.tags.join('，')}` : '')
+              + (doc.url !== '' ? `｜出处：${doc.url}` : ''),
+            clip(doc.text, 400),
+          ].join('\n');
+        }
+
+        if (action === 'learn') {
+          const items = Array.isArray(args?.items) ? args.items : [];
+          if (items.length === 0) throw new Error('learn 需要非空的 items 数组');
+          const written = [];
+          const failed = [];
+          const blocked = [];
+          for (const item of items.slice(0, 100)) {
+            if (!item || typeof item !== 'object') {
+              failed.push('跳过一条非对象条目');
+              continue;
+            }
+            try {
+              const doc = store.remember({
+                text: item.text,
+                category: item.category,
+                source: item.source ?? 'reasoning',
+                tags: item.tags,
+                url: item.url,
+                confidence: item.confidence,
+              }, { confirm: args?.confirm === true });
+              if (doc && doc.needs_confirm) {
+                blocked.push(doc);
+                continue;
+              }
+              written.push(doc);
+            } catch (error) {
+              failed.push(`${clip(item.text ?? '', 60)}：${error?.message ?? error}`);
+            }
+          }
+          const merged = written.filter((doc) => doc.merged).length;
+          const lines = [
+            `已写入知识 ${written.length} 条（新增 ${written.length - merged}，合并 ${merged}）`
+              + (blocked.length > 0 ? `，待确认 ${blocked.length} 条` : '')
+              + (failed.length > 0 ? `，失败 ${failed.length}` : ''),
+          ];
+          for (const doc of written) {
+            lines.push(`- [${doc.category}] ${doc.doc_id}（${doc.source}）：${clip(doc.text, 120)}`);
+          }
+          for (const doc of blocked.slice(0, 5)) {
+            lines.push('');
+            lines.push(formatConflict(doc));
+          }
+          for (const row of failed.slice(0, 5)) lines.push(`  ! ${row}`);
+          return lines.join('\n');
+        }
+
+        if (action === 'promote') {
+          const result = store.promoteKnowledge({
+            dryRun: args?.dry_run === true,
+            limit: Number.isInteger(args?.limit) ? args.limit : 20,
           });
-          return `知识已写入（${source.label}）：${doc.doc_id}（category=${doc.category}）\n${clip(doc.text, 300)}`;
+          return formatPromotion(result);
+        }
+
+        if (action === 'forget') {
+          const removed = store.forgetKnowledge(args?.doc_id);
+          if (!removed.deleted) return `未删除：${removed.reason}`;
+          return `已删除知识：${removed.doc_id}（${source.label}）`;
         }
 
         if (action === 'status') {
@@ -739,19 +926,21 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
     {
       name: 'aim_context',
       description:
-        '上下文管理：save=把当前已完成对话整理进存储；clear=保存后压缩/清理会话上下文；'
-        + 'restore=把保存的上下文重新注入当前会话；list=列出存档；status=查看压缩服务与存档状态；'
+        '上下文管理：save=把当前已完成对话整理进存储；clear=按话题相似度清理会话上下文；'
+        + 'restore=把保存的上下文重新注入当前会话；list=列出存档；status=查看清理策略与存档状态；'
         + 'sessions=列出所有对话及其记忆规模。'
+        + '清理不再一刀切：以当轮与上轮的话题为基准，相似度低的老轮次会被清出上下文，相似度高的原样保留；'
+        + '被清出的轮次会先完整存档，随时可以用 restore 调回。'
         + '存档默认按对话隔离（每个对话只列出自己的），restore 默认可以跨对话找到别的对话保存过的上下文。'
-        + '自动整理开启时每 N 轮会自动执行 save+clear；手动工具始终可用。清理后需要旧信息时用 restore 调回。',
+        + '自动整理开启时每 N 轮会自动执行 save+clear；手动工具始终可用。',
       parameters: {
         action: {
           type: 'string',
           required: true,
           enum: ['save', 'clear', 'restore', 'list', 'status', 'sessions'],
           description:
-            'save=保存当前对话上下文；clear=保存并压缩清理；restore=恢复存档（可跨对话）；'
-            + 'list=列存档；status=查看状态；sessions=列出所有对话。',
+            'save=保存当前对话上下文；clear=按话题相似度清理（低相似度清出、高相似度保留，清出的可 restore）；'
+            + 'restore=恢复存档（可跨对话）；list=列存档；status=查看状态；sessions=列出所有对话。',
         },
         scope: {
           type: 'string',
@@ -807,6 +996,16 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         }
 
         if (action === 'clear') {
+          if (!session || typeof session.ownEvents !== 'function') {
+            throw new Error('当前调用没有可用的会话上下文');
+          }
+          if (config.topicalClear !== false) {
+            runtime.pending.set(String(session.id), 'manual');
+            return '已登记清理请求：本轮结束后按话题相似度清理本对话上下文。\n'
+              + `保留最近 ${config.keepRecentTurns} 轮（当轮与上轮始终保留）；相似度阈值 ${config.similarityThreshold}；`
+              + `单次最多清出 ${config.maxClearTurns} 轮。\n`
+              + '相似度高的轮次原样保留；被清出的轮次会先完整存档，之后可用 restore 调回。';
+          }
           const built = snapshot();
           const saved = store.saveContext({
             label: args?.name ?? 'before-clear',
@@ -878,20 +1077,26 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           const totalContexts = rows.reduce((sum, row) => sum + row.counts.contexts, 0) + shared.contexts;
           const closed = closedConversationCount(context);
           return [
-            `compaction 服务：${compaction && typeof compaction.compactNow === 'function' ? '可用' : '不可用'}`,
+            `清理策略：${config.topicalClear === false
+              ? `整段压缩（compaction 服务${compaction && typeof compaction.compactNow === 'function' ? '可用' : '不可用'}）`
+              : '话题相似度（低相似度清出，高相似度保留）'}`,
+            `相似度设置：阈值 ${config.similarityThreshold}，保留最近 ${config.keepRecentTurns} 轮，`
+              + `单次最多 ${config.maxClearTurns} 轮（${config.minClearChars}~${config.maxClearChars} 字符）`,
             `自动整理：${config.autoEnabled ? `开启（每 ${config.autoEveryRounds} 轮）` : '关闭'}`,
             `手动工具：始终可用`,
             `当前对话：${source.label}${context.sessionId ? `（${shortSessionId(context.sessionId)}）` : ''}`,
             `上下文存档：${store.listContexts().length} 个（本对话），可见对话共 ${totalContexts} 个`,
             `对话数量：${rows.length} 个${closed > 0 ? `（另有 ${closed} 个未对外开放）` : ''}`,
-            `待压缩：${session && session.id && runtime.pending.has(String(session.id)) ? '是' : '否'}`,
+            `待清理：${session && session.id && runtime.pending.has(String(session.id)) ? '是' : '否'}`,
             (() => {
               const last = store.readCompactionStatus();
-              if (!last) return '最近压缩：无记录';
-              return `最近压缩：${last.state}${last.error ? `（${last.error}）` : ''}`
-                + `${Number.isInteger(last.compacted) ? `，${last.compacted} 条 / ${last.tokens ?? 0} tokens` : ''}`
-                + `${last.noop ? '，无可压缩历史' : ''}`
-                + `${last.at ? ` @ ${last.at}` : ''}`;
+              if (!last) return '最近清理：无记录';
+              const detail = Number.isInteger(last.turns)
+                ? `，清出 ${last.turns} 轮 / ${last.cleared ?? 0} 条 / ${last.chars ?? 0} 字符，保留 ${last.kept ?? '?'} 轮`
+                : `${Number.isInteger(last.compacted) ? `，${last.compacted} 条 / ${last.tokens ?? 0} tokens` : ''}`
+                  + `${last.noop ? '，无可压缩历史' : ''}`;
+              return `最近清理：${last.state}${last.reason ? `（${last.reason}）` : ''}${detail}`
+                + `${last.error ? `（${last.error}）` : ''}${last.at ? ` @ ${last.at}` : ''}`;
             })(),
           ].join('\n');
         }
@@ -923,13 +1128,17 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
 // ---- plugin entry --------------------------------------------------------
 
 /**
- * Context management: archive the conversation window and, when possible,
- * compact it. Auto mode also does this every N turns; manual mode only reacts
- * to explicit `aim_context` tool calls. The listener is always installed so a
- * manual `clear` can finish after the current turn closes.
+ * Context management: archive and clear the conversation window with the
+ * configured policy. Auto mode also does this every N turns; manual mode only
+ * reacts to explicit `aim_context` tool calls. The listener is always installed
+ * so a manual `clear` can finish after the current turn closes.
  *
- * Compaction must run while the agent is idle, so it is deferred to `turn/end`
- * and awaited through `agent.whenIdle()`. Subagents are skipped.
+ * The default policy is topic-aware: the turns that still share the current
+ * topic stay verbatim, and only the ones the conversation has moved away from
+ * are replaced — after their full text has been archived, so `restore` can
+ * always bring them back. Clearing must run while the agent is idle, so it is
+ * deferred to `turn/end` and awaited through `agent.whenIdle()`. Subagents are
+ * skipped.
  */
 export function installContextManagement(ctx, config, deps, runtime) {
   const counters = runtime?.counters ?? new Map();
@@ -977,24 +1186,288 @@ export function installContextManagement(ctx, config, deps, runtime) {
     }
   };
 
+  /** Memory store of one session, or `undefined` when it cannot be resolved. */
+  const storeOfSession = (session) => {
+    try {
+      const context = memoryContext(config, { agent: { session } }, deps, runtime);
+      return writeSource(context, 'session').store;
+    } catch {
+      return undefined;
+    }
+  };
+
+  /** Diagnostics sink for the last clear/compaction attempt. */
+  const recorderOf = (store) => (data) => {
+    try {
+      store?.writeCompactionStatus(data);
+    } catch {
+      // Status is diagnostics only; never fail clearing because of it.
+    }
+  };
+
+  /** Heuristic token price of one shadowed surface node. */
+  const priceOfNode = (session, seq) => {
+    try {
+      const event = typeof session.eventAt === 'function' ? session.eventAt(seq) : undefined;
+      if (!event) return 0;
+      const message = typeof session.deriveEventMessage === 'function'
+        ? session.deriveEventMessage(event) : null;
+      if (!message) return 0;
+      const meter = getService('tokenMeter');
+      if (meter && typeof meter.estimateMessage === 'function') {
+        return Number(meter.estimateMessage(message)) || 0;
+      }
+      return Math.ceil(JSON.stringify(message.content ?? '').length / 4);
+    } catch {
+      return 0;
+    }
+  };
+
+  /**
+   * Surface range of one turn, or `null` when clearing it is not safe.
+   *
+   * A turn is addressable only while every one of its events is still on the
+   * surface as one contiguous run: a turn already split by an earlier
+   * compaction or clear cannot be replaced as a unit. Node 0 holds the system
+   * prompt and is never part of a clear.
+   */
+  const turnRange = (session, turn) => {
+    const nodes = session && session.surface && Array.isArray(session.surface.nodes)
+      ? session.surface.nodes : null;
+    const seqs = Array.isArray(turn?.seqs) ? turn.seqs : [];
+    if (!nodes || nodes.length === 0 || seqs.length === 0) return null;
+    const position = new Map();
+    nodes.forEach((seq, index) => position.set(seq, index));
+    const indexes = [];
+    for (const seq of seqs) {
+      const index = position.get(seq);
+      if (index === undefined) return null;
+      indexes.push(index);
+    }
+    for (let index = 1; index < indexes.length; index += 1) {
+      if (indexes[index] !== indexes[index - 1] + 1) return null;
+    }
+    // Node 0 holds the system prompt and may never be shadowed by a clear.
+    if (indexes[0] === 0) {
+      const head = typeof session.eventAt === 'function' ? session.eventAt(nodes[0]) : undefined;
+      if (!head || head.type === 'system/message') return null;
+    }
+    return {
+      seqs: [...seqs],
+      startSeq: seqs[0],
+      endSeq: seqs[seqs.length - 1],
+      startIdx: indexes[0],
+      endIdx: indexes[indexes.length - 1],
+    };
+  };
+
+  /**
+   * Group cleared turns into the contiguous surface runs one replacement can
+   * cover. Adjacent cleared turns share a run; a kept turn in between always
+   * splits it, so retained context is never swallowed.
+   */
+  const groupRuns = (session, cleared) => {
+    const runs = [];
+    for (const turn of cleared) {
+      const range = turnRange(session, turn);
+      if (!range) continue;
+      const last = runs[runs.length - 1];
+      if (last && last.endIdx + 1 === range.startIdx) {
+        last.turns.push(turn);
+        last.seqs.push(...range.seqs);
+        last.endSeq = range.endSeq;
+        last.endIdx = range.endIdx;
+        last.chars += turn.chars ?? 0;
+        last.similarity = Math.max(last.similarity, turn.similarity ?? 0);
+      } else {
+        runs.push({
+          turns: [turn],
+          seqs: [...range.seqs],
+          startSeq: range.startSeq,
+          endSeq: range.endSeq,
+          startIdx: range.startIdx,
+          endIdx: range.endIdx,
+          chars: turn.chars ?? 0,
+          similarity: turn.similarity ?? 0,
+        });
+      }
+    }
+    return runs;
+  };
+
+  /**
+   * Replace one surface run with a short model-facing note.
+   *
+   * The note says what left the window and how to bring it back, so the model
+   * keeps a pointer to the archive instead of silently losing the subject. The
+   * archive is written before this function is ever called.
+   */
+  const clearRun = (session, run, contextId) => {
+    let shadowedTokens = 0;
+    for (const seq of run.seqs) shadowedTokens += priceOfNode(session, seq);
+    // Shadow-price protocol: the metering event and its replacement are
+    // appended adjacently so a pure consumer can subtract the shadowed price.
+    // Pricing is diagnostics; a log that refuses it must not block the clear.
+    try {
+      session.append('compaction/prune', {
+        shadowedRange: { start: run.startSeq, end: run.endSeq },
+        shadowedSeqs: run.seqs,
+        shadowedTokenCount: shadowedTokens,
+      });
+    } catch {
+      // keep clearing
+    }
+    session.append('user/message', {
+      id: randomUUID(),
+      role: 'user',
+      content: [{
+        type: 'text',
+        text: `【上下文清理】${describeTurns(run.turns, run.similarity)}已清出当前上下文，`
+          + `原文完整保存在本对话的记忆存档 ${contextId}。`
+          + `需要时调用 aim_context restore（context_id=${contextId}）即可调回。`,
+      }],
+      source: { kind: 'ai-for-memory' },
+    }, {
+      surfaceOp: { op: 'replace', startSeq: run.startSeq, endSeq: run.endSeq },
+      sourceEventSeqs: run.seqs,
+    });
+  };
+
+  /**
+   * Similarity-aware clear: keep the turns that still share the current topic,
+   * remove the ones the conversation has moved away from, and archive exactly
+   * what is removed before touching the transcript.
+   */
+  const runTopicalClear = (session, options = {}) => {
+    const label = String(options.label ?? 'before-clear');
+    const store = storeOfSession(session);
+    const record = recorderOf(store);
+    if (!session || typeof session.ownEvents !== 'function') {
+      record({ state: 'unavailable', reason: 'no-session' });
+      return;
+    }
+    if (typeof session.append !== 'function' || !session.surface) {
+      record({ state: 'unavailable', reason: 'session 不支持清理窗口' });
+      return;
+    }
+    const agents = getService('agents');
+    const agent = agents && typeof agents.get === 'function' ? agents.get(session.id) : undefined;
+
+    /** Everything the clear does, once the agent is safely idle. */
+    const clearNow = async () => {
+      const events = session.ownEvents();
+      const turns = collectTurns(events);
+      if (turns.length === 0) {
+        record({ state: 'skipped', reason: 'empty' });
+        return;
+      }
+      const selection = selectTurnsByTopic(turns, {
+        threshold: config.similarityThreshold,
+        keepRecent: config.keepRecentTurns,
+        anchorTurns: 2,
+      });
+      if (selection.clear.length === 0) {
+        record({
+          state: 'skipped',
+          reason: '全部轮次都与当前话题相关',
+          kept: selection.keep.length,
+          cleared: 0,
+          threshold: selection.threshold,
+        });
+        return;
+      }
+      const runs = groupRuns(session, selection.clear);
+      if (runs.length === 0) {
+        record({ state: 'skipped', reason: '没有可安全清理的连续轮次', kept: selection.keep.length, cleared: 0 });
+        return;
+      }
+
+      // Budget is applied oldest first: the turns furthest from the current
+      // topic go first, and every chosen turn must fit in the archive.
+      const chosen = [];
+      let chars = 0;
+      let turnCount = 0;
+      for (const run of runs) {
+        if (turnCount + run.turns.length > config.maxClearTurns) break;
+        if (chars + run.chars > config.maxClearChars) break;
+        chosen.push(run);
+        chars += run.chars;
+        turnCount += run.turns.length;
+      }
+      if (chosen.length === 0) {
+        record({ state: 'skipped', reason: '超出单次清理预算' });
+        return;
+      }
+      if (chars < config.minClearChars) {
+        record({ state: 'skipped', reason: '可清理内容太少', chars, cleared: 0 });
+        return;
+      }
+
+      const clearedTurns = chosen.flatMap((run) => run.turns);
+      const snapshot = snapshotOfTurns(clearedTurns, { maxChars: Infinity });
+      // Archive first: nothing leaves the window before it is restorable.
+      const saved = store.saveContext({
+        label,
+        sessionId: String(session.id),
+        ...snapshot,
+      });
+
+      let shadowed = 0;
+      for (const run of chosen) {
+        clearRun(session, run, saved.context_id);
+        shadowed += run.seqs.length;
+      }
+      record({
+        state: 'done',
+        session: String(session.id),
+        cleared: shadowed,
+        turns: turnCount,
+        chars,
+        kept: selection.keep.length,
+        context: saved.context_id,
+        threshold: selection.threshold,
+      });
+      // eslint-disable-next-line no-console
+      console.log(`[ai-for-memory] 已按话题相似度清出 ${turnCount} 轮（保留 ${selection.keep.length} 轮），存档 ${saved.context_id}`);
+    };
+
+    void (async () => {
+      try {
+        record({ state: 'started', session: String(session.id) });
+        // `turn/end` still fires while the agent is settling, so the surface may
+        // only be rewritten once it is idle. Prefer the agent's maintenance
+        // entry point: it additionally withholds later waking input while the
+        // replacement lands. It throws when the agent is active, which is why
+        // idle is awaited first and the entry retried once.
+        if (agent && typeof agent.whenIdle === 'function') await agent.whenIdle();
+        const maintenance = agent && typeof agent.runMaintenance === 'function'
+          ? agent.runMaintenance.bind(agent)
+          : null;
+        if (!maintenance) {
+          await clearNow();
+          return;
+        }
+        try {
+          await maintenance(() => clearNow());
+        } catch (busyError) {
+          if (typeof agent.whenIdle !== 'function') throw busyError;
+          await agent.whenIdle();
+          await maintenance(() => clearNow());
+        }
+      } catch (error) {
+        record({ state: 'error', session: String(session.id), error: String(error?.message ?? error) });
+        // eslint-disable-next-line no-console
+        console.error(`[ai-for-memory] 上下文清理失败：${error?.message ?? error}`);
+      }
+    })();
+  };
+
+  /** Legacy whole-window compaction, kept behind `topicalClear: false`. */
   const runCompaction = (session) => {
     const agents = getService('agents');
     const agent = agents && typeof agents.get === 'function' ? agents.get(session.id) : undefined;
     const compaction = getService('compaction');
-    let store;
-    try {
-      const context = memoryContext(config, { agent: { session } }, deps, runtime);
-      store = writeSource(context, 'session').store;
-    } catch {
-      store = undefined;
-    }
-    const record = (data) => {
-      try {
-        store?.writeCompactionStatus(data);
-      } catch {
-        // Status is diagnostics only; never fail compaction because of it.
-      }
-    };
+    const record = recorderOf(storeOfSession(session));
     if (!agent || !compaction || typeof compaction.compactNow !== 'function') {
       record({ state: 'unavailable', error: 'compaction 服务不可用' });
       // eslint-disable-next-line no-console
@@ -1023,6 +1496,18 @@ export function installContextManagement(ctx, config, deps, runtime) {
         console.error(`[ai-for-memory] 上下文压缩失败：${error?.message ?? error}`);
       }
     })();
+  };
+
+  /** Run the configured clear policy for one conversation. */
+  const runClear = (session, kind = 'auto') => {
+    if (config.topicalClear === false) {
+      runCompaction(session);
+      return;
+    }
+    const label = kind === 'manual'
+      ? 'before-clear'
+      : `auto-${config.autoEveryRounds}rounds`;
+    runTopicalClear(session, { label });
   };
 
   const onSessionEvent = (session, event) => {
@@ -1056,16 +1541,38 @@ export function installContextManagement(ctx, config, deps, runtime) {
             store.stage({ content: digest, kind: 'digest', source: 'auto' });
             store.archive();
           }
-          const snapshot = buildContextSnapshot(events, { maxChars: config.maxContextChars });
-          if (snapshot) {
-            const saved = store.saveContext({
-              label: `auto-${config.autoEveryRounds}rounds`,
-              sessionId: id,
-              ...snapshot,
-            });
-            pending.set(id, saved.context_id);
-            // eslint-disable-next-line no-console
-            console.log(`[ai-for-memory] 自动整理：已归档上下文 ${saved.context_id}（第 ${saved.turn_from}-${saved.turn_to} 轮）`);
+          if (config.autoKnowledge !== false) {
+            // Mine the three layers for knowledge while tidying: rules the user
+            // stated, error→fix pairs, decisions with their reason.
+            let promoted;
+            try {
+              promoted = store.promoteKnowledge({ limit: config.autoKnowledgeLimit });
+            } catch (error) {
+              // eslint-disable-next-line no-console
+              console.warn(`[ai-for-memory] 自动提炼知识失败：${error?.message ?? error}`);
+              promoted = null;
+            }
+            if (promoted && promoted.added.length > 0) {
+              // eslint-disable-next-line no-console
+              console.log(`[ai-for-memory] 自动提炼知识：新增 ${promoted.added.length} 篇，合并 ${promoted.merged.length} 篇`);
+            }
+          }
+          if (config.topicalClear === false) {
+            // Legacy mode still snapshots the recent window before compacting.
+            const snapshot = buildContextSnapshot(events, { maxChars: config.maxContextChars });
+            if (snapshot) {
+              const saved = store.saveContext({
+                label: `auto-${config.autoEveryRounds}rounds`,
+                sessionId: id,
+                ...snapshot,
+              });
+              pending.set(id, saved.context_id);
+              // eslint-disable-next-line no-console
+              console.log(`[ai-for-memory] 自动整理：已归档上下文 ${saved.context_id}（第 ${saved.turn_from}-${saved.turn_to} 轮）`);
+            }
+          } else {
+            // Similarity mode archives exactly what it clears, inside runClear.
+            pending.set(id, 'auto');
           }
         } catch (error) {
           // eslint-disable-next-line no-console
@@ -1075,8 +1582,9 @@ export function installContextManagement(ctx, config, deps, runtime) {
     }
 
     if (pending.has(id)) {
+      const request = pending.get(id);
       pending.delete(id);
-      runCompaction(session);
+      runClear(session, request === 'manual' ? 'manual' : 'auto');
     }
   };
 

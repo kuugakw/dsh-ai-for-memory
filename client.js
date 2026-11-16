@@ -44,14 +44,32 @@ window.__ModuleLoader__.load({
         tabKnowledge: '知识',
         tabDecisions: '决策',
         tabContexts: '上下文',
+        tabHints: {
+          staging: '过程记录：把「刚发生了什么」原样落下——决策、错误、界面事实、任务状态，一行一条。这是六层里唯一会持续追加的流水，先记下来，再决定归档到哪一类。',
+          archive: '归档：把过程记录按类型收进固定的分类文件（界面事实 / 动作日志 / 决策理由 / 错误修复…）。归档是幂等的，重复执行只补缺失条目，所以可以随时再跑一次。',
+          snapshots: '快照：保存「某一刻的精确状态对象」，需要时按 id 或名字原样取回。它不描述过程，只负责让你能把状态恢复成当时的样子。',
+          knowledge: '知识：从过程记录、归档、上下文三层里提炼出来的一句句结论，加上我或你直接写入的事实。八类分类、自带出处、同一条会自动合并。',
+          decisions: '决策：高风险或不可逆操作的正反理由与审查结果，带权重和结论。它回答「为什么当初这么定」，而不只是「做了什么」。',
+          contexts: '上下文：对话窗口的存档。按话题相似度清出低相似度的老轮次之前，先把全文存到这里，随时可以用 aim_context restore 调回。',
+        },
         emptyStaging: '还没有过程记录。',
         emptyArchive: '还没有归档记录。',
         emptySnapshots: '还没有快照。',
         emptyKnowledge: '还没有知识文档。',
+        knowledgePending: '待提炼',
+        knowledgeHint: '知识只存结论：三层里提炼出的用户规则/错误修复/决策理由，加上我或你直接写入的事实；每条都带分类与出处。新知识与已有知识或我的认知冲突时，会先问你，确认后才写入。',
+        evidence: '证据',
+        sourceUrl: '出处',
         emptyDecisions: '还没有决策审查记录。',
         emptyContexts: '还没有上下文存档。',
         scopeLabel: '查看范围',
         scopeCurrent: '本对话',
+        scopePick: '指定对话',
+        scopeWorkspace: '工作区',
+        scopeConversation: '对话',
+        scopeNoWorkspace: '未记录工作区',
+        scopeNoConversation: '该工作区暂无对话',
+        scopeChooseConversation: '选择对话…',
         scopeAll: '全部对话',
         scopeShared: '共享层',
         scopeAuto: '本对话（自动识别）',
@@ -76,8 +94,12 @@ window.__ModuleLoader__.load({
         privateBadge: '私有',
         defaultPublic: '新对话默认对外开放',
         defaultPublicHint: '新建对话时自动创建记忆文件夹，并按这个默认值设置开放状态。',
+        clearingTopic: '按话题相似度清理',
+        clearingThreshold: '相似度阈值（越大清得越狠）',
+        clearingKeep: '始终保留最近几轮',
+        clearingHint: '按话题相似度清理：以当轮与上轮为基准，相似度低的老轮次被清出，相似度高的原样保留；清出前先完整存档，随时可以 restore 调回。',
         contextRestoreHint: '需要恢复时，在对话里让我执行 aim_context restore。',
-        searchPlaceholder: '搜索知识（标题/正文/分类）',
+        searchPlaceholder: '搜索知识（id/正文/分类/来源/标签）',
         clearSearch: '清空',
         state: '状态',
         time: '时间',
@@ -97,7 +119,7 @@ window.__ModuleLoader__.load({
         switchOff: '关',
         modeRounds: '每几轮自动整理',
         modeHintManual: '自动整理已关闭；手动工具始终可用：aim_memory / aim_search / aim_decide / aim_context。',
-        modeHintAuto: '自动整理已开启：每 N 轮自动执行 摘要→归档→上下文存档→压缩清理；手动工具仍然可用。',
+        modeHintAuto: '自动整理已开启：每 N 轮自动执行 摘要→归档→按话题相似度清理；手动工具仍然可用。',
         fixedPath: '记忆地址（绝对路径，留空=跟随项目）',
         dirName: '目录名（跟随项目时使用）',
         save: '保存设置',
@@ -139,14 +161,32 @@ window.__ModuleLoader__.load({
         tabKnowledge: 'Knowledge',
         tabDecisions: 'Decisions',
         tabContexts: 'Contexts',
+        tabHints: {
+          staging: 'Process log: records what just happened, verbatim — decisions, errors, UI facts, task state, one line each. It is the only layer that keeps appending; capture first, classify later.',
+          archive: 'Archive: files those records into fixed categories (UI facts, action logs, decision reasons, error fixes…). Archiving is idempotent — re-running only fills in what is missing.',
+          snapshots: 'Snapshots: an exact state object saved at one moment, restored later by id or name. It does not describe the process; it makes the state recoverable.',
+          knowledge: 'Knowledge: one-sentence conclusions distilled from the three layers, plus facts written by the model or the user. Eight categories, provenance on every document, duplicates merged.',
+          decisions: 'Decisions: the thesis, antithesis, weights and outcome of risky or irreversible operations — they answer "why this was chosen", not just "what was done".',
+          contexts: 'Contexts: archived conversation windows. Before the topic-aware clear removes low-similarity older turns their full text lands here, and aim_context restore brings it back.',
+        },
         emptyStaging: 'No process records yet.',
         emptyArchive: 'Nothing archived yet.',
         emptySnapshots: 'No snapshots yet.',
         emptyKnowledge: 'No knowledge documents yet.',
+        knowledgePending: 'To distill',
+        knowledgeHint: 'Knowledge stores conclusions only: user rules, error→fix pairs and decision reasons mined from the three layers, plus facts written by the model or the user. Each document carries a category and a source. When a new fact conflicts with stored knowledge or with the model’s own understanding, you are asked first and it is stored only after you agree.',
+        evidence: 'Evidence',
+        sourceUrl: 'Source',
         emptyDecisions: 'No decision reviews yet.',
         emptyContexts: 'No archived contexts yet.',
         scopeLabel: 'Scope',
         scopeCurrent: 'This conversation',
+        scopePick: 'Specific conversation',
+        scopeWorkspace: 'Workspace',
+        scopeConversation: 'Conversation',
+        scopeNoWorkspace: 'Workspace not recorded',
+        scopeNoConversation: 'No conversation in this workspace',
+        scopeChooseConversation: 'Choose a conversation…',
         scopeAll: 'All conversations',
         scopeShared: 'Shared layer',
         scopeAuto: 'This conversation (auto)',
@@ -171,8 +211,12 @@ window.__ModuleLoader__.load({
         privateBadge: 'private',
         defaultPublic: 'New conversations open by default',
         defaultPublicHint: 'A new conversation gets its memory folder automatically, seeded with this access setting.',
+        clearingTopic: 'Topic similarity',
+        clearingThreshold: 'Similarity threshold (higher clears more)',
+        clearingKeep: 'Always keep the last N turns',
+        clearingHint: 'Topic-aware clearing: each older turn is compared with the current and previous turn. Turns that still share the topic stay verbatim; only the ones the conversation has left behind are cleared, and their full text is archived first so restore can always bring them back.',
         contextRestoreHint: 'To restore one, ask me in the chat to run aim_context restore.',
-        searchPlaceholder: 'Search knowledge (id, text, category)',
+        searchPlaceholder: 'Search knowledge (id, text, category, source, tag)',
         clearSearch: 'Clear',
         state: 'State',
         time: 'Time',
@@ -192,7 +236,7 @@ window.__ModuleLoader__.load({
         switchOff: 'Off',
         modeRounds: 'Auto tidy every N rounds',
         modeHintManual: 'Auto tidy is off; manual tools are always available: aim_memory / aim_search / aim_decide / aim_context.',
-        modeHintAuto: 'Auto tidy is on: every N turns it digests, archives, saves context and compacts it. Manual tools remain available.',
+        modeHintAuto: 'Auto tidy is on: every N turns it digests, archives and runs a topic-aware clear. Manual tools remain available.',
         fixedPath: 'Memory path (absolute, empty = follow project)',
         dirName: 'Directory name (used when following the project)',
         save: 'Save settings',
@@ -212,6 +256,90 @@ window.__ModuleLoader__.load({
       },
     };
     const t = STRINGS[lang];
+
+    // ---- motion system -----------------------------------------------------
+    //
+    // The panel renders with inline styles, which cannot declare keyframes, so
+    // the shared motion vocabulary lives in one injected stylesheet. Every
+    // effect is short (<= 260ms), uses the same easing, and is disabled under
+    // `prefers-reduced-motion`.
+    const MOTION_STYLE_ID = 'aim-motion-styles';
+    const MOTION_CSS = `
+@keyframes aim-fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes aim-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes aim-slide-down { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes aim-indicator-in { from { opacity: 0; transform: scaleX(.35); } to { opacity: 1; transform: scaleX(1); } }
+@keyframes aim-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
+.aim-page { animation: aim-fade-up .26s cubic-bezier(.2,.7,.3,1) both; }
+.aim-fade-up { animation: aim-fade-up .22s cubic-bezier(.2,.7,.3,1) both; }
+.aim-content { animation: aim-fade .24s ease-out both; }
+.aim-notice { animation: aim-slide-down .2s cubic-bezier(.2,.7,.3,1) both; }
+.aim-indicator { animation: aim-indicator-in .18s cubic-bezier(.2,.7,.3,1) both; transform-origin: left center; }
+.aim-pulse { animation: aim-pulse 1.4s ease-in-out infinite; }
+
+.aim-btn { transition: background-color .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease, transform .09s ease; }
+.aim-btn:hover:not(:disabled) { filter: brightness(1.05); }
+.aim-btn:active:not(:disabled) { transform: scale(.97); }
+.aim-btn:disabled { opacity: .6; cursor: default; }
+
+.aim-tab { transition: color .16s ease, opacity .16s ease, transform .09s ease; }
+.aim-tab:hover { opacity: .9; }
+.aim-tab:active { transform: translateY(1px); }
+
+.aim-row, .aim-tile { transition: transform .18s cubic-bezier(.2,.7,.3,1), box-shadow .18s ease, border-color .18s ease; }
+.aim-row:hover, .aim-tile:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,.10); }
+
+.aim-icon { transition: transform .2s cubic-bezier(.2,.7,.3,1); }
+.aim-icon:hover { transform: translateY(-1px) scale(1.06); }
+
+@media (prefers-reduced-motion: reduce) {
+  .aim-page, .aim-fade-up, .aim-content, .aim-notice, .aim-indicator, .aim-pulse { animation: none !important; }
+  .aim-btn, .aim-tab, .aim-row, .aim-tile, .aim-icon { transition: none !important; }
+  .aim-row:hover, .aim-tile:hover, .aim-icon:hover, .aim-btn:active, .aim-tab:active { transform: none; }
+}
+
+/* Belt and braces for the layer tabs: whatever a host stylesheet does to
+   buttons (focus ring underline, inherited border), the tab row never shows
+   more than the one indicator element rendered by the selected tab. */
+.aim-switch, .aim-switch:hover, .aim-switch:focus, .aim-switch:focus-visible, .aim-switch:active {
+  text-decoration: none !important;
+  border-bottom: none !important;
+  outline: none !important;
+}
+
+/* The selected switch is marked by a dot drawn from aria-checked, so the
+   label itself stays plain text that no background can swallow. */
+.aim-switch[aria-checked="true"]::before {
+  content: '●';
+  font-size: 9px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.aim-tabs, .aim-tabs button,
+.aim-tabs button:hover, .aim-tabs button:focus, .aim-tabs button:focus-visible,
+.aim-tabs button:active {
+  text-decoration: none !important;
+  border-bottom: none !important;
+  outline: none !important;
+}
+`;
+
+    /** Inject the shared motion stylesheet once per page. */
+    function installMotionStyles() {
+      const doc = globalThis.document;
+      if (!doc || !doc.head) return () => {};
+      if (doc.getElementById(MOTION_STYLE_ID)) return () => {};
+      const style = doc.createElement('style');
+      style.id = MOTION_STYLE_ID;
+      style.textContent = MOTION_CSS;
+      doc.head.append(style);
+      return () => {
+        const installed = doc.getElementById(MOTION_STYLE_ID);
+        if (installed) installed.remove();
+      };
+    }
 
     function apiBase() {
       const location = globalThis.location;
@@ -330,6 +458,31 @@ window.__ModuleLoader__.load({
         cursor: 'pointer', display: 'flex', gap: '6px', alignItems: 'center',
       },
       tabOn: { color: colors.label, borderBottomColor: colors.brand, fontWeight: 600 },
+      // The six layer tabs draw their own active indicator element instead of
+      // relying on a bottom border: a border can be inherited from a host
+      // stylesheet and then two tabs look underlined at once.
+      tabBar: {
+        font: 'inherit', fontSize: '12.5px', color: colors.secondary, background: 'transparent',
+        border: 'none', borderBottom: 'none', textDecoration: 'none', boxShadow: 'none',
+        padding: '7px 10px 8px', cursor: 'pointer', position: 'relative',
+        display: 'flex', gap: '6px', alignItems: 'center',
+      },
+      tabBarOn: { color: colors.label, fontWeight: 600 },
+      // Settings switches: text only, no filled background and no border. The
+      // selected option is brand-coloured, bold, and marked with a dot drawn by
+      // CSS from aria-checked, so the label can never sit unreadable on top of
+      // a background colour (light and dark themes both keep it readable).
+      switchOption: {
+        fontSize: '12.5px', lineHeight: '1.5', minHeight: '24px',
+        color: colors.secondary, background: 'transparent',
+        border: 'none', borderRadius: '6px', padding: '2px 8px', cursor: 'pointer',
+        textDecoration: 'none', boxShadow: 'none', whiteSpace: 'nowrap',
+      },
+      switchOptionOn: { color: colors.brand, fontWeight: 700, background: 'transparent' },
+      tabBarIndicator: {
+        position: 'absolute', left: '8px', right: '8px', bottom: '-1px', height: '2px',
+        borderRadius: '2px', background: colors.brand,
+      },
       tabCount: {
         fontSize: '11px', color: colors.secondary, background: colors.bg2,
         border: `1px solid ${colors.border}`, borderRadius: '999px', padding: '0 6px',
@@ -395,6 +548,7 @@ window.__ModuleLoader__.load({
         width: size,
         height: size,
         'aria-hidden': true,
+        className: 'aim-icon',
         fill: 'none',
         stroke: 'currentColor',
         strokeWidth: 1.7,
@@ -408,7 +562,7 @@ window.__ModuleLoader__.load({
     }
 
     function Tile(props) {
-      return h('div', { style: styles.tile },
+      return h('div', { className: 'aim-tile', style: styles.tile },
         h('div', { style: styles.tileLabel }, props.label),
         h('div', { style: styles.tileValue }, String(props.value ?? 0)));
     }
@@ -419,7 +573,7 @@ window.__ModuleLoader__.load({
 
     function EntryRow(props) {
       const row = props.row;
-      return h('div', { style: styles.row },
+      return h('div', { className: 'aim-row', style: styles.row },
         h('div', { style: styles.rowHead },
           row.kind ? h('span', { style: badgeStyle('pending') }, row.kind) : null,
           row.risk ? h('span', { style: badgeStyle(row.risk) }, `${t.risk}: ${row.risk}`) : null,
@@ -452,6 +606,9 @@ window.__ModuleLoader__.load({
       const [formMode, setFormMode] = React.useState('manual');
       const [formRounds, setFormRounds] = React.useState(5);
       const [formDefaultPublic, setFormDefaultPublic] = React.useState(true);
+      const [formTopical, setFormTopical] = React.useState(true);
+      const [formThreshold, setFormThreshold] = React.useState(0.06);
+      const [formKeepRecent, setFormKeepRecent] = React.useState(2);
       const [formName, setFormName] = React.useState('');
       const [formPublic, setFormPublic] = React.useState(true);
       const [saving, setSaving] = React.useState(false);
@@ -513,6 +670,9 @@ window.__ModuleLoader__.load({
           else if (payload.mode === 'manual' || payload.mode === 'auto') setFormMode(payload.mode);
           if (Number.isInteger(payload.autoEveryRounds)) setFormRounds(payload.autoEveryRounds);
           if (typeof payload.defaultPublic === 'boolean') setFormDefaultPublic(payload.defaultPublic);
+          if (typeof payload.topicalClear === 'boolean') setFormTopical(payload.topicalClear);
+          if (typeof payload.similarityThreshold === 'number') setFormThreshold(payload.similarityThreshold);
+          if (Number.isInteger(payload.keepRecentTurns)) setFormKeepRecent(payload.keepRecentTurns);
           const selected = payload?.selectedSession ?? null;
           setFormName(selected?.label ?? '');
           setFormPublic(selected?.public !== false);
@@ -558,6 +718,34 @@ window.__ModuleLoader__.load({
         return [...sessions, ...extras];
       }, [sessions, catalogRows]);
 
+      // Scope is a two-level directory: memory folders live inside the
+      // workspace that produced them, so the picker groups by workspace first
+      // instead of listing every conversation in one flat blob.
+      const workspaceGroups = React.useMemo(() => {
+        const groups = new Map();
+        for (const row of optionRows) {
+          // Rows without a folder key cannot be selected as a scope target.
+          if (!row.key) continue;
+          const workspace = typeof row.workspace === 'string' ? row.workspace : '';
+          if (!groups.has(workspace)) groups.set(workspace, []);
+          groups.get(workspace).push(row);
+        }
+        return [...groups.entries()]
+          .map(([workspace, rows]) => ({
+            workspace,
+            short: workspace === ''
+              ? t.scopeNoWorkspace
+              : (workspace.split(/[\\/]/).filter(Boolean).pop() || workspace),
+            rows,
+          }))
+          .sort((left, right) => {
+            if (left.workspace === right.workspace) return 0;
+            if (left.workspace === '') return 1;
+            if (right.workspace === '') return -1;
+            return left.workspace.localeCompare(right.workspace);
+          });
+      }, [optionRows, t]);
+
       const titleOf = (row) => titles[row?.sessionId] ?? '';
       const conversationName = (row) => {
         if (!row) return '';
@@ -580,9 +768,27 @@ window.__ModuleLoader__.load({
       const sharedNote = scope?.kind === 'session' && hasNothingHere && data?.shared?.hasData
         ? `${t.scopeShared}：过程记录 ${data.shared.counts?.staging ?? 0} 条，知识 ${data.shared.counts?.knowledge ?? 0} 篇。`
         : '';
+      const scopeIsSession = scope == null || scope.kind === 'session';
+      const currentKey = scope?.kind === 'session' ? (scope.key ?? null) : null;
+      const activeRow = (currentKey !== null
+        ? optionRows.find((row) => row.key === currentKey)
+        : optionRows.find((row) => row.current))
+        ?? null;
+      const activeWorkspace = typeof activeRow?.workspace === 'string' ? activeRow.workspace : '';
+      const conversationRows = workspaceGroups.find((group) => group.workspace === activeWorkspace)?.rows ?? [];
+      const pickConversation = (row) => {
+        if (!row || !row.key) return;
+        const next = { kind: 'session', key: row.key };
+        applyScope(next);
+        load(selectedRoot, next);
+      };
+      // 'auto' keeps the Host-decided current conversation; 'pick' jumps into
+      // the workspace/conversation selects below.
       const scopeValue = scope == null
-        ? 'session:'
-        : scope.kind === 'all' ? 'all' : scope.kind === 'shared' ? 'shared' : `session:${scope.key ?? ''}`;
+        ? 'auto'
+        : scope.kind === 'all' ? 'all'
+          : scope.kind === 'shared' ? 'shared'
+            : (scope.key ? 'pick' : 'auto');
 
       const copyPath = async () => {
         if (selectedRoot === '') return;
@@ -619,6 +825,9 @@ window.__ModuleLoader__.load({
               autoEnabled: formMode === 'auto',
               autoEveryRounds: Number(formRounds) || 5,
               defaultPublic: formDefaultPublic,
+              topicalClear: formTopical,
+              similarityThreshold: Number(formThreshold) || 0.06,
+              keepRecentTurns: Number(formKeepRecent) || 2,
             },
           });
           setNotice({ kind: 'ok', text: t.saved });
@@ -667,6 +876,9 @@ window.__ModuleLoader__.load({
         const needle = query.trim().toLowerCase();
         return String(doc.doc_id).toLowerCase().includes(needle)
           || String(doc.category).toLowerCase().includes(needle)
+          || String(doc.source ?? '').toLowerCase().includes(needle)
+          || (Array.isArray(doc.tags) ? doc.tags.join(' ') : '').toLowerCase().includes(needle)
+          || String(doc.url ?? '').toLowerCase().includes(needle)
           || String(doc.text).toLowerCase().includes(needle);
       });
 
@@ -708,6 +920,7 @@ window.__ModuleLoader__.load({
               h('summary', { style: styles.summary }, t.details),
               h('pre', { style: styles.pre }, row.state_text)))));
       } else if (tab === 'knowledge') {
+        const pending = Number(data?.knowledgePending ?? 0);
         content = h('div', { style: styles.list },
           h('div', { style: styles.actions },
             h('input', {
@@ -716,15 +929,22 @@ window.__ModuleLoader__.load({
               value: query,
               onChange: (event) => setQuery(event.target.value),
             }),
-            query !== '' ? h('button', { type: 'button', style: styles.button, onClick: () => setQuery('') }, t.clearSearch) : null),
+            query !== '' ? h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => setQuery('') }, t.clearSearch) : null),
+          h('p', { style: styles.hint },
+            pending > 0 ? `${t.knowledgePending}: ${pending}` : t.knowledgeHint),
           knowledge.length === 0
             ? h(Empty, { text: t.emptyKnowledge })
-            : knowledge.map((doc) => h('div', { key: `${doc.session_key ?? ''}:${doc.doc_id}`, style: styles.row },
+            : knowledge.map((doc) => h('div', { key: `${doc.session_key ?? ''}:${doc.doc_id}`, className: 'aim-row', style: styles.row },
               h('div', { style: styles.rowHead },
                 h('span', { style: { fontWeight: 600 } }, doc.doc_id),
                 h('span', { style: badgeStyle('pending') }, doc.category),
-                showSession && doc.session_label ? h('span', { style: badgeStyle('pending') }, doc.session_label) : null),
-              h('p', { style: styles.content }, doc.text))));
+                doc.source ? h('span', { style: badgeStyle('pending') }, doc.source) : null,
+                (doc.tags ?? []).map((tag) => h('span', { key: tag, style: styles.meta }, `#${tag}`)),
+                showSession && doc.session_label ? h('span', { style: badgeStyle('pending') }, doc.session_label) : null,
+                h('span', { style: { ...styles.meta, marginLeft: 'auto' } },
+                  `${t.evidence}: ${doc.evidence_count ?? 0}｜${formatTime(doc.updated_at || doc.created_at)}`)),
+              h('p', { style: styles.content }, doc.text),
+              doc.url ? h('p', { style: styles.hint }, `${t.sourceUrl}: ${doc.url}`) : null)));
       } else if (tab === 'decisions') {
         const rows = data?.decisions ?? [];
         content = rows.length === 0
@@ -759,13 +979,13 @@ window.__ModuleLoader__.load({
             h('p', { style: styles.hint }, t.contextRestoreHint))));
       }
 
-      return h('div', { style: styles.page },
+      return h('div', { className: 'aim-page', style: styles.page },
         h('div', { style: styles.header },
           h('div', null,
             h('h2', { style: styles.title }, t.title),
             h('p', { style: styles.subtitle }, t.subtitle)),
           h('div', { style: styles.actions },
-            h('label', { style: { ...styles.label, minWidth: '230px' } },
+            h('label', { style: { ...styles.label, minWidth: '190px' } },
               t.scopeLabel,
               h('select', {
                 style: styles.input,
@@ -778,17 +998,56 @@ window.__ModuleLoader__.load({
                     load(selectedRoot, next);
                     return;
                   }
-                  const key = value.startsWith('session:') ? value.slice('session:'.length) : '';
-                  const next = { kind: 'session', key: key === '' ? null : key };
-                  applyScope(next);
-                  load(selectedRoot, next);
+                  if (value === 'auto') {
+                    const next = { kind: 'session', key: null };
+                    applyScope(next);
+                    load(selectedRoot, next);
+                    return;
+                  }
+                  // "pick": stay on the current conversation when one is known,
+                  // otherwise start from the first saved conversation.
+                  pickConversation(activeRow ?? conversationRows[0] ?? null);
                 },
               },
-              scopeValue === 'session:' ? h('option', { value: 'session:' }, t.scopeAuto) : null,
-              optionRows.map((row) => h('option', { key: row.key || row.sessionId, value: `session:${row.key || row.sessionId}` },
-                `${row.current ? t.scopeCurrent : t.conversation} · ${conversationName(row)}${row.public === false ? `（${t.privateBadge}）` : ''}`)),
+              h('option', { value: 'auto' }, t.scopeAuto),
+              h('option', { value: 'pick' }, t.scopePick),
               h('option', { value: 'all' }, t.scopeAll),
               h('option', { value: 'shared' }, t.scopeShared))),
+            scopeIsSession
+              ? h('label', { style: { ...styles.label, minWidth: '190px' } },
+                t.scopeWorkspace,
+                h('select', {
+                  style: styles.input,
+                  value: workspaceGroups.some((group) => group.workspace === activeWorkspace)
+                    ? activeWorkspace
+                    : (workspaceGroups[0]?.workspace ?? ''),
+                  onChange: (event) => {
+                    const group = workspaceGroups.find((item) => item.workspace === event.target.value);
+                    pickConversation(group?.rows.find((row) => row.current) ?? group?.rows[0] ?? null);
+                  },
+                },
+                workspaceGroups.map((group) => h('option', {
+                  key: group.workspace,
+                  value: group.workspace,
+                  title: group.workspace === '' ? t.scopeNoWorkspace : group.workspace,
+                }, `${group.short}（${group.rows.length}）`))))
+              : null,
+            scopeIsSession
+              ? h('label', { style: { ...styles.label, minWidth: '210px' } },
+                t.scopeConversation,
+                h('select', {
+                  style: styles.input,
+                  value: currentKey ?? '',
+                  onChange: (event) => {
+                    pickConversation(conversationRows.find((row) => row.key === event.target.value) ?? null);
+                  },
+                },
+                h('option', { value: '' }, conversationRows.length === 0 ? t.scopeNoConversation : t.scopeChooseConversation),
+                conversationRows.map((row) => h('option', {
+                  key: row.key,
+                  value: row.key,
+                }, `${conversationName(row)}${row.current ? `（${t.scopeCurrent}）` : ''}${row.public === false ? `（${t.privateBadge}）` : ''}`))))
+              : null,
             h('label', { style: { ...styles.label, minWidth: '200px' } },
               t.root,
               h('select', {
@@ -805,6 +1064,7 @@ window.__ModuleLoader__.load({
               }, `${row.fixed ? t.fixedRoot : row.label}${row.root === selectedRoot ? '' : ` — ${row.root}`}`)))),
             h('button', {
               type: 'button',
+              className: busy ? 'aim-btn aim-pulse' : 'aim-btn',
               style: styles.button,
               disabled: busy,
               onClick: () => load(selectedRoot),
@@ -812,6 +1072,7 @@ window.__ModuleLoader__.load({
 
         notice !== null
           ? h('div', {
+            className: 'aim-notice',
             style: {
               ...styles.notice,
               color: notice.kind === 'err' ? colors.error : colors.success,
@@ -823,15 +1084,15 @@ window.__ModuleLoader__.load({
         error !== null
           ? h('div', { style: styles.card },
             h('p', { style: styles.hint }, `${t.loadFailed}: ${error}`),
-            h('button', { type: 'button', style: styles.button, onClick: () => load(selectedRoot) }, t.retry))
+            h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => load(selectedRoot) }, t.retry))
           : null,
 
         selectedRoot === ''
           ? h('div', { style: styles.card }, h('p', { style: styles.hint }, t.noRoot))
           : h('div', { style: styles.pathRow },
             h('code', { style: styles.path }, selectedRoot),
-            h('button', { type: 'button', style: styles.button, onClick: copyPath }, t.copy),
-            h('button', { type: 'button', style: styles.button, disabled: busy, onClick: reveal }, t.reveal)),
+            h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: copyPath }, t.copy),
+            h('button', { type: 'button', className: 'aim-btn', style: styles.button, disabled: busy, onClick: reveal }, t.reveal)),
 
         h('p', { style: styles.hint }, scopeHint),
         sharedNote !== '' ? h('p', { style: styles.hint }, sharedNote) : null,
@@ -857,14 +1118,16 @@ window.__ModuleLoader__.load({
                     type: 'button',
                     role: 'switch',
                     'aria-checked': formPublic,
-                    style: { ...styles.tab, ...(formPublic ? styles.tabOn : {}) },
+                    className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formPublic ? styles.switchOptionOn : {}) },
                     onClick: () => setFormPublic(true),
                   }, t.conversationOpen),
                   h('button', {
                     type: 'button',
                     role: 'switch',
                     'aria-checked': !formPublic,
-                    style: { ...styles.tab, ...(!formPublic ? styles.tabOn : {}) },
+                    className: 'aim-switch',
+              style: { ...styles.switchOption, ...(!formPublic ? styles.switchOptionOn : {}) },
                     onClick: () => setFormPublic(false),
                   }, t.conversationClosed)))),
             h('p', { style: styles.hint }, formPublic ? t.conversationOpenHintOn : t.conversationOpenHintOff),
@@ -876,6 +1139,7 @@ window.__ModuleLoader__.load({
             h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' } },
               h('button', {
                 type: 'button',
+                className: 'aim-btn',
                 style: styles.primary,
                 disabled: sessionSaving,
                 onClick: saveConversation,
@@ -890,14 +1154,27 @@ window.__ModuleLoader__.load({
           h(Tile, { label: t.counts.decisions, value: counts.decisions }),
           h(Tile, { label: t.counts.contexts, value: counts.contexts })),
 
-        h('div', { style: styles.tabs }, tabs.map((item) => h('button', {
-          key: item.id,
-          type: 'button',
-          style: { ...styles.tab, ...(tab === item.id ? styles.tabOn : {}) },
-          onClick: () => setTab(item.id),
-        }, item.label, h('span', { style: styles.tabCount }, String(item.count ?? 0))))),
+        h('div', { className: 'aim-tabs', style: styles.tabs, role: 'tablist' }, tabs.map((item) => {
+          const active = tab === item.id;
+          return h('button', {
+            key: item.id,
+            type: 'button',
+            role: 'tab',
+            'aria-selected': active,
+            title: (t.tabHints && t.tabHints[item.id]) || '',
+            style: { ...styles.tabBar, ...(active ? styles.tabBarOn : {}) },
+            onClick: () => setTab(item.id),
+          },
+          item.label,
+          h('span', { style: styles.tabCount }, String(item.count ?? 0)),
+          // The indicator exists only for the selected tab, so switching can
+          // never leave the previous tab's underline behind.
+          active ? h('span', { 'aria-hidden': 'true', className: 'aim-indicator', style: styles.tabBarIndicator }) : null);
+        })),
 
-        h('div', { style: styles.card }, content),
+        h('p', { style: styles.hint }, (t.tabHints && t.tabHints[tab]) || ''),
+
+        h('div', { key: tab, className: 'aim-content', style: styles.card }, content),
 
         h('section', { style: styles.card },
           h('h3', { style: styles.cardTitle }, t.storageSettings),
@@ -907,14 +1184,16 @@ window.__ModuleLoader__.load({
               type: 'button',
               role: 'switch',
               'aria-checked': formMode === 'auto',
-              style: { ...styles.tab, ...(formMode === 'auto' ? styles.tabOn : {}) },
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formMode === 'auto' ? styles.switchOptionOn : {}) },
               onClick: () => setFormMode('auto'),
             }, t.switchOn),
             h('button', {
               type: 'button',
               role: 'switch',
               'aria-checked': formMode === 'manual',
-              style: { ...styles.tab, ...(formMode === 'manual' ? styles.tabOn : {}) },
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formMode === 'manual' ? styles.switchOptionOn : {}) },
               onClick: () => setFormMode('manual'),
             }, t.switchOff)),
           h('p', { style: styles.hint }, formMode === 'auto' ? t.modeHintAuto : t.modeHintManual),
@@ -936,17 +1215,62 @@ window.__ModuleLoader__.load({
               type: 'button',
               role: 'switch',
               'aria-checked': formDefaultPublic,
-              style: { ...styles.tab, ...(formDefaultPublic ? styles.tabOn : {}) },
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formDefaultPublic ? styles.switchOptionOn : {}) },
               onClick: () => setFormDefaultPublic(true),
             }, t.switchOn),
             h('button', {
               type: 'button',
               role: 'switch',
               'aria-checked': !formDefaultPublic,
-              style: { ...styles.tab, ...(!formDefaultPublic ? styles.tabOn : {}) },
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(!formDefaultPublic ? styles.switchOptionOn : {}) },
               onClick: () => setFormDefaultPublic(false),
             }, t.switchOff)),
           h('p', { style: styles.hint }, t.defaultPublicHint),
+          h('div', { style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.clearingTopic),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': formTopical,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formTopical ? styles.switchOptionOn : {}) },
+              onClick: () => setFormTopical(true),
+            }, t.switchOn),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': !formTopical,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(!formTopical ? styles.switchOptionOn : {}) },
+              onClick: () => setFormTopical(false),
+            }, t.switchOff)),
+          h('p', { style: styles.hint }, t.clearingHint),
+          formTopical
+            ? h('div', { style: styles.grid2 },
+              h('label', { style: styles.label },
+                t.clearingThreshold,
+                h('input', {
+                  style: styles.input,
+                  type: 'number',
+                  min: 0.01,
+                  max: 0.95,
+                  step: 0.01,
+                  value: formThreshold,
+                  onChange: (event) => setFormThreshold(event.target.value),
+                })),
+              h('label', { style: styles.label },
+                t.clearingKeep,
+                h('input', {
+                  style: styles.input,
+                  type: 'number',
+                  min: 1,
+                  max: 20,
+                  value: formKeepRecent,
+                  onChange: (event) => setFormKeepRecent(event.target.value),
+                })))
+            : null,
           h('p', { style: styles.hint }, t.storageHint),
           h('div', { style: styles.grid2 },
             h('label', { style: styles.label },
@@ -967,6 +1291,7 @@ window.__ModuleLoader__.load({
           h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' } },
             h('button', {
               type: 'button',
+              className: 'aim-btn',
               style: styles.primary,
               disabled: saving,
               onClick: saveConfig,
@@ -976,6 +1301,11 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots'],
       apply(clientCtx) {
+        if (typeof clientCtx.effect === 'function') {
+          clientCtx.effect(() => installMotionStyles());
+        } else {
+          installMotionStyles();
+        }
         clientCtx.slots.inject('sidebar.panellist', () => clientCtx.slots.register({
           name: 'sidebar.panellist',
           id: PANEL_ID,
