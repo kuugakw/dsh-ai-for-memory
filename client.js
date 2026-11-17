@@ -23,7 +23,7 @@ window.__ModuleLoader__.load({
       zh: {
         nav: 'AI 记忆',
         title: 'AI 记忆',
-        subtitle: '分层项目记忆：对话隔离 · 过程记录 · 归档 · 快照 · 知识 · 决策',
+        subtitle: '分层项目记忆：对话隔离 · 过程记录 · 归档 · 快照 · 知识库 · 决策',
         refresh: '刷新',
         loading: '加载中…',
         loadFailed: '读取记忆失败',
@@ -41,27 +41,57 @@ window.__ModuleLoader__.load({
         tabStaging: '过程记录',
         tabArchive: '归档',
         tabSnapshots: '快照',
-        tabKnowledge: '知识',
+        tabKnowledge: '知识库',
         tabDecisions: '决策',
         tabContexts: '上下文',
         tabHints: {
           staging: '过程记录：把「刚发生了什么」原样落下——决策、错误、界面事实、任务状态，一行一条。这是六层里唯一会持续追加的流水，先记下来，再决定归档到哪一类。',
           archive: '归档：把过程记录按类型收进固定的分类文件（界面事实 / 动作日志 / 决策理由 / 错误修复…）。归档是幂等的，重复执行只补缺失条目，所以可以随时再跑一次。',
           snapshots: '快照：保存「某一刻的精确状态对象」，需要时按 id 或名字原样取回。它不描述过程，只负责让你能把状态恢复成当时的样子。',
-          knowledge: '知识：从过程记录、归档、上下文三层里提炼出来的一句句结论，加上我或你直接写入的事实。八类分类、自带出处、同一条会自动合并。',
+          knowledge: '知识库：从过程记录、归档、上下文三层里提炼出来的一句句结论，加上我或你直接写入的事实。八类分类、自带出处、同一条会自动合并。',
           decisions: '决策：高风险或不可逆操作的正反理由与审查结果，带权重和结论。它回答「为什么当初这么定」，而不只是「做了什么」。',
           contexts: '上下文：对话窗口的存档。按话题相似度清出低相似度的老轮次之前，先把全文存到这里，随时可以用 aim_context restore 调回。',
         },
         emptyStaging: '还没有过程记录。',
         emptyArchive: '还没有归档记录。',
         emptySnapshots: '还没有快照。',
-        emptyKnowledge: '还没有知识文档。',
+        emptyKnowledge: '知识库还是空的。',
         knowledgePending: '待提炼',
-        knowledgeHint: '知识只存结论：三层里提炼出的用户规则/错误修复/决策理由，加上我或你直接写入的事实；每条都带分类与出处。新知识与已有知识或我的认知冲突时，会先问你，确认后才写入。',
+        knowledgeHint: '知识库只存结论：三层里提炼出的用户规则/错误修复/决策理由，加上我或你直接写入的事实；每条都带分类与出处。新内容与库中已有知识或我的认知冲突时，会先问你，确认后才写入。',
+        externalTitle: '外部模型（RAG 用）',
+        externalBase: 'API 地址',
+        externalModel: '模型名（可留空）',
+        externalTimeout: '超时（毫秒）',
+        externalHint: '主要用 Embedding 和 Rerank 模型：嵌入地址/模型 + 重排地址/模型留空就沿用主地址。三个开关打开后，归档靠「嵌入找分类 + 重排定胜负」，知识库靠「句子嵌入取最中心」，上下文靠「句子嵌入挑重点」。主地址只在显式调用 chat 时才用。测试连接会顺带检查 embed/rerank 是否启用。',
+        externalTest: '测试连接',
+        externalTesting: '测试中…',
+        externalOk: '连接正常',
+        externalFail: '连接失败',
+        externalEmbedBase: 'Embedding 地址（留空=主地址）',
+        externalEmbedModel: 'Embedding 模型',
+        externalRerankBase: 'Rerank 地址（留空=主地址）',
+        externalRerankModel: 'Rerank 模型',
+        externalSameAs: '留空沿用主地址',
+        capOk: '可用',
+        capMissing: '不可用',
+        modeArchive: '归档方式',
+        modeKnowledge: '知识库提炼',
+        modeContext: '上下文清理',
+        modeLocal: '本地规则',
+        modeExternal: '外部模型',
+        modeHint: '三个开关各自独立：本地规则离线、确定性、随时可用；外部模型交给任何 OpenAI 兼容服务（llama.cpp / Ollama / LM Studio / vLLM / 云端 API）做分类/提炼/摘要。外部调用失败时会自动退回本地规则，数据不会丢。',
+        modeNeedsServer: '已启用外部模型模式：请确认配置的 OpenAI 兼容服务可访问，否则对应操作会自动回退本地规则（结果里会注明）。',
+        modeLocalHint: '当前三层都用本地规则，不依赖任何外部服务。',
         evidence: '证据',
         sourceUrl: '出处',
         emptyDecisions: '还没有决策审查记录。',
         emptyContexts: '还没有上下文存档。',
+        expandAll: '全部展开',
+        collapseAll: '全部收起',
+        showMore: '显示更多',
+        listShown: '当前显示',
+        expandRow: '展开这条',
+        collapseRow: '收起这条',
         scopeLabel: '查看范围',
         scopeCurrent: '本对话',
         scopePick: '指定对话',
@@ -98,8 +128,22 @@ window.__ModuleLoader__.load({
         clearingThreshold: '相似度阈值（越大清得越狠）',
         clearingKeep: '始终保留最近几轮',
         clearingHint: '按话题相似度清理：以当轮与上轮为基准，相似度低的老轮次被清出，相似度高的原样保留；清出前先完整存档，随时可以 restore 调回。',
+        ragTitle: 'RAG 挂载（知识库检索）',
+        ragHintOn: '已挂载：aim_search 优先用外部嵌入 + 重排检索知识库，结果会标注「检索方式：RAG」；关掉即回到本地 BM25。',
+        ragHintOff: '未挂载：aim_search 用本地 BM25 + 哈希向量（离线可用）；打开后改用外部嵌入检索，可随时摘下来。',
+        ragBuild: '建立/更新 RAG 索引',
+        ragBuilding: '正在建索引…',
+        ragBuilt: '索引已更新，共',
+        ragBuildFail: '建索引失败',
+        ragIndexed: '索引：',
+        ragNoIndex: '尚未建立索引（先建一次）',
+        storageBase: 'JSON 文件：始终启用（唯一底座，先写 JSON 供审查与修正；SQL / RAG 都从它派生）',
+        storageSqlTitle: 'SQL 只读镜像（派生）',
+        storageSqlOn: '已启用：每次写入 JSON 后同步一份 knowledge/knowledge.sqlite，供 SQL 工具查询；关掉不影响 JSON，也不影响 RAG。',
+        storageSqlOff: '未启用：只写 JSON 底座；SQL 查询仍会从 JSON 临时建只读表，RAG 也不受影响。',
+        storageSqliteUnavailable: '当前 Node 不支持 node:sqlite（需要 Node 22.5+），会继续只用 JSON。',
         contextRestoreHint: '需要恢复时，在对话里让我执行 aim_context restore。',
-        searchPlaceholder: '搜索知识（id/正文/分类/来源/标签）',
+        searchPlaceholder: '搜索知识库（id/正文/分类/来源/标签）',
         clearSearch: '清空',
         state: '状态',
         time: '时间',
@@ -118,8 +162,9 @@ window.__ModuleLoader__.load({
         switchOn: '开',
         switchOff: '关',
         modeRounds: '每几轮自动整理',
+        modeUsage: '占用到百分之几时清理',
         modeHintManual: '自动整理已关闭；手动工具始终可用：aim_memory / aim_search / aim_decide / aim_context。',
-        modeHintAuto: '自动整理已开启：每 N 轮自动执行 摘要→归档→按话题相似度清理；手动工具仍然可用。',
+        modeHintAuto: '自动整理已开启：每 N 轮，或上下文占用达到设定百分比时，自动执行 摘要→归档→按话题相似度清理；两个条件任一满足就触发，手动工具仍然可用。',
         fixedPath: '记忆地址（绝对路径，留空=跟随项目）',
         dirName: '目录名（跟随项目时使用）',
         save: '保存设置',
@@ -130,7 +175,7 @@ window.__ModuleLoader__.load({
           staging: '过程记录',
           archive: '归档',
           snapshots: '快照',
-          knowledge: '知识',
+          knowledge: '知识库',
           decisions: '决策',
           contexts: '上下文',
         },
@@ -140,7 +185,7 @@ window.__ModuleLoader__.load({
       en: {
         nav: 'AI for Memory',
         title: 'AI for Memory',
-        subtitle: 'Layered project memory: per-conversation isolation · process log · archive · snapshots · knowledge · decisions',
+        subtitle: 'Layered project memory: per-conversation isolation · process log · archive · snapshots · knowledge base · decisions',
         refresh: 'Refresh',
         loading: 'Loading…',
         loadFailed: 'Failed to load memory',
@@ -158,7 +203,7 @@ window.__ModuleLoader__.load({
         tabStaging: 'Process log',
         tabArchive: 'Archive',
         tabSnapshots: 'Snapshots',
-        tabKnowledge: 'Knowledge',
+        tabKnowledge: 'Knowledge base',
         tabDecisions: 'Decisions',
         tabContexts: 'Contexts',
         tabHints: {
@@ -172,13 +217,43 @@ window.__ModuleLoader__.load({
         emptyStaging: 'No process records yet.',
         emptyArchive: 'Nothing archived yet.',
         emptySnapshots: 'No snapshots yet.',
-        emptyKnowledge: 'No knowledge documents yet.',
+        emptyKnowledge: 'The knowledge base is still empty.',
         knowledgePending: 'To distill',
         knowledgeHint: 'Knowledge stores conclusions only: user rules, error→fix pairs and decision reasons mined from the three layers, plus facts written by the model or the user. Each document carries a category and a source. When a new fact conflicts with stored knowledge or with the model’s own understanding, you are asked first and it is stored only after you agree.',
+        externalTitle: 'External model (for RAG)',
+        externalBase: 'API address',
+        externalModel: 'Model name (optional)',
+        externalTimeout: 'Timeout (ms)',
+        externalHint: 'Built around embedding and rerank models: the embedding address/model and the rerank address/model fall back to the main address when empty. With a switch on, archive = embedding picks the category and the reranker breaks ties, knowledge = the most central sentences by embedding, context = the most central sentences of the turns being cleared. The main address is only used for an explicit chat call. Test connection also reports whether embeddings and rerank are enabled.',
+        externalTest: 'Test connection',
+        externalTesting: 'Testing…',
+        externalOk: 'Connected',
+        externalFail: 'Connection failed',
+        externalEmbedBase: 'Embedding address (empty = main)',
+        externalEmbedModel: 'Embedding model',
+        externalRerankBase: 'Rerank address (empty = main)',
+        externalRerankModel: 'Rerank model',
+        externalSameAs: 'Empty uses the main address',
+        capOk: 'available',
+        capMissing: 'not available',
+        modeArchive: 'Archive mode',
+        modeKnowledge: 'Knowledge-base extraction',
+        modeContext: 'Context summary',
+        modeLocal: 'Local rules',
+        modeExternal: 'External model',
+        modeHint: 'The three switches are independent: local rules are offline, deterministic and always available; external mode hands classifying, mining and summarising to any OpenAI-compatible service (llama.cpp / Ollama / LM Studio / vLLM / hosted API). If the call fails the operation falls back to the local rules, so no data is lost.',
+        modeNeedsServer: 'External mode is on: make sure the configured OpenAI-compatible service is reachable, otherwise those operations fall back to the local rules (the result says so).',
+        modeLocalHint: 'All three layers currently use local rules and need no external service.',
         evidence: 'Evidence',
         sourceUrl: 'Source',
         emptyDecisions: 'No decision reviews yet.',
         emptyContexts: 'No archived contexts yet.',
+        expandAll: 'Expand all',
+        collapseAll: 'Collapse all',
+        showMore: 'Show more',
+        listShown: 'Showing',
+        expandRow: 'Expand this entry',
+        collapseRow: 'Collapse this entry',
         scopeLabel: 'Scope',
         scopeCurrent: 'This conversation',
         scopePick: 'Specific conversation',
@@ -216,7 +291,21 @@ window.__ModuleLoader__.load({
         clearingKeep: 'Always keep the last N turns',
         clearingHint: 'Topic-aware clearing: each older turn is compared with the current and previous turn. Turns that still share the topic stay verbatim; only the ones the conversation has left behind are cleared, and their full text is archived first so restore can always bring them back.',
         contextRestoreHint: 'To restore one, ask me in the chat to run aim_context restore.',
-        searchPlaceholder: 'Search knowledge (id, text, category, source, tag)',
+        ragTitle: 'RAG mount (knowledge search)',
+        ragHintOn: 'Mounted: aim_search uses external embeddings + rerank over the knowledge layer and marks results as RAG. Turn it off to go back to local BM25.',
+        ragHintOff: 'Not mounted: aim_search uses local BM25 + hashing vectors (offline). Turn it on to switch retrieval to the external embedding index; it can be unmounted at any time.',
+        ragBuild: 'Build / refresh RAG index',
+        ragBuilding: 'Building index…',
+        ragBuilt: 'Index updated:',
+        ragBuildFail: 'Index build failed',
+        ragIndexed: 'Index:',
+        ragNoIndex: 'No index yet (build once)',
+        storageBase: 'JSON files: always on (the single base; everything is written to JSON first for review and correction, and SQL / RAG are derived from it)',
+        storageSqlTitle: 'SQL read-only mirror (derived)',
+        storageSqlOn: 'On: every JSON write also syncs knowledge/knowledge.sqlite for SQL tools. Turning it off does not affect JSON or RAG.',
+        storageSqlOff: 'Off: JSON stays the only base; SQL queries still build a temporary read-only table from JSON, and RAG is unaffected.',
+        storageSqliteUnavailable: 'This Node build has no node:sqlite (Node 22.5+ required); JSON only.',
+        searchPlaceholder: 'Search the knowledge base (id, text, category, source, tag)',
         clearSearch: 'Clear',
         state: 'State',
         time: 'Time',
@@ -235,8 +324,9 @@ window.__ModuleLoader__.load({
         switchOn: 'On',
         switchOff: 'Off',
         modeRounds: 'Auto tidy every N rounds',
+        modeUsage: 'Clear at what percent of context',
         modeHintManual: 'Auto tidy is off; manual tools are always available: aim_memory / aim_search / aim_decide / aim_context.',
-        modeHintAuto: 'Auto tidy is on: every N turns it digests, archives and runs a topic-aware clear. Manual tools remain available.',
+        modeHintAuto: 'Auto tidy is on: it digests, archives and runs a topic-aware clear every N turns, or as soon as context usage reaches the set percentage. Either trigger suffices; manual tools remain available.',
         fixedPath: 'Memory path (absolute, empty = follow project)',
         dirName: 'Directory name (used when following the project)',
         save: 'Save settings',
@@ -494,6 +584,25 @@ window.__ModuleLoader__.load({
         padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '4px',
       },
       rowHead: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' },
+      // Collapsible log rows: header always visible, body rendered on demand.
+      logHead: {
+        display: 'flex', alignItems: 'flex-start', gap: '6px', width: '100%',
+        background: 'transparent', border: 'none', padding: 0, margin: 0,
+        color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer',
+      },
+      logHeadMain: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', flex: 1 },
+      logChevron: { color: colors.secondary, fontSize: '11px', lineHeight: '18px', width: '10px', flex: 'none' },
+      logBody: { display: 'flex', flexDirection: 'column', gap: '4px' },
+      logPreview: {
+        margin: 0, color: colors.secondary, fontSize: '12px',
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      },
+      logBar: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '8px' },
+      groupHead: {
+        display: 'flex', alignItems: 'center', gap: '6px', width: '100%',
+        background: 'transparent', border: 'none', padding: 0, color: 'inherit',
+        font: 'inherit', textAlign: 'left', cursor: 'pointer',
+      },
       content: { margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: '12.5px' },
       meta: { color: colors.secondary, fontSize: '11.5px', display: 'flex', gap: '10px', flexWrap: 'wrap' },
       badge: {
@@ -571,21 +680,61 @@ window.__ModuleLoader__.load({
       return h('p', { style: styles.empty }, props.text);
     }
 
+    /** One clipped preview line so a collapsed log row still says something. */
+    function clipPreview(text, max = 120) {
+      const value = String(text ?? '').replace(/\s+/g, ' ').trim();
+      return value.length > max ? `${value.slice(0, max)}…` : value;
+    }
+
+    /**
+     * A collapsible log row.
+     *
+     * Six layers of logs add up fast — a full process-record list is quickly
+     * thousands of pixels tall. The header always renders; the body only renders
+     * when the row is open. The owner of the open-key set decides what is open,
+     * which is what lets "expand all / collapse all" work across a whole tab.
+     */
+    function LogRow(props) {
+      const open = props.open === true;
+      return h('div', { className: 'aim-log', style: { ...styles.row, gap: '6px' } },
+        h('button', {
+          type: 'button',
+          className: 'aim-log-head',
+          'aria-expanded': open,
+          title: open ? t.collapseRow : t.expandRow,
+          onClick: () => props.onToggle(props.rowKey),
+          style: styles.logHead,
+        },
+          h('span', { style: styles.logChevron, 'aria-hidden': true }, open ? '▾' : '▸'),
+          h('span', { style: styles.logHeadMain }, props.head)),
+        open
+          ? h('div', { style: styles.logBody }, props.children)
+          : (props.preview ? h('p', { style: styles.logPreview }, clipPreview(props.preview)) : null));
+    }
+
     function EntryRow(props) {
       const row = props.row;
-      return h('div', { className: 'aim-row', style: styles.row },
-        h('div', { style: styles.rowHead },
-          row.kind ? h('span', { style: badgeStyle('pending') }, row.kind) : null,
-          row.risk ? h('span', { style: badgeStyle(row.risk) }, `${t.risk}: ${row.risk}`) : null,
-          row.category ? h('span', { style: badgeStyle('pending') }, row.category) : null,
+      return h(LogRow, {
+        rowKey: props.rowKey,
+        open: props.open,
+        onToggle: props.onToggle,
+        head: [
+          row.kind ? h('span', { key: 'kind', style: badgeStyle('pending') }, row.kind) : null,
+          row.risk ? h('span', { key: 'risk', style: badgeStyle(row.risk) }, `${t.risk}: ${row.risk}`) : null,
+          row.category ? h('span', { key: 'category', style: badgeStyle('pending') }, row.category) : null,
           props.showSession && row.session_label
-            ? h('span', { style: badgeStyle('pending') }, row.session_label)
+            ? h('span', { key: 'session', style: badgeStyle('pending') }, row.session_label)
             : null,
-          h('span', { style: { marginLeft: 'auto', color: colors.secondary, fontSize: '11.5px' } }, formatTime(row.timestamp))),
-        h('p', { style: styles.content }, row.content ?? ''),
-        row.source || row.dedup_id ? h('div', { style: styles.meta },
-          row.source ? h('span', null, `${t.source}: ${row.source}`) : null,
-          row.dedup_id ? h('span', { style: styles.mono }, row.dedup_id.slice(0, 10)) : null) : null);
+          h('span', { key: 'time', style: { marginLeft: 'auto', color: colors.secondary, fontSize: '11.5px' } }, formatTime(row.timestamp)),
+        ],
+        preview: row.content,
+        children: [
+          h('p', { key: 'content', style: styles.content }, row.content ?? ''),
+          row.source || row.dedup_id ? h('div', { key: 'meta', style: styles.meta },
+            row.source ? h('span', null, `${t.source}: ${row.source}`) : null,
+            row.dedup_id ? h('span', { style: styles.mono }, row.dedup_id.slice(0, 10)) : null) : null,
+        ],
+      });
     }
 
     /**
@@ -600,15 +749,41 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false);
       const [tab, setTab] = React.useState('staging');
       const [query, setQuery] = React.useState('');
+      // Log lists collapse: `openRows` holds the row keys the user opened and
+      // `listLimit` how many rows each list shows before "show more".
+      const [openRows, setOpenRows] = React.useState(() => new Set());
+      const [listLimit, setListLimit] = React.useState(8);
       const [notice, setNotice] = React.useState(null);
       const [formRoot, setFormRoot] = React.useState('');
       const [formDir, setFormDir] = React.useState('.ai-for-memory');
       const [formMode, setFormMode] = React.useState('manual');
       const [formRounds, setFormRounds] = React.useState(5);
+      // Percentage of the context window that also triggers a tidy, next to the
+      // every-N-rounds trigger (both coexist; default 70%).
+      const [formUsage, setFormUsage] = React.useState(70);
       const [formDefaultPublic, setFormDefaultPublic] = React.useState(true);
       const [formTopical, setFormTopical] = React.useState(true);
       const [formThreshold, setFormThreshold] = React.useState(0.06);
       const [formKeepRecent, setFormKeepRecent] = React.useState(2);
+      // RAG is mounted on the knowledge layer: the switch decides whether
+      // aim_search uses the vector index; building the index is a separate click.
+      const [formRagMount, setFormRagMount] = React.useState(false);
+      const [ragIndex, setRagIndex] = React.useState({ built: false, docs: 0, dim: 0, model: '', built_at: '' });
+      const [ragBusy, setRagBusy] = React.useState(false);
+      // Knowledge storage backend: 'json' (files) or 'sqlite' (queryable db).
+      const [formStorage, setFormStorage] = React.useState('json');
+      const [formExternalBase, setFormExternalBase] = React.useState('');
+      const [formExternalModel, setFormExternalModel] = React.useState('');
+      const [formExternalTimeout, setFormExternalTimeout] = React.useState(60000);
+      const [formEmbedBase, setFormEmbedBase] = React.useState('');
+      const [formEmbedModel, setFormEmbedModel] = React.useState('');
+      const [formRerankBase, setFormRerankBase] = React.useState('');
+      const [formRerankModel, setFormRerankModel] = React.useState('');
+      const [externalProbing, setExternalProbing] = React.useState(false);
+      const [externalStatus, setExternalStatus] = React.useState('');
+      const [formArchiveExternal, setFormArchiveExternal] = React.useState(false);
+      const [formKnowledgeExternal, setFormKnowledgeExternal] = React.useState(false);
+      const [formContextExternal, setFormContextExternal] = React.useState(false);
       const [formName, setFormName] = React.useState('');
       const [formPublic, setFormPublic] = React.useState(true);
       const [saving, setSaving] = React.useState(false);
@@ -669,10 +844,26 @@ window.__ModuleLoader__.load({
           if (typeof payload.autoEnabled === 'boolean') setFormMode(payload.autoEnabled ? 'auto' : 'manual');
           else if (payload.mode === 'manual' || payload.mode === 'auto') setFormMode(payload.mode);
           if (Number.isInteger(payload.autoEveryRounds)) setFormRounds(payload.autoEveryRounds);
+          if (Number.isInteger(payload.contextUsagePercent)) setFormUsage(payload.contextUsagePercent);
           if (typeof payload.defaultPublic === 'boolean') setFormDefaultPublic(payload.defaultPublic);
           if (typeof payload.topicalClear === 'boolean') setFormTopical(payload.topicalClear);
+          if (typeof payload.ragMount === 'boolean') setFormRagMount(payload.ragMount);
+          if (payload.ragIndex && typeof payload.ragIndex === 'object') setRagIndex(payload.ragIndex);
+          if (payload.knowledgeBackend === 'sqlite' || payload.knowledgeBackend === 'json') {
+            setFormStorage(payload.knowledgeBackend);
+          }
           if (typeof payload.similarityThreshold === 'number') setFormThreshold(payload.similarityThreshold);
           if (Number.isInteger(payload.keepRecentTurns)) setFormKeepRecent(payload.keepRecentTurns);
+          if (typeof payload.externalBaseUrl === 'string') setFormExternalBase(payload.externalBaseUrl);
+          if (typeof payload.externalModel === 'string') setFormExternalModel(payload.externalModel);
+          if (Number.isInteger(payload.externalTimeoutMs)) setFormExternalTimeout(payload.externalTimeoutMs);
+          if (typeof payload.externalEmbedBaseUrl === 'string') setFormEmbedBase(payload.externalEmbedBaseUrl);
+          if (typeof payload.externalEmbedModel === 'string') setFormEmbedModel(payload.externalEmbedModel);
+          if (typeof payload.externalRerankBaseUrl === 'string') setFormRerankBase(payload.externalRerankBaseUrl);
+          if (typeof payload.externalRerankModel === 'string') setFormRerankModel(payload.externalRerankModel);
+          if (typeof payload.archiveExternal === 'boolean') setFormArchiveExternal(payload.archiveExternal);
+          if (typeof payload.knowledgeExternal === 'boolean') setFormKnowledgeExternal(payload.knowledgeExternal);
+          if (typeof payload.contextExternal === 'boolean') setFormContextExternal(payload.contextExternal);
           const selected = payload?.selectedSession ?? null;
           setFormName(selected?.label ?? '');
           setFormPublic(selected?.public !== false);
@@ -766,7 +957,7 @@ window.__ModuleLoader__.load({
       const hasNothingHere = ['staging', 'archive', 'snapshots', 'knowledge', 'decisions', 'contexts']
         .every((key) => (counts[key] ?? 0) === 0);
       const sharedNote = scope?.kind === 'session' && hasNothingHere && data?.shared?.hasData
-        ? `${t.scopeShared}：过程记录 ${data.shared.counts?.staging ?? 0} 条，知识 ${data.shared.counts?.knowledge ?? 0} 篇。`
+        ? `${t.scopeShared}：过程记录 ${data.shared.counts?.staging ?? 0} 条，知识库 ${data.shared.counts?.knowledge ?? 0} 篇。`
         : '';
       const scopeIsSession = scope == null || scope.kind === 'session';
       const currentKey = scope?.kind === 'session' ? (scope.key ?? null) : null;
@@ -824,10 +1015,23 @@ window.__ModuleLoader__.load({
               directoryName: formDir.trim(),
               autoEnabled: formMode === 'auto',
               autoEveryRounds: Number(formRounds) || 5,
+              contextUsagePercent: Number(formUsage) || 70,
               defaultPublic: formDefaultPublic,
               topicalClear: formTopical,
+              ragMount: formRagMount,
+              knowledgeBackend: formStorage,
               similarityThreshold: Number(formThreshold) || 0.06,
               keepRecentTurns: Number(formKeepRecent) || 2,
+              externalBaseUrl: formExternalBase.trim(),
+              externalModel: formExternalModel.trim(),
+              externalTimeoutMs: Number(formExternalTimeout) || 60000,
+              externalEmbedBaseUrl: formEmbedBase.trim(),
+              externalEmbedModel: formEmbedModel.trim(),
+              externalRerankBaseUrl: formRerankBase.trim(),
+              externalRerankModel: formRerankModel.trim(),
+              archiveExternal: formArchiveExternal,
+              knowledgeExternal: formKnowledgeExternal,
+              contextExternal: formContextExternal,
             },
           });
           setNotice({ kind: 'ok', text: t.saved });
@@ -839,6 +1043,63 @@ window.__ModuleLoader__.load({
         }
       };
 
+      /** Ask the Host to probe the configured external model (any OpenAI-compatible API). */
+      const testExternal = async () => {
+        setExternalProbing(true);
+        setExternalStatus('');
+        try {
+          const payload = await callApi('/external?deep=1');
+          const probe = payload?.probe ?? {};
+          const parts = [probe.ok ? t.externalOk : t.externalFail];
+          if (probe.detail) parts.push(probe.detail);
+          if (probe.error) parts.push(probe.error);
+          const caps = probe.capabilities;
+          if (caps) {
+            parts.push(`embeddings ${caps.embeddings.ok ? t.capOk : t.capMissing}`);
+            parts.push(`rerank ${caps.rerank.ok ? t.capOk : t.capMissing}`);
+          }
+          setExternalStatus(parts.join(' | '));
+        } catch (error) {
+          setExternalStatus(`${t.externalFail}: ${String(error?.message ?? error)}`);
+        } finally {
+          setExternalProbing(false);
+        }
+      };
+      /** Build/refresh the RAG index for the currently visible scope. */
+      const buildRag = async () => {
+        setRagBusy(true);
+        setNotice(null);
+        try {
+          const payload = await callApi('/rag/index', {
+            method: 'POST',
+            body: {
+              root: selectedRoot,
+              scope: scope?.kind === 'shared' ? 'shared' : 'session',
+              session: data?.currentSessionId
+                || data?.selectedSession?.session_id
+                || (scope?.kind === 'session' ? scope?.key : '')
+                || '',
+            },
+          });
+          if (payload?.ok) {
+            setRagIndex({
+              built: true,
+              docs: payload.docs ?? payload.indexed ?? 0,
+              dim: payload.dim ?? 0,
+              model: payload.model ?? '',
+              built_at: payload.built_at ?? '',
+            });
+            setNotice({ kind: 'ok', text: `${t.ragBuilt}: ${payload.indexed ?? payload.docs ?? 0}` });
+            load(selectedRoot, scope);
+          } else {
+            setNotice({ kind: 'err', text: `${t.ragBuildFail}: ${payload?.error ?? ''}` });
+          }
+        } catch (error) {
+          setNotice({ kind: 'err', text: `${t.ragBuildFail}: ${String(error?.message ?? error)}` });
+        } finally {
+          setRagBusy(false);
+        }
+      };
       const saveConversation = async () => {
         if (!selectedSession) return;
         setSessionSaving(true);
@@ -881,44 +1142,116 @@ window.__ModuleLoader__.load({
           || String(doc.url ?? '').toLowerCase().includes(needle)
           || String(doc.text).toLowerCase().includes(needle);
       });
+      const keyOf = (sessionKey, id) => `${sessionKey ?? ''}:${id}`;
+      const rowOpen = (key) => openRows.has(key);
+      const toggleRow = (key) => setOpenRows((prev) => {
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      });
+      const openAll = (keys) => setOpenRows(new Set(keys));
+      const collapseAll = () => setOpenRows(new Set());
+      const moreRow = (key, total) => h('button', {
+        key,
+        type: 'button',
+        className: 'aim-btn',
+        style: styles.button,
+        onClick: () => setListLimit((value) => value + 8),
+      }, `${t.showMore}（${Math.min(listLimit, total)}/${total}）`);
+
+      // Every row key of the current tab, for "expand all".
+      const tabKeys = tab === 'staging'
+        ? (data?.staging ?? []).map((row) => keyOf(row.session_key, row.dedup_id))
+        : tab === 'archive'
+          ? (data?.archive ?? []).flatMap((group) => group.entries.map((row) => keyOf(row.session_key, row.dedup_id)))
+          : tab === 'snapshots'
+            ? (data?.snapshots ?? []).map((row) => keyOf(row.session_key, row.snapshot_id))
+            : tab === 'knowledge'
+              ? knowledge.map((doc) => keyOf(doc.session_key, doc.doc_id))
+              : tab === 'decisions'
+                ? (data?.decisions ?? []).map((row) => keyOf(row.session_key, row.decision_id))
+                : (data?.contexts ?? []).map((row) => keyOf(row.session_key, row.context_id));
 
       let content = null;
       if (tab === 'staging') {
-        content = (data?.staging ?? []).length === 0
+        const rows = data?.staging ?? [];
+        content = rows.length === 0
           ? h(Empty, { text: t.emptyStaging })
-          : h('div', { style: styles.list }, (data?.staging ?? []).map((row) => h(EntryRow, {
-            key: `${row.session_key ?? ''}:${row.dedup_id}`,
-            row,
-            showSession,
-          })));
-      } else if (tab === 'archive') {
-        const categories = data?.archive ?? [];
-        content = categories.length === 0
-          ? h(Empty, { text: t.emptyArchive })
-          : h('div', { style: styles.list }, categories.map((group) => h('section', { key: group.category, style: styles.card },
-            h('div', { style: styles.rowHead },
-              h('h3', { style: styles.cardTitle }, group.category),
-              h('span', { style: styles.tabCount }, String(group.count))),
-            group.entries.length === 0
-              ? h(Empty, { text: t.emptyArchive })
-              : h('div', { style: styles.list }, group.entries.map((row) => h(EntryRow, {
-                key: `${row.session_key ?? ''}:${row.dedup_id}`,
-                row: { ...row, category: group.category },
+          : h('div', { style: styles.list },
+            ...rows.slice(0, listLimit).map((row) => {
+              const key = keyOf(row.session_key, row.dedup_id);
+              return h(EntryRow, {
+                key,
+                rowKey: key,
+                open: rowOpen(key),
+                onToggle: toggleRow,
+                row,
                 showSession,
-              }))))));
+              });
+            }),
+            rows.length > listLimit ? moreRow('more-staging', rows.length) : null);
+      } else if (tab === 'archive') {
+        const groups = data?.archive ?? [];
+        content = groups.length === 0
+          ? h(Empty, { text: t.emptyArchive })
+          : h('div', { style: styles.list }, groups.map((group) => {
+            const groupKey = `cat:${group.category}`;
+            const groupOpen = rowOpen(groupKey);
+            const entries = group.entries ?? [];
+            return h('section', { key: group.category, style: styles.card },
+              h('button', {
+                type: 'button',
+                style: styles.groupHead,
+                'aria-expanded': groupOpen,
+                onClick: () => toggleRow(groupKey),
+              },
+                h('span', { style: styles.logChevron, 'aria-hidden': true }, groupOpen ? '▾' : '▸'),
+                h('h3', { style: { ...styles.cardTitle, margin: 0 } }, group.category),
+                h('span', { style: styles.tabCount }, String(group.count ?? entries.length))),
+              groupOpen
+                ? h('div', { style: { ...styles.list, marginTop: '8px' } },
+                  ...(entries.length === 0
+                    ? [h(Empty, { key: 'empty', text: t.emptyArchive })]
+                    : entries.slice(0, listLimit).map((row) => {
+                      const key = keyOf(row.session_key, row.dedup_id);
+                      return h(EntryRow, {
+                        key,
+                        rowKey: key,
+                        open: rowOpen(key),
+                        onToggle: toggleRow,
+                        row: { ...row, category: group.category },
+                        showSession,
+                      });
+                    })),
+                  entries.length > listLimit ? moreRow(`more-${group.category}`, entries.length) : null)
+                : null);
+          }));
       } else if (tab === 'snapshots') {
         const rows = data?.snapshots ?? [];
         content = rows.length === 0
           ? h(Empty, { text: t.emptySnapshots })
-          : h('div', { style: styles.list }, rows.map((row) => h('div', { key: `${row.session_key ?? ''}:${row.snapshot_id}`, style: styles.row },
-            h('div', { style: styles.rowHead },
-              h('span', { style: { fontWeight: 600 } }, row.snapshot_id),
-              showSession && row.session_label ? h('span', { style: badgeStyle('pending') }, row.session_label) : null,
-              h('span', { style: styles.meta }, `${t.size}: ${formatBytes(row.state_size)}`),
-              h('span', { style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.timestamp))),
-            h('details', { style: styles.details },
-              h('summary', { style: styles.summary }, t.details),
-              h('pre', { style: styles.pre }, row.state_text)))));
+          : h('div', { style: styles.list },
+            ...rows.slice(0, listLimit).map((row) => {
+              const key = keyOf(row.session_key, row.snapshot_id);
+              return h(LogRow, {
+                key,
+                rowKey: key,
+                open: rowOpen(key),
+                onToggle: toggleRow,
+                head: [
+                  h('span', { key: 'id', style: { fontWeight: 600 } }, row.snapshot_id),
+                  showSession && row.session_label
+                    ? h('span', { key: 'session', style: badgeStyle('pending') }, row.session_label)
+                    : null,
+                  h('span', { key: 'size', style: styles.meta }, `${t.size}: ${formatBytes(row.state_size)}`),
+                  h('span', { key: 'time', style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.timestamp)),
+                ],
+                preview: row.state_text,
+                children: h('pre', { style: styles.pre }, row.state_text),
+              });
+            }),
+            rows.length > listLimit ? moreRow('more-snapshots', rows.length) : null);
       } else if (tab === 'knowledge') {
         const pending = Number(data?.knowledgePending ?? 0);
         content = h('div', { style: styles.list },
@@ -934,49 +1267,102 @@ window.__ModuleLoader__.load({
             pending > 0 ? `${t.knowledgePending}: ${pending}` : t.knowledgeHint),
           knowledge.length === 0
             ? h(Empty, { text: t.emptyKnowledge })
-            : knowledge.map((doc) => h('div', { key: `${doc.session_key ?? ''}:${doc.doc_id}`, className: 'aim-row', style: styles.row },
-              h('div', { style: styles.rowHead },
-                h('span', { style: { fontWeight: 600 } }, doc.doc_id),
-                h('span', { style: badgeStyle('pending') }, doc.category),
-                doc.source ? h('span', { style: badgeStyle('pending') }, doc.source) : null,
-                (doc.tags ?? []).map((tag) => h('span', { key: tag, style: styles.meta }, `#${tag}`)),
-                showSession && doc.session_label ? h('span', { style: badgeStyle('pending') }, doc.session_label) : null,
-                h('span', { style: { ...styles.meta, marginLeft: 'auto' } },
-                  `${t.evidence}: ${doc.evidence_count ?? 0}｜${formatTime(doc.updated_at || doc.created_at)}`)),
-              h('p', { style: styles.content }, doc.text),
-              doc.url ? h('p', { style: styles.hint }, `${t.sourceUrl}: ${doc.url}`) : null)));
+            : h('div', { style: styles.list },
+              ...knowledge.slice(0, listLimit).map((doc) => {
+                const key = keyOf(doc.session_key, doc.doc_id);
+                return h(LogRow, {
+                  key,
+                  rowKey: key,
+                  open: rowOpen(key),
+                  onToggle: toggleRow,
+                  head: [
+                    h('span', { key: 'id', style: { fontWeight: 600 } }, doc.doc_id),
+                    h('span', { key: 'cat', style: badgeStyle('pending') }, doc.category),
+                    doc.source ? h('span', { key: 'src', style: badgeStyle('pending') }, doc.source) : null,
+                    (doc.tags ?? []).map((tag) => h('span', { key: `tag-${tag}`, style: styles.meta }, `#${tag}`)),
+                    showSession && doc.session_label
+                      ? h('span', { key: 'session', style: badgeStyle('pending') }, doc.session_label)
+                      : null,
+                    h('span', { key: 'time', style: { ...styles.meta, marginLeft: 'auto' } },
+                      `${t.evidence}: ${doc.evidence_count ?? 0}｜${formatTime(doc.updated_at || doc.created_at)}`),
+                  ],
+                  preview: doc.text,
+                  children: [
+                    h('p', { key: 'text', style: styles.content }, doc.text),
+                    doc.url ? h('p', { key: 'url', style: styles.hint }, `${t.sourceUrl}: ${doc.url}`) : null,
+                  ],
+                });
+              }),
+              knowledge.length > listLimit ? moreRow('more-knowledge', knowledge.length) : null));
       } else if (tab === 'decisions') {
         const rows = data?.decisions ?? [];
         content = rows.length === 0
           ? h(Empty, { text: t.emptyDecisions })
-          : h('div', { style: styles.list }, rows.map((row) => h('div', { key: `${row.session_key ?? ''}:${row.decision_id}`, style: styles.row },
-            h('div', { style: styles.rowHead },
-              h('span', { style: badgeStyle(row.outcome) }, row.outcome),
-              h('span', { style: badgeStyle(row.risk_level) }, `${t.risk}: ${row.risk_level}`),
-              showSession && row.session_label ? h('span', { style: badgeStyle('pending') }, row.session_label) : null,
-              h('span', { style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.timestamp))),
-            h('p', { style: styles.content }, row.decision),
-            row.reason ? h('p', { style: styles.hint }, `${t.reason}: ${row.reason}`) : null,
-            row.thesis || row.antithesis
-              ? h('div', { style: styles.meta },
-                row.thesis ? h('span', null, `${t.thesis}: ${row.thesis}`) : null,
-                row.antithesis ? h('span', null, `${t.antithesis}: ${row.antithesis}`) : null)
-              : null)));
+          : h('div', { style: styles.list },
+            ...rows.slice(0, listLimit).map((row) => {
+              const key = keyOf(row.session_key, row.decision_id);
+              return h(LogRow, {
+                key,
+                rowKey: key,
+                open: rowOpen(key),
+                onToggle: toggleRow,
+                head: [
+                  h('span', { key: 'outcome', style: badgeStyle(row.outcome) }, row.outcome),
+                  h('span', { key: 'risk', style: badgeStyle(row.risk_level) }, `${t.risk}: ${row.risk_level}`),
+                  showSession && row.session_label
+                    ? h('span', { key: 'session', style: badgeStyle('pending') }, row.session_label)
+                    : null,
+                  h('span', { key: 'time', style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.timestamp)),
+                ],
+                preview: row.decision,
+                children: [
+                  h('p', { key: 'decision', style: styles.content }, row.decision),
+                  row.reason ? h('p', { key: 'reason', style: styles.hint }, `${t.reason}: ${row.reason}`) : null,
+                  row.thesis || row.antithesis
+                    ? h('div', { key: 'thesis', style: styles.meta },
+                      row.thesis ? h('span', null, `${t.thesis}: ${row.thesis}`) : null,
+                      row.antithesis ? h('span', null, `${t.antithesis}: ${row.antithesis}`) : null)
+                    : null,
+                ],
+              });
+            }),
+            rows.length > listLimit ? moreRow('more-decisions', rows.length) : null);
       } else if (tab === 'contexts') {
         const rows = data?.contexts ?? [];
         content = rows.length === 0
           ? h(Empty, { text: t.emptyContexts })
-          : h('div', { style: styles.list }, rows.map((row) => h('div', { key: `${row.session_key ?? ''}:${row.context_id}`, style: styles.row },
-            h('div', { style: styles.rowHead },
-              h('span', { style: { fontWeight: 600 } }, row.context_id),
-              h('span', { style: badgeStyle('pending') }, row.label),
-              showSession && row.session_label ? h('span', { style: badgeStyle('pending') }, row.session_label) : null,
-              h('span', { style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.created_at))),
-            h('div', { style: styles.meta },
-              h('span', null, `第 ${row.turn_from}-${row.turn_to} 轮`),
-              h('span', null, `${row.turn_count} 轮`),
-              h('span', null, `${row.chars} 字符`)),
-            h('p', { style: styles.hint }, t.contextRestoreHint))));
+          : h('div', { style: styles.list },
+            ...rows.slice(0, listLimit).map((row) => {
+              const key = keyOf(row.session_key, row.context_id);
+              const meta = `第 ${row.turn_from}-${row.turn_to} 轮｜${row.turn_count} 轮｜${row.chars} 字符`;
+              return h(LogRow, {
+                key,
+                rowKey: key,
+                open: rowOpen(key),
+                onToggle: toggleRow,
+                head: [
+                  h('span', { key: 'id', style: { fontWeight: 600 } }, row.context_id),
+                  h('span', { key: 'label', style: badgeStyle('pending') }, row.label),
+                  showSession && row.session_label
+                    ? h('span', { key: 'session', style: badgeStyle('pending') }, row.session_label)
+                    : null,
+                  h('span', { key: 'time', style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.created_at)),
+                ],
+                preview: `${meta}｜${clipPreview(row.text ?? '', 80)}`,
+                children: [
+                  h('div', { key: 'meta', style: styles.meta },
+                    h('span', null, `第 ${row.turn_from}-${row.turn_to} 轮`),
+                    h('span', null, `${row.turn_count} 轮`),
+                    h('span', null, `${row.chars} 字符`)),
+                  row.model_summary
+                    ? h('p', { key: 'summary', style: styles.hint }, row.model_summary)
+                    : null,
+                  row.text ? h('pre', { key: 'text', style: styles.pre }, row.text) : null,
+                  h('p', { key: 'hint', style: styles.hint }, t.contextRestoreHint),
+                ],
+              });
+            }),
+            rows.length > listLimit ? moreRow('more-contexts', rows.length) : null);
       }
 
       return h('div', { className: 'aim-page', style: styles.page },
@@ -1174,7 +1560,154 @@ window.__ModuleLoader__.load({
 
         h('p', { style: styles.hint }, (t.tabHints && t.tabHints[tab]) || ''),
 
+        h('div', { style: styles.logBar },
+          h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => openAll(tabKeys) }, t.expandAll),
+          h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: collapseAll }, t.collapseAll),
+          h('span', { style: styles.hint }, `${t.listShown}：${Math.min(listLimit, tabKeys.length)}/${tabKeys.length}`),
+          tabKeys.length > listLimit
+            ? h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              onClick: () => setListLimit((value) => value + 8),
+            }, t.showMore)
+            : null),
+
         h('div', { key: tab, className: 'aim-content', style: styles.card }, content),
+
+        h('section', { style: styles.card },
+          h('h3', { style: styles.cardTitle }, t.externalTitle),
+          h('p', { style: styles.hint }, t.externalHint),
+          h('div', { style: styles.grid2 },
+            h('label', { style: styles.label },
+              t.externalBase,
+              h('input', {
+                style: styles.input,
+                type: 'url',
+                value: formExternalBase,
+                placeholder: 'http://127.0.0.1:8080',
+                onChange: (event) => setFormExternalBase(event.target.value),
+              })),
+            h('label', { style: styles.label },
+              t.externalModel,
+              h('input', {
+                style: styles.input,
+                value: formExternalModel,
+                placeholder: 'qwen2.5-7b-instruct',
+                onChange: (event) => setFormExternalModel(event.target.value),
+              })),
+            h('label', { style: styles.label },
+              t.externalTimeout,
+              h('input', {
+                style: styles.input,
+                type: 'number',
+                min: 1000,
+                max: 600000,
+                step: 1000,
+                value: formExternalTimeout,
+                onChange: (event) => setFormExternalTimeout(event.target.value),
+              })),
+            h('label', { style: styles.label },
+              t.externalEmbedBase,
+              h('input', {
+                style: styles.input,
+                type: 'url',
+                value: formEmbedBase,
+                placeholder: t.externalSameAs,
+                onChange: (event) => setFormEmbedBase(event.target.value),
+              })),
+            h('label', { style: styles.label },
+              t.externalEmbedModel,
+              h('input', {
+                style: styles.input,
+                value: formEmbedModel,
+                placeholder: 'bge-m3 / nomic-embed-text',
+                onChange: (event) => setFormEmbedModel(event.target.value),
+              })),
+            h('label', { style: styles.label },
+              t.externalRerankBase,
+              h('input', {
+                style: styles.input,
+                type: 'url',
+                value: formRerankBase,
+                placeholder: t.externalSameAs,
+                onChange: (event) => setFormRerankBase(event.target.value),
+              })),
+            h('label', { style: styles.label },
+              t.externalRerankModel,
+              h('input', {
+                style: styles.input,
+                value: formRerankModel,
+                placeholder: 'qwen3-reranker-0.6b',
+                onChange: (event) => setFormRerankModel(event.target.value),
+              }))),
+          h('div', { style: styles.actions },
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              disabled: externalProbing,
+              onClick: testExternal,
+            }, externalProbing ? t.externalTesting : t.externalTest),
+            externalStatus !== '' ? h('span', { style: styles.hint }, externalStatus) : null),
+          h('div', { style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.modeArchive),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': !formArchiveExternal,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formArchiveExternal ? {} : styles.switchOptionOn) },
+              onClick: () => setFormArchiveExternal(false),
+            }, t.modeLocal),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': formArchiveExternal,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formArchiveExternal ? styles.switchOptionOn : {}) },
+              onClick: () => setFormArchiveExternal(true),
+            }, t.modeExternal)),
+          h('div', { style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.modeKnowledge),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': !formKnowledgeExternal,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formKnowledgeExternal ? {} : styles.switchOptionOn) },
+              onClick: () => setFormKnowledgeExternal(false),
+            }, t.modeLocal),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': formKnowledgeExternal,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formKnowledgeExternal ? styles.switchOptionOn : {}) },
+              onClick: () => setFormKnowledgeExternal(true),
+            }, t.modeExternal)),
+          h('div', { style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.modeContext),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': !formContextExternal,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formContextExternal ? {} : styles.switchOptionOn) },
+              onClick: () => setFormContextExternal(false),
+            }, t.modeLocal),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': formContextExternal,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formContextExternal ? styles.switchOptionOn : {}) },
+              onClick: () => setFormContextExternal(true),
+            }, t.modeExternal)),
+          h('p', { style: styles.hint }, t.modeHint),
+          h('p', { style: styles.hint }, (formArchiveExternal || formKnowledgeExternal || formContextExternal)
+            ? t.modeNeedsServer
+            : t.modeLocalHint)),
 
         h('section', { style: styles.card },
           h('h3', { style: styles.cardTitle }, t.storageSettings),
@@ -1198,16 +1731,81 @@ window.__ModuleLoader__.load({
             }, t.switchOff)),
           h('p', { style: styles.hint }, formMode === 'auto' ? t.modeHintAuto : t.modeHintManual),
           formMode === 'auto'
-            ? h('label', { style: { ...styles.label, maxWidth: '220px' } },
-              t.modeRounds,
-              h('input', {
-                style: styles.input,
-                type: 'number',
-                min: 1,
-                max: 100,
-                value: formRounds,
-                onChange: (event) => setFormRounds(event.target.value),
-              }))
+            ? h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+              h('label', { style: { ...styles.label, maxWidth: '220px' } },
+                t.modeRounds,
+                h('input', {
+                  style: styles.input,
+                  type: 'number',
+                  min: 1,
+                  max: 100,
+                  value: formRounds,
+                  onChange: (event) => setFormRounds(event.target.value),
+                })),
+              h('label', { style: { ...styles.label, maxWidth: '220px' } },
+                t.modeUsage,
+                h('input', {
+                  style: styles.input,
+                  type: 'number',
+                  min: 1,
+                  max: 100,
+                  step: 5,
+                  value: formUsage,
+                  onChange: (event) => setFormUsage(event.target.value),
+                })))
+            : null,
+          h('div', { style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.ragTitle),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': formRagMount,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formRagMount ? styles.switchOptionOn : {}) },
+              onClick: () => setFormRagMount(true),
+            }, t.switchOn),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': !formRagMount,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(!formRagMount ? styles.switchOptionOn : {}) },
+              onClick: () => setFormRagMount(false),
+            }, t.switchOff)),
+          h('p', { style: styles.hint }, formRagMount ? t.ragHintOn : t.ragHintOff),
+          h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              disabled: ragBusy,
+              onClick: buildRag,
+            }, ragBusy ? t.ragBuilding : t.ragBuild),
+            h('span', { style: styles.hint }, ragIndex?.built
+              ? `${t.ragIndexed} ${ragIndex.docs} 篇 · ${ragIndex.dim}d · ${ragIndex.model || 'local'}`
+              : t.ragNoIndex)),
+          h('p', { style: { ...styles.hint, margin: '8px 0 0' } }, t.storageBase),
+          h('div', { style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.storageSqlTitle),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': formStorage === 'sqlite',
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formStorage === 'sqlite' ? styles.switchOptionOn : {}) },
+              onClick: () => setFormStorage('sqlite'),
+            }, t.switchOn),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': formStorage === 'json',
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formStorage === 'json' ? styles.switchOptionOn : {}) },
+              onClick: () => setFormStorage('json'),
+            }, t.switchOff)),
+          h('p', { style: styles.hint }, formStorage === 'sqlite' ? t.storageSqlOn : t.storageSqlOff),
+          formStorage === 'sqlite' && data?.knowledgeStorage?.sqliteAvailable === false
+            ? h('p', { style: styles.hint }, t.storageSqliteUnavailable)
             : null,
           h('div', { style: styles.modeRow },
             h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.defaultPublic),

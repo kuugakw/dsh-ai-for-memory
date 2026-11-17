@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Per-conversation layered project memory for DeepSeek Harness, rewritten from ai-game-for-memory: isolated conversation stores, a shared layer, cross-conversation search, process log, archive, snapshots, similarity-based context clearing with restorable archives, risk-reviewed decisions, and a text knowledge layer that asks before overwriting a conflicting fact. Test build.",
+  "description": "Per-conversation layered project memory for DeepSeek Harness, rewritten from ai-game-for-memory: isolated conversation stores, a shared layer, cross-conversation search, process log, archive, snapshots, similarity-based context clearing with restorable archives, context-usage auto tidy, risk-reviewed decisions, and a knowledge base with JSON base files, an optional SQL read-only mirror, RAG retrieval over an OpenAI-compatible embedding/rerank service, and a query router that sends metrics to Text-to-SQL and fuzzy questions to vectors. Test build.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -51,7 +51,12 @@
     "memory",
     "snapshot",
     "bm25",
-    "decision-review"
+    "decision-review",
+    "rag",
+    "embeddings",
+    "rerank",
+    "sqlite",
+    "text-to-sql"
   ],
   "license": "MIT"
 }

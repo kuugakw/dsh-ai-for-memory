@@ -7,13 +7,33 @@ import test from 'node:test';
 import { MemoryStore } from '../lib/store.js';
 import { MemoryScopes, sessionKey } from '../lib/scopes.js';
 import { decodeWorkspaceBucket, encodeWorkspace, resolveWorkspacePath, workspaceIndex } from '../lib/dsh-workspace.js';
+import {
+  chat, embed, listModels, normalizeExternal, parseEmbeddingResponse, parseRerankResponse,
+  probe, resolveBaseUrl,
+} from '../lib/external.js';
+import {
+  classifyRecord,
+  extractFacts,
+  parseCategoryReply,
+  parseKnowledgeReply,
+  parseSummaryReply,
+  summarizeTurns,
+} from '../lib/external-ops.js';
 import { evaluateDecision } from '../lib/decision.js';
+import {
+  buildRagIndex, cosine, ragCandidates, ragStats, readRagIndex, rerankCandidates,
+} from '../lib/rag.js';
+import { knowledgeDatabasePath, sqliteAvailable } from '../lib/knowledge-sqlite.js';
+import {
+  formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
+} from '../lib/knowledge-query.js';
 import { search, tokenize } from '../lib/retrieval.js';
 import { CATEGORIES, hourKey } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { collectTurnDigest } from '../lib/auto.js';
 import { buildContextSnapshot } from '../lib/context.js';
 import { contentTokens, selectTurnsByTopic, topicSimilarity } from '../lib/similarity.js';
+import { exceedsUsageThreshold, formatPressure, usagePercentOf } from '../lib/pressure.js';
 import {
   candidatesFromDecision, candidatesFromRecord, candidatesFromTurn, findDuplicate,
   knowledgeKey, normalizeCategory, normalizeSource, stripInjectedText, withTokens,
@@ -234,7 +254,7 @@ test('tools are registered and executable against the session workspace', async 
       get: () => undefined,
     };
     apply(ctx, {});
-    assert.deepEqual(registered.map((tool) => tool.name), ['aim_memory', 'aim_search', 'aim_decide', 'aim_context']);
+    assert.deepEqual(registered.map((tool) => tool.name), ['aim_memory', 'aim_search', 'aim_decide', 'aim_context', 'aim_ask']);
     for (const tool of registered) {
       assert.equal(tool.parameters.type, 'object');
       assert.ok(tool.output.render);
@@ -1119,6 +1139,7 @@ test('config validator bounds auto settings', () => {
   const defaults = normalizeConfig({});
   assert.equal(defaults.autoEnabled, false);
   assert.equal(defaults.autoEveryRounds, 5);
+  assert.equal(defaults.contextUsagePercent, 70);
   assert.equal(defaults.maxContextChars, 30000);
   assert.equal(defaults.defaultPublic, true);
   assert.equal(defaults.topicalClear, true);
@@ -1133,12 +1154,32 @@ test('config validator bounds auto settings', () => {
   assert.ok(validator({ autoEnabled: 'yes' }).issues);
   assert.ok(validator({ autoEveryRounds: 0 }).issues);
   assert.ok(validator({ autoEveryRounds: 101 }).issues);
+  assert.equal(validator({ contextUsagePercent: 85 }).value.contextUsagePercent, 85);
+  assert.ok(validator({ contextUsagePercent: 0 }).issues);
+  assert.ok(validator({ contextUsagePercent: 101 }).issues);
+  assert.ok(validator({ contextUsagePercent: 70.5 }).issues);
   assert.ok(validator({ maxContextChars: 500 }).issues);
   assert.ok(validator({ keepRecentTurns: 0 }).issues);
   assert.ok(validator({ keepRecentTurns: 2.5 }).issues);
   assert.ok(validator({ similarityThreshold: 1.5 }).issues);
   assert.ok(validator({ similarityThreshold: 'high' }).issues);
   assert.ok(validator({ topicalClear: 'yes' }).issues);
+});
+
+test('context pressure triggers only when measured usage reaches the threshold', () => {
+  const measured = { pressureTokens: 70000, contextWindow: 100000 };
+  assert.equal(usagePercentOf(measured), 70);
+  assert.equal(exceedsUsageThreshold(measured, 70), true);
+  assert.equal(exceedsUsageThreshold(measured, 70.1), false);
+  assert.equal(exceedsUsageThreshold({ pressureTokens: 30000, contextWindow: 100000 }, 70), false);
+  // Unmeasured sessions must never look like 0% or trigger a clear.
+  assert.equal(usagePercentOf(null), null);
+  assert.equal(usagePercentOf({}), null);
+  assert.equal(usagePercentOf({ pressureTokens: 10, contextWindow: 0 }), null);
+  assert.equal(exceedsUsageThreshold(null, 70), false);
+  assert.equal(exceedsUsageThreshold(measured, 0), false);
+  assert.match(formatPressure(measured), /^70%（70000\/100000 tokens）$/);
+  assert.match(formatPressure(null), /未知/);
 });
 
 test('config validator accepts defaults and rejects wrong types', () => {
@@ -1503,4 +1544,513 @@ test('a fact that disagrees with stored knowledge waits for the user', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('external client speaks the llama.cpp OpenAI-compatible protocol', async () => {
+  const calls = [];
+  const fakeFetch = async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({
+      model: 'qwen',
+      choices: [{ message: { role: 'assistant', content: '你好' }, finish_reason: 'stop' }],
+      usage: { total_tokens: 12 },
+    }), { status: 200 });
+  };
+  const config = normalizeExternal({ baseUrl: 'http://127.0.0.1:8080/', model: 'qwen', timeoutMs: 5000 });
+  assert.equal(config.baseUrl, 'http://127.0.0.1:8080');
+
+  const result = await chat(config, { prompt: '你好', system: '你是助手', maxTokens: 64 }, fakeFetch);
+  assert.equal(result.ok, true);
+  assert.equal(result.text, '你好');
+  assert.equal(result.usage.total_tokens, 12);
+  assert.equal(calls[0].url, 'http://127.0.0.1:8080/v1/chat/completions');
+  assert.equal(calls[0].body.model, 'qwen');
+  assert.deepEqual(calls[0].body.messages, [
+    { role: 'system', content: '你是助手' },
+    { role: 'user', content: '你好' },
+  ]);
+  assert.equal(calls[0].body.max_tokens, 64);
+  assert.equal(calls[0].body.stream, false);
+
+  // an empty prompt never reaches the network
+  const empty = await chat(config, { prompt: '   ' }, fakeFetch);
+  assert.equal(empty.ok, false);
+  assert.equal(calls.length, 1);
+});
+
+test('external client turns failures into readable messages', async () => {
+  const rejecting = async () => new Response(
+    JSON.stringify({ error: { message: 'model not loaded' } }),
+    { status: 400 },
+  );
+  const failed = await chat(normalizeExternal({}), { prompt: 'hi' }, rejecting);
+  assert.equal(failed.ok, false);
+  assert.ok(failed.error.includes('400'));
+  assert.ok(failed.error.includes('model not loaded'));
+
+  const hanging = async (url, init) => new Promise((resolve, reject) => {
+    init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+  });
+  const timedOut = await chat(normalizeExternal({ timeoutMs: 1000 }), { prompt: 'hi' }, hanging);
+  assert.equal(timedOut.ok, false);
+  assert.ok(timedOut.error.includes('超时'));
+
+  const unreachable = async () => {
+    throw Object.assign(new Error('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+  };
+  const offline = await chat(normalizeExternal({}), { prompt: 'hi' }, unreachable);
+  assert.equal(offline.ok, false);
+  assert.ok(offline.error.includes('ECONNREFUSED'));
+  assert.ok(offline.error.includes('llama.cpp'));
+});
+
+test('external embeddings keep input order and explain a missing --embeddings', async () => {
+  const embedding = async (url, init) => {
+    assert.equal(url, 'http://127.0.0.1:8080/v1/embeddings');
+    const body = JSON.parse(init.body);
+    const count = Array.isArray(body.input) ? body.input.length : 1;
+    return new Response(JSON.stringify({
+      data: Array.from({ length: count }, (_, index) => ({ embedding: [0.1, 0.2, index] })),
+    }), { status: 200 });
+  };
+  const vectors = await embed(normalizeExternal({}), ['a', 'b'], embedding);
+  assert.equal(vectors.ok, true);
+  assert.equal(vectors.vectors.length, 2);
+  assert.equal(vectors.vectors[1][2], 1);
+
+  const wrong = async () => new Response(JSON.stringify({ data: [{ embedding: [0.1] }] }), { status: 200 });
+  const missing = await embed(normalizeExternal({}), ['a', 'b'], wrong);
+  assert.equal(missing.ok, false);
+  assert.ok(missing.error.includes('--embeddings'));
+});
+
+test('probe falls back from /health to /v1/models', async () => {
+  const fakeFetch = async (url) => {
+    if (url.endsWith('/health')) return new Response('not found', { status: 404 });
+    return new Response(JSON.stringify({ data: [{ id: 'qwen2.5-7b' }] }), { status: 200 });
+  };
+  const result = await probe(normalizeExternal({}), fakeFetch);
+  assert.equal(result.ok, true);
+  assert.equal(result.via, 'models');
+  assert.deepEqual(result.models, ['qwen2.5-7b']);
+});
+
+test('base URLs resolve for servers with and without /v1', () => {
+  assert.equal(resolveBaseUrl('http://127.0.0.1:8080').api, 'http://127.0.0.1:8080/v1');
+  assert.equal(resolveBaseUrl('http://127.0.0.1:8080/').api, 'http://127.0.0.1:8080/v1');
+  assert.equal(resolveBaseUrl('https://api.openai.com/v1').api, 'https://api.openai.com/v1');
+  assert.equal(resolveBaseUrl('https://api.openai.com/v1/').server, 'https://api.openai.com');
+  assert.equal(resolveBaseUrl('https://api.openai.com/v1/embeddings').api, 'https://api.openai.com/v1');
+  assert.equal(resolveBaseUrl('http://host:8080/v1/chat/completions').api, 'http://host:8080/v1');
+  assert.equal(resolveBaseUrl('http://host:8080/v1/rerank').server, 'http://host:8080');
+  // A non-OpenAI mount path is preserved instead of guessing /v1.
+  assert.equal(resolveBaseUrl('http://host:8080/embed').api, 'http://host:8080/embed/v1');
+});
+
+test('embedding and rerank payloads accept every protocol shape', () => {
+  assert.deepEqual(parseEmbeddingResponse({ data: [{ embedding: [1, 2] }] }).vectors, [[1, 2]]);
+  assert.deepEqual(parseEmbeddingResponse({ embeddings: [[1, 2], [3, 4]] }).vectors, [[1, 2], [3, 4]]);
+  assert.deepEqual(parseEmbeddingResponse([[1, 2], [3, 4]]).vectors, [[1, 2], [3, 4]]);
+  assert.deepEqual(parseEmbeddingResponse({ data: [{ embedding: ['x'] }] }).vectors, []);
+  assert.deepEqual(parseRerankResponse([{ index: 1, score: 0.2 }, { index: 0, score: 0.9 }]),
+    [{ index: 0, score: 0.9 }, { index: 1, score: 0.2 }]);
+  assert.deepEqual(parseRerankResponse({ results: [{ index: 0, relevance_score: 0.7 }] }), [{ index: 0, score: 0.7 }]);
+  assert.deepEqual(parseRerankResponse({ data: [{ index: 2, score: 0.1 }] }), [{ index: 2, score: 0.1 }]);
+});
+
+test('a base URL ending in /v1 is not doubled', async () => {
+  const seen = [];
+  const fake = async (url) => {
+    seen.push(url);
+    return new Response(JSON.stringify({ data: [{ embedding: [0.5, 0.5] }] }), { status: 200 });
+  };
+  const vectors = await embed(normalizeExternal({ baseUrl: 'https://api.example.com/v1' }), 'hello', fake);
+  assert.equal(vectors.ok, true);
+  assert.deepEqual(seen, ['https://api.example.com/v1/embeddings']);
+});
+
+test('unversioned embedding servers (TEI shape) are reached via fallback', async () => {
+  const seen = [];
+  const fake = async (url) => {
+    seen.push(url);
+    if (url.endsWith('/v1/embeddings')) return new Response('not found', { status: 404 });
+    if (url.endsWith('/embeddings')) return new Response(JSON.stringify([[0.25, 0.75]]), { status: 200 });
+    return new Response('nope', { status: 404 });
+  };
+  const vectors = await embed(normalizeExternal({ baseUrl: 'http://127.0.0.1:9000' }), 'x', fake);
+  assert.equal(vectors.ok, true);
+  assert.deepEqual(vectors.vectors, [[0.25, 0.75]]);
+  assert.deepEqual(seen, ['http://127.0.0.1:9000/v1/embeddings', 'http://127.0.0.1:9000/embeddings']);
+});
+
+test('listModels tolerates a bare array of models', async () => {
+  const fake = async (url) => {
+    assert.equal(url, 'https://api.example.com/v1/models');
+    return new Response(JSON.stringify([{ id: 'm1' }, { id: 'm2' }]), { status: 200 });
+  };
+  const result = await listModels(normalizeExternal({ baseUrl: 'https://api.example.com/v1' }), fake);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.models, ['m1', 'm2']);
+});
+
+test('external replies are parsed defensively', () => {
+  // fenced JSON, prose around it, and a bare category name all work
+  assert.equal(parseCategoryReply('```json\n{"category":"ui_facts"}\n```'), 'ui_facts');
+  assert.equal(parseCategoryReply('我觉得这条应该归到 errors_fixes 吧'), null);
+  assert.equal(parseCategoryReply('{"category":"errors_fixes"}'), 'errors_fixes');
+  assert.equal(parseCategoryReply('errors_fixes'), 'errors_fixes');
+  assert.equal(parseCategoryReply('{"category":"nonsense"}'), null);
+  assert.equal(parseCategoryReply('{"category":"UI-FACTS"}'), 'ui_facts');
+
+  const facts = parseKnowledgeReply(JSON.stringify([
+    { text: '知识写入前先查冲突。', category: 'errors_fixes' },
+    { text: '知识写入前先查冲突。', category: 'errors_fixes' },
+    { text: '分类不认识就落到第一类。', category: 'whatever' },
+    { text: '  ', category: 'ui_facts' },
+    { text: 'x'.repeat(400), category: 'ui_facts' },
+  ]));
+  assert.equal(facts.length, 3);
+  assert.equal(facts[1].category, 'project_facts');
+  assert.equal(facts[2].text.length, 200);
+
+  const wrapped = parseKnowledgeReply('说明如下：\n{"facts":[{"text":"面板范围是两级目录","category":"ui_facts"}]}');
+  assert.equal(wrapped.length, 1);
+  assert.equal(wrapped[0].category, 'ui_facts');
+
+  assert.equal(parseSummaryReply('{"summary":"做了还原点","topics":["还原点"]}').summary, '做了还原点');
+  assert.equal(parseSummaryReply('纯文本摘要').summary, '纯文本摘要');
+  assert.equal(parseSummaryReply(''), null);
+});
+
+test('external classify uses embeddings, then rerank when available', async () => {
+  // Deterministic fake embedding: count a few keyword groups per text.
+  const GROUPS = [['面板', '截图', '界面'], ['bug', '修复', '报错'], ['决定', '因为', '取舍'], ['工具', 'api', '命令']];
+  const vec = (value) => GROUPS.map((words) => words.reduce((sum, word) => (String(value).includes(word) ? sum + 1 : sum), 0));
+  const seen = [];
+  const fake = async (url, init) => {
+    seen.push(url);
+    if (url.endsWith('/v1/embeddings')) {
+      const body = JSON.parse(init.body);
+      const inputs = Array.isArray(body.input) ? body.input : [body.input];
+      return new Response(JSON.stringify({ data: inputs.map((input) => ({ embedding: vec(input) })) }), { status: 200 });
+    }
+    return new Response(JSON.stringify({
+      results: [{ index: 0, relevance_score: 0.9 }, { index: 1, relevance_score: 0.1 }],
+    }), { status: 200 });
+  };
+  const config = normalizeExternal({});
+  const picked = await classifyRecord(config, { kind: 'state', content: '面板截图显示按钮位置' }, fake);
+  assert.equal(picked.ok, true);
+  assert.equal(picked.category, 'ui_facts');
+  assert.equal(picked.via, 'rerank');
+  assert.ok(seen.some((url) => url.endsWith('/v1/embeddings')));
+  assert.ok(seen.some((url) => url.endsWith('/v1/rerank')));
+
+  // Without a reranker the embedding result still wins (404 falls through).
+  const noRerank = async (url, init) => {
+    if (!url.endsWith('/v1/embeddings')) return new Response('nope', { status: 404 });
+    const body = JSON.parse(init.body);
+    const inputs = Array.isArray(body.input) ? body.input : [body.input];
+    return new Response(JSON.stringify({ data: inputs.map((input) => ({ embedding: vec(input) })) }), { status: 200 });
+  };
+  const embeddingOnly = await classifyRecord(config, { kind: 'state', content: '修复了 bug 和报错' }, noRerank);
+  assert.equal(embeddingOnly.ok, true);
+  assert.equal(embeddingOnly.via, 'embedding');
+  assert.equal(embeddingOnly.category, 'errors_fixes');
+});
+
+test('external extract and summary are extractive and fail closed', async () => {
+  const vec = (value) => {
+    const groups = [['面板', '截图'], ['bug', '修复'], ['决定', '因为'], ['必须', '不要']];
+    return groups.map((words) => words.reduce((sum, word) => (String(value).includes(word) ? sum + 1 : sum), 0));
+  };
+  const fake = async (url, init) => {
+    const body = JSON.parse(init.body);
+    const inputs = Array.isArray(body.input) ? body.input : [body.input];
+    return new Response(JSON.stringify({ data: inputs.map((input) => ({ embedding: vec(input) })) }), { status: 200 });
+  };
+  const config = normalizeExternal({});
+  const mined = await extractFacts(config, [
+    '面板范围改成两级目录。',
+    '面板范围改成两级目录。',
+    '修 bug 的时候要先复现。',
+    '决定用本地规则兜底因为模型可能挂。',
+  ].join(''), fake);
+  assert.equal(mined.ok, true);
+  assert.ok(mined.items.length >= 2);
+  for (const item of mined.items) {
+    assert.ok(['project_facts', 'ui_facts', 'errors_fixes', 'decisions_reasoning', 'tools_apis', 'workflow_rules', 'external_sources', 'open_questions'].includes(item.category));
+  }
+
+  const summary = await summarizeTurns(config, [
+    { turn: 1, user: '把面板的查看范围改成两层。', assistant: '已经改成范围到工作区再到对话。' },
+  ], fake);
+  assert.equal(summary.ok, true);
+  assert.ok(summary.summary.includes('范围') || summary.summary.includes('工作区'));
+
+  const offline = async () => { throw Object.assign(new Error('fetch failed'), { cause: { code: 'ECONNREFUSED' } }); };
+  assert.equal((await classifyRecord(config, { content: '正文' }, offline)).ok, false);
+  assert.equal((await extractFacts(config, '正文内容足够长的一句话。', offline)).ok, false);
+  assert.equal((await summarizeTurns(config, [{ turn: 1, user: 'a', assistant: 'b' }], offline)).ok, false);
+});
+
+test('archive honours model-chosen categories and ignores unknown ones', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-archive-override-'));
+  const store = new MemoryStore(dir);
+  store.init();
+  const first = store.stage({ kind: 'action', content: '第一条记录' });
+  const second = store.stage({ kind: 'action', content: '第二条记录' });
+  const stats = store.archive({ categories: { [first.dedup_id]: 'ui_maps', [second.dedup_id]: 'not_a_category' } });
+  assert.equal(stats.archived, 2);
+  const uiMaps = store.archiveEntries('ui_maps', 20);
+  assert.equal(uiMaps.length, 1);
+  assert.equal(uiMaps[0].content, '第一条记录');
+  // the unknown override falls back to the kind-based route
+  const actions = store.archiveEntries('action_logs', 20);
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].content, '第二条记录');
+});
+
+test('probe deep reports embedding and rerank capabilities', async () => {
+  const fake = async (url, init) => {
+    if (url.endsWith('/health')) return new Response('{"status":"ok"}', { status: 200 });
+    if (url.endsWith('/v1/embeddings')) {
+      const body = JSON.parse(init.body);
+      const inputs = Array.isArray(body.input) ? body.input : [body.input];
+      return new Response(JSON.stringify({ data: inputs.map(() => ({ embedding: [1, 0, 0] })) }), { status: 200 });
+    }
+    if (url.endsWith('/v1/rerank')) {
+      return new Response(JSON.stringify({ results: [{ index: 0, relevance_score: 0.5 }] }), { status: 200 });
+    }
+    return new Response('no', { status: 404 });
+  };
+  const result = await probe(normalizeExternal({}), fake, { deep: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.capabilities.embeddings.ok, true);
+  assert.equal(result.capabilities.rerank.ok, true);
+  assert.ok(result.endpoints.embeddings.startsWith('http://127.0.0.1:8080'));
+
+  // A server without --embeddings still gets a useful verdict.
+  const noEmbed = async (url) => (url.endsWith('/health')
+    ? new Response('{"status":"ok"}', { status: 200 })
+    : new Response('missing', { status: 404 }));
+  const plain = await probe(normalizeExternal({}), noEmbed, { deep: true });
+  assert.equal(plain.capabilities.embeddings.ok, false);
+  assert.equal(plain.capabilities.rerank.ok, false);
+});
+
+test('RAG index embeds once, reuses unchanged docs and prunes removed ones', async () => {
+  const root = tempRoot();
+  const docs = [
+    { doc_id: 'k_a', text: '面板截图显示按钮位置', category: 'ui_facts', source: 'agent', updated_at: '2026-01-01' },
+    { doc_id: 'k_b', text: '超时先重试三次', category: 'errors_fixes', source: 'agent', updated_at: '2026-01-02' },
+  ];
+  const store = { root, documents: () => docs };
+  let requests = 0;
+  const fake = async (url, init) => {
+    requests += 1;
+    assert.ok(url.endsWith('/embeddings'), `unexpected URL ${url}`);
+    const body = JSON.parse(init.body);
+    const inputs = Array.isArray(body.input) ? body.input : [body.input];
+    return new Response(JSON.stringify({
+      data: inputs.map((text) => ({ embedding: [text.length, 1, 0] })),
+    }), { status: 200 });
+  };
+  const endpoint = normalizeExternal({});
+  const built = await buildRagIndex(store, endpoint, { fetchImpl: fake });
+  assert.equal(built.ok, true);
+  assert.equal(built.indexed, 2);
+  assert.equal(built.embedded, 2);
+  assert.equal(readRagIndex(root).docs.k_a.hash.length > 0, true);
+  assert.equal(ragStats(root).docs, 2);
+
+  // Nothing changed: no embedding request at all.
+  const before = requests;
+  const again = await buildRagIndex(store, endpoint, { fetchImpl: fake });
+  assert.equal(again.embedded, 0);
+  assert.equal(requests, before);
+
+  // Changed text is re-embedded; a removed document disappears from the index.
+  docs[1] = { ...docs[1], text: '超时重试两次即可' };
+  docs.push({ doc_id: 'k_c', text: '新的知识', category: 'project_facts', source: 'user', updated_at: '2026-01-03' });
+  const changed = await buildRagIndex(store, endpoint, { fetchImpl: fake });
+  assert.equal(changed.embedded, 2);
+  assert.equal(ragStats(root).docs, 3);
+  const removedStore = { root, documents: () => docs.filter((doc) => doc.doc_id !== 'k_c') };
+  const pruned = await buildRagIndex(removedStore, endpoint, { fetchImpl: fake });
+  assert.equal(pruned.removed, 1);
+  assert.equal(ragStats(root).docs, 2);
+});
+
+test('RAG embedding failure leaves the previous index intact', async () => {
+  const root = tempRoot();
+  const store = { root, documents: () => [{ doc_id: 'k_a', text: 'old', category: 'ui_facts', source: 'agent' }] };
+  const good = async () => new Response(JSON.stringify({ data: [{ embedding: [1, 0] }] }), { status: 200 });
+  const first = await buildRagIndex(store, normalizeExternal({}), { fetchImpl: good });
+  assert.equal(first.ok, true);
+  const oldHash = readRagIndex(root).docs.k_a.hash;
+  store.documents = () => [{ doc_id: 'k_a', text: 'new', category: 'ui_facts', source: 'agent' }];
+  const failing = async () => new Response(JSON.stringify({ error: { message: 'down' } }), { status: 500 });
+  const failed = await buildRagIndex(store, normalizeExternal({}), { fetchImpl: failing });
+  assert.equal(failed.ok, false);
+  assert.equal(readRagIndex(root).docs.k_a.hash, oldHash);
+});
+
+test('RAG candidates honour the category filter and rerank falls back to embeddings', async () => {
+  const root = tempRoot();
+  const docs = [
+    { doc_id: 'k_a', text: 'aaaa', category: 'ui_facts', source: 'agent' },
+    { doc_id: 'k_b', text: 'bbbb', category: 'errors_fixes', source: 'agent' },
+  ];
+  const store = { root, documents: () => docs };
+  const fake = async (url, init) => {
+    if (url.endsWith('/embeddings')) {
+      const body = JSON.parse(init.body);
+      const inputs = Array.isArray(body.input) ? body.input : [body.input];
+      return new Response(JSON.stringify({ data: inputs.map((text) => ({ embedding: [text.length, 0, 0] })) }), { status: 200 });
+    }
+    return new Response('nope', { status: 404 });
+  };
+  await buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake });
+  const all = ragCandidates(store, [4, 0, 0], { topK: 5 });
+  assert.equal(all.ok, true);
+  assert.equal(all.candidates.length, 2);
+  const filtered = ragCandidates(store, [4, 0, 0], { topK: 5, category: 'ui_facts' });
+  assert.equal(filtered.candidates.length, 1);
+  assert.equal(filtered.candidates[0].doc.doc_id, 'k_a');
+  assert.equal(cosine([1, 0], [1, 0]), 1);
+  // The rerank endpoint is missing: the embedding order must still be returned.
+  const reranked = await rerankCandidates(normalizeExternal({}), 'aaaa', all.candidates, {
+    topK: 1,
+    fetchImpl: fake,
+  });
+  assert.equal(reranked.ok, true);
+  assert.equal(reranked.via, 'embedding');
+  assert.equal(reranked.hits.length, 1);
+});
+
+test('knowledge backend config accepts json / sqlite and rejects unknown values', () => {
+  assert.equal(normalizeConfig({}).knowledgeBackend, 'json');
+  assert.equal(normalizeConfig({ knowledgeBackend: 'sqlite' }).knowledgeBackend, 'sqlite');
+  assert.equal(normalizeConfig({ knowledgeBackend: 'sql' }).knowledgeBackend, 'sqlite');
+  const validator = Config['~standard'].validate;
+  assert.equal(validator({ knowledgeBackend: 'sqlite' }).value.knowledgeBackend, 'sqlite');
+  assert.ok(validator({ knowledgeBackend: 'mysql' }).issues);
+});
+
+test('SQLite knowledge backend imports JSON rows, mirrors writes and deletes', (t) => {
+  if (!sqliteAvailable()) {
+    t.skip('node:sqlite is unavailable on this Node build');
+    return;
+  }
+  const root = tempRoot();
+  const jsonStore = new MemoryStore(root).init();
+  jsonStore.remember({ doc_id: 'k_old', text: '旧的 JSON 知识', category: 'ui_facts', source: 'user' });
+
+  const store = new MemoryStore(root, { knowledgeBackend: 'sqlite' });
+  assert.equal(store.knowledgeBackend, 'sqlite');
+  // First open imports existing JSON documents, so nothing written before the
+  // switch disappears.
+  assert.equal(store.documents().length, 1);
+
+  const written = store.remember({
+    doc_id: 'k_new',
+    text: '写进 SQLite 的知识',
+    category: 'errors_fixes',
+    source: 'agent',
+  });
+  assert.equal(written.merged, false);
+  assert.equal(store.documents().length, 2);
+
+  const dbFile = knowledgeDatabasePath(root);
+  assert.equal(fs.existsSync(dbFile), true);
+  const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
+  const db = new DatabaseSync(dbFile);
+  const rows = db.prepare('SELECT doc_id FROM knowledge_docs ORDER BY doc_id').all();
+  db.close();
+  assert.deepEqual(rows.map((row) => row.doc_id), ['k_new', 'k_old']);
+
+  // The JSON mirror keeps a switch back to the file backend lossless.
+  const back = new MemoryStore(root);
+  assert.equal(back.knowledgeBackend, 'json');
+  assert.equal(back.documents().length, 2);
+  const info = store.knowledgeBackendInfo();
+  assert.equal(info.source, 'json');
+  assert.equal(info.sqlMirror, true);
+
+  // JSON alone decides what the knowledge base contains: a row written only
+  // into the SQL mirror must not appear in documents(), because SQLite is a
+  // derived read-only view rather than a second source of truth.
+  const dbOnly = new DatabaseSync(dbFile);
+  dbOnly.prepare('INSERT INTO knowledge_docs (doc_id, text) VALUES (?, ?)').run('k_sql_only', 'SQL only');
+  dbOnly.close();
+  assert.equal(store.documents().some((doc) => doc.doc_id === 'k_sql_only'), false);
+  assert.equal(store.documents().length, 2);
+
+  const removed = store.forgetKnowledge('k_new');
+  assert.equal(removed.deleted, true);
+  assert.equal(store.documents().length, 1);
+  assert.equal(back.documents().length, 1);
+});
+
+test('query router sends metrics to SQL and fuzzy questions to vectors', () => {
+  assert.equal(routeKnowledgeQuery('知识一共有多少条').route, 'sql');
+  assert.equal(routeKnowledgeQuery('按分类统计知识数量').route, 'sql');
+  assert.equal(routeKnowledgeQuery('k_5ec4c66a 是什么').route, 'sql');
+  assert.equal(routeKnowledgeQuery('最近 3 条知识').route, 'sql');
+  assert.equal(routeKnowledgeQuery('如何清理上下文').route, 'vector');
+  assert.equal(routeKnowledgeQuery('错误修复有多少条，相关文档有哪些').route, 'hybrid');
+  assert.equal(translateToSql('知识一共有多少条').kind, 'count');
+  assert.equal(translateToSql('按分类统计知识数量').kind, 'group');
+  assert.equal(translateToSql('k_5ec4c66a 是什么').kind, 'exact');
+  assert.equal(translateToSql('最近 3 条知识').kind, 'recent');
+  assert.equal(translateToSql('如何清理上下文'), null);
+});
+
+test('raw SQL is accepted only as one read-only statement', () => {
+  assert.equal(isSafeSelect('SELECT COUNT(*) FROM knowledge_docs'), true);
+  assert.equal(isSafeSelect('select * from knowledge_docs where category = ?'), true);
+  assert.equal(isSafeSelect('DELETE FROM knowledge_docs'), false);
+  assert.equal(isSafeSelect('SELECT 1; DROP TABLE knowledge_docs'), false);
+  assert.equal(isSafeSelect('SELECT * FROM knowledge_docs;'), true);
+  assert.equal(translateToSql('DELETE FROM knowledge_docs'), null);
+});
+
+test('SQL route answers counts and groups from the JSON base', (t) => {
+  if (!sqliteAvailable()) {
+    t.skip('node:sqlite is unavailable on this Node build');
+    return;
+  }
+  const store = new MemoryStore(tempRoot()).init();
+  store.remember({ doc_id: 'k_abc12345', text: '界面按钮位置', category: 'ui_facts', source: 'agent' });
+  store.remember({ doc_id: 'k_b', text: '超时重试三次', category: 'errors_fixes', source: 'user' });
+  store.remember({ doc_id: 'k_c', text: '发布前跑测试', category: 'errors_fixes', source: 'user' });
+
+  const total = runSqlQuery(store, '知识一共有多少条');
+  assert.equal(total.ok, true);
+  assert.equal(total.rows[0].n, 3);
+
+  const grouped = runSqlQuery(store, '按分类统计知识数量');
+  assert.equal(grouped.ok, true);
+  const byCategory = Object.fromEntries(grouped.rows.map((row) => [row.label, row.n]));
+  assert.equal(byCategory.errors_fixes, 2);
+  assert.equal(byCategory.ui_facts, 1);
+
+  // Category filter must produce valid SQL (`WHERE` after `FROM`).
+  const filteredCount = runSqlQuery(store, '错误修复有多少条');
+  assert.equal(filteredCount.ok, true);
+  assert.equal(filteredCount.rows[0].n, 2);
+
+  const exact = runSqlQuery(store, 'k_abc12345 是什么');
+  assert.equal(exact.ok, true);
+  assert.equal(exact.rows[0].doc_id, 'k_abc12345');
+
+  const output = formatSqlResult('知识一共有多少条', total);
+  assert.match(output, /检索路由：SQL/);
+  assert.match(output, /n=3/);
+
+  // The same query works against a merged document list with origin labels.
+  const merged = store.documents().map((doc) => ({ ...doc, origin: '本对话' }));
+  const mergedTotal = runSqlQuery(merged, '知识一共有多少条');
+  assert.equal(mergedTotal.rows[0].n, 3);
 });
