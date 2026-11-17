@@ -48,7 +48,7 @@ window.__ModuleLoader__.load({
           staging: '过程记录：把「刚发生了什么」原样落下——决策、错误、界面事实、任务状态，一行一条。这是六层里唯一会持续追加的流水，先记下来，再决定归档到哪一类。',
           archive: '归档：把过程记录按类型收进固定的分类文件（界面事实 / 动作日志 / 决策理由 / 错误修复…）。归档是幂等的，重复执行只补缺失条目，所以可以随时再跑一次。',
           snapshots: '快照：保存「某一刻的精确状态对象」，需要时按 id 或名字原样取回。它不描述过程，只负责让你能把状态恢复成当时的样子。',
-          knowledge: '知识库：从过程记录、归档、上下文三层里提炼出来的一句句结论，加上我或你直接写入的事实。八类分类、自带出处、同一条会自动合并。',
+          knowledge: '知识库：从过程记录、归档、上下文三层里提炼出来的一句句结论，加上我或你直接写入的事实。九类分类（其中「事故」incidents 是独立类型）、自带出处、同一条会自动合并。',
           decisions: '决策：高风险或不可逆操作的正反理由与审查结果，带权重和结论。它回答「为什么当初这么定」，而不只是「做了什么」。',
           contexts: '上下文：对话窗口的存档。按话题相似度清出低相似度的老轮次之前，先把全文存到这里，随时可以用 aim_context restore 调回。',
         },
@@ -58,6 +58,16 @@ window.__ModuleLoader__.load({
         emptyKnowledge: '知识库还是空的。',
         knowledgePending: '待提炼',
         knowledgeHint: '知识库只存结论：三层里提炼出的用户规则/错误修复/决策理由，加上我或你直接写入的事实；每条都带分类与出处。新内容与库中已有知识或我的认知冲突时，会先问你，确认后才写入。',
+        exportButton: '导出',
+        exportClose: '收起导出',
+        exportKnowledge: '知识库（JSON / Markdown）',
+        exportSql: 'SQL 镜像（.sqlite）',
+        exportRag: 'RAG 索引',
+        exportFormat: '知识库格式',
+        exportRun: '导出所选',
+        exportPick: '至少选择一种导出类型',
+        exportStarted: '已开始下载 {n} 个文件。',
+        exportHint: '勾选任意组合：知识库（可选 JSON 无损 / Markdown 可读）、SQL 镜像（完整 .sqlite）、RAG 索引（向量文件）。导出是完整副本，不裁剪、不遗忘，浏览器直接下载到你选定的位置。',
         externalTitle: '外部模型（RAG 用）',
         externalBase: 'API 地址',
         externalModel: '模型名（可留空）',
@@ -72,6 +82,13 @@ window.__ModuleLoader__.load({
         externalRerankBase: 'Rerank 地址（留空=主地址）',
         externalRerankModel: 'Rerank 模型',
         externalSameAs: '留空沿用主地址',
+        externalPreset: '常用服务（云端 / 本地）',
+        externalApiKey: '主 API Key',
+        externalEmbedApiKey: 'Embedding API Key（留空=主 Key）',
+        externalRerankApiKey: 'Rerank API Key（留空=主 Key）',
+        externalKeySaved: '已保存，留空保持不变，填 - 清除',
+        externalKeyEmpty: '未设置（云端服务通常必填）',
+        externalCloudHint: '云端服务：选一个预设或填 https 地址，再填 API Key。Key 只保存在本机，面板只显示是否已保存，留空不覆盖、填 - 清除；嵌入/重排可用不同服务商，各填自己的地址与 Key。支持 OpenAI、DeepSeek、SiliconFlow、百炼、智谱、Kimi、火山方舟、Cohere、Jina 以及本地 Ollama / LM Studio / llama.cpp。',
         capOk: '可用',
         capMissing: '不可用',
         modeArchive: '归档方式',
@@ -129,6 +146,7 @@ window.__ModuleLoader__.load({
         clearingKeep: '始终保留最近几轮',
         clearingHint: '按话题相似度清理：以当轮与上轮为基准，相似度低的老轮次被清出，相似度高的原样保留；清出前先完整存档，随时可以 restore 调回。',
         ragTitle: 'RAG 挂载（知识库检索）',
+        ragNeedModels: '启用 RAG 需要同时填写 Embedding 模型和 Rerank 模型（在下方「外部模型」区设置）；缺一个都不能挂载。',
         ragHintOn: '已挂载：aim_search 优先用外部嵌入 + 重排检索知识库，结果会标注「检索方式：RAG」；关掉即回到本地 BM25。',
         ragHintOff: '未挂载：aim_search 用本地 BM25 + 哈希向量（离线可用）；打开后改用外部嵌入检索，可随时摘下来。',
         ragBuild: '建立/更新 RAG 索引',
@@ -136,6 +154,7 @@ window.__ModuleLoader__.load({
         ragBuilt: '索引已更新，共',
         ragBuildFail: '建索引失败',
         ragIndexed: '索引：',
+        ragStale: '嵌入模型或地址已变化，旧索引维度可能不兼容；请点「建立/更新索引」重建后再检索。',
         ragNoIndex: '尚未建立索引（先建一次）',
         storageBase: 'JSON 文件：始终启用（唯一底座，先写 JSON 供审查与修正；SQL / RAG 都从它派生）',
         storageSqlTitle: 'SQL 只读镜像（派生）',
@@ -163,6 +182,10 @@ window.__ModuleLoader__.load({
         switchOff: '关',
         modeRounds: '每几轮自动整理',
         modeUsage: '占用到百分之几时清理',
+        snapshotTitle: '自动快照',
+        snapshotHint: '默认开启：每 N 轮把最近的上下文窗口存成快照，默认每 5 轮、最多 10 个。超过上限时按相似度清理——相似度高的旧快照先删，差异大的保留；快照与自动整理开关互相独立，关掉整理仍会留快照。',
+        snapshotEvery: '快照间隔（轮）',
+        snapshotMax: '快照上限（个）',
         modeHintManual: '自动整理已关闭；手动工具始终可用：aim_memory / aim_search / aim_decide / aim_context。',
         modeHintAuto: '自动整理已开启：每 N 轮，或上下文占用达到设定百分比时，自动执行 摘要→归档→按话题相似度清理；两个条件任一满足就触发，手动工具仍然可用。',
         fixedPath: '记忆地址（绝对路径，留空=跟随项目）',
@@ -210,7 +233,7 @@ window.__ModuleLoader__.load({
           staging: 'Process log: records what just happened, verbatim — decisions, errors, UI facts, task state, one line each. It is the only layer that keeps appending; capture first, classify later.',
           archive: 'Archive: files those records into fixed categories (UI facts, action logs, decision reasons, error fixes…). Archiving is idempotent — re-running only fills in what is missing.',
           snapshots: 'Snapshots: an exact state object saved at one moment, restored later by id or name. It does not describe the process; it makes the state recoverable.',
-          knowledge: 'Knowledge: one-sentence conclusions distilled from the three layers, plus facts written by the model or the user. Eight categories, provenance on every document, duplicates merged.',
+          knowledge: 'Knowledge: one-sentence conclusions distilled from the three layers, plus facts written by the model or the user. Nine categories (incidents are their own type), provenance on every document, duplicates merged.',
           decisions: 'Decisions: the thesis, antithesis, weights and outcome of risky or irreversible operations — they answer "why this was chosen", not just "what was done".',
           contexts: 'Contexts: archived conversation windows. Before the topic-aware clear removes low-similarity older turns their full text lands here, and aim_context restore brings it back.',
         },
@@ -220,6 +243,16 @@ window.__ModuleLoader__.load({
         emptyKnowledge: 'The knowledge base is still empty.',
         knowledgePending: 'To distill',
         knowledgeHint: 'Knowledge stores conclusions only: user rules, error→fix pairs and decision reasons mined from the three layers, plus facts written by the model or the user. Each document carries a category and a source. When a new fact conflicts with stored knowledge or with the model’s own understanding, you are asked first and it is stored only after you agree.',
+        exportButton: 'Export',
+        exportClose: 'Close export',
+        exportKnowledge: 'Knowledge base (JSON / Markdown)',
+        exportSql: 'SQL mirror (.sqlite)',
+        exportRag: 'RAG index',
+        exportFormat: 'Knowledge format',
+        exportRun: 'Export selected',
+        exportPick: 'Pick at least one export type',
+        exportStarted: 'Started downloading {n} file(s).',
+        exportHint: 'Pick any combination: knowledge base (JSON lossless / Markdown readable), SQL mirror (full .sqlite), RAG index (vector file). The export is a complete copy — nothing trimmed or forgotten — and the browser saves it where you choose.',
         externalTitle: 'External model (for RAG)',
         externalBase: 'API address',
         externalModel: 'Model name (optional)',
@@ -234,6 +267,13 @@ window.__ModuleLoader__.load({
         externalRerankBase: 'Rerank address (empty = main)',
         externalRerankModel: 'Rerank model',
         externalSameAs: 'Empty uses the main address',
+        externalPreset: 'Common providers (cloud / local)',
+        externalApiKey: 'Main API key',
+        externalEmbedApiKey: 'Embedding API key (empty = main key)',
+        externalRerankApiKey: 'Rerank API key (empty = main key)',
+        externalKeySaved: 'Saved; leave empty to keep, enter - to clear',
+        externalKeyEmpty: 'Not set (usually required by cloud services)',
+        externalCloudHint: 'Cloud services: pick a preset or paste an https URL, then fill the API key. Keys stay on this machine; the panel only shows whether one is saved. Leave the field empty to keep it, enter - to clear it. Embedding and rerank may use different providers, each with its own address and key. Works with OpenAI, DeepSeek, SiliconFlow, DashScope, Zhipu, Kimi, Volcano Ark, Cohere, Jina, and local Ollama / LM Studio / llama.cpp.',
         capOk: 'available',
         capMissing: 'not available',
         modeArchive: 'Archive mode',
@@ -292,6 +332,7 @@ window.__ModuleLoader__.load({
         clearingHint: 'Topic-aware clearing: each older turn is compared with the current and previous turn. Turns that still share the topic stay verbatim; only the ones the conversation has left behind are cleared, and their full text is archived first so restore can always bring them back.',
         contextRestoreHint: 'To restore one, ask me in the chat to run aim_context restore.',
         ragTitle: 'RAG mount (knowledge search)',
+        ragNeedModels: 'RAG needs both an embedding model and a rerank model (set them in External model below). It cannot be mounted with only one.',
         ragHintOn: 'Mounted: aim_search uses external embeddings + rerank over the knowledge layer and marks results as RAG. Turn it off to go back to local BM25.',
         ragHintOff: 'Not mounted: aim_search uses local BM25 + hashing vectors (offline). Turn it on to switch retrieval to the external embedding index; it can be unmounted at any time.',
         ragBuild: 'Build / refresh RAG index',
@@ -299,6 +340,7 @@ window.__ModuleLoader__.load({
         ragBuilt: 'Index updated:',
         ragBuildFail: 'Index build failed',
         ragIndexed: 'Index:',
+        ragStale: 'The embedding model or endpoint changed, so the old index may use an incompatible dimension. Rebuild with "Build / update index" before searching.',
         ragNoIndex: 'No index yet (build once)',
         storageBase: 'JSON files: always on (the single base; everything is written to JSON first for review and correction, and SQL / RAG are derived from it)',
         storageSqlTitle: 'SQL read-only mirror (derived)',
@@ -325,6 +367,10 @@ window.__ModuleLoader__.load({
         switchOff: 'Off',
         modeRounds: 'Auto tidy every N rounds',
         modeUsage: 'Clear at what percent of context',
+        snapshotTitle: 'Automatic snapshots',
+        snapshotHint: 'On by default: every N turns the recent context window is saved as a snapshot (5 turns / 10 snapshots by default). Above the cap, near-duplicates are removed first by similarity, while distinct snapshots are kept. Snapshotting is independent of automatic tidying: turning tidying off still keeps checkpoints.',
+        snapshotEvery: 'Snapshot every N turns',
+        snapshotMax: 'Snapshot cap',
         modeHintManual: 'Auto tidy is off; manual tools are always available: aim_memory / aim_search / aim_decide / aim_context.',
         modeHintAuto: 'Auto tidy is on: it digests, archives and runs a topic-aware clear every N turns, or as soon as context usage reaches the set percentage. Either trigger suffices; manual tools remain available.',
         fixedPath: 'Memory path (absolute, empty = follow project)',
@@ -743,7 +789,27 @@ window.__ModuleLoader__.load({
      * over the Session catalog. That catalog supplies conversation titles; the
      * Host API supplies the memory rows and which conversation is current.
      */
-    function Dashboard(props) {
+    /**
+   * Cloud / local OpenAI-compatible presets. Picking one only fills the base URL
+   * and the typical embedding/rerank model names; every field stays editable.
+   */
+  const EXTERNAL_PRESETS = [
+    { id: 'custom', label: '自定义 / 本地', baseUrl: '', embedModel: '', rerankModel: '' },
+    { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', embedModel: 'text-embedding-3-small', rerankModel: '' },
+    { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', embedModel: '', rerankModel: '' },
+    { id: 'siliconflow', label: 'SiliconFlow 硅基流动', baseUrl: 'https://api.siliconflow.cn/v1', embedModel: 'BAAI/bge-m3', rerankModel: 'BAAI/bge-reranker-v2-m3' },
+    { id: 'dashscope', label: '阿里云百炼（兼容模式）', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', embedModel: 'text-embedding-v3', rerankModel: '' },
+    { id: 'zhipu', label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', embedModel: 'embedding-3', rerankModel: 'rerank' },
+    { id: 'moonshot', label: '月之暗面 Kimi', baseUrl: 'https://api.moonshot.cn/v1', embedModel: '', rerankModel: '' },
+    { id: 'ark', label: '火山方舟', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', embedModel: 'doubao-embedding', rerankModel: '' },
+    { id: 'cohere', label: 'Cohere', baseUrl: 'https://api.cohere.com/v1', embedModel: 'embed-multilingual-v3.0', rerankModel: 'rerank-multilingual-v3.0' },
+    { id: 'jina', label: 'Jina AI', baseUrl: 'https://api.jina.ai/v1', embedModel: 'jina-embeddings-v3', rerankModel: 'jina-reranker-v2-base-multilingual' },
+    { id: 'ollama', label: 'Ollama 本地', baseUrl: 'http://127.0.0.1:11434/v1', embedModel: 'nomic-embed-text', rerankModel: '' },
+    { id: 'lmstudio', label: 'LM Studio 本地', baseUrl: 'http://127.0.0.1:1234/v1', embedModel: '', rerankModel: '' },
+    { id: 'llamacpp', label: 'llama.cpp 本地', baseUrl: 'http://127.0.0.1:8080', embedModel: '', rerankModel: '' },
+  ];
+
+  function Dashboard(props) {
       const [data, setData] = React.useState(null);
       const [error, setError] = React.useState(null);
       const [busy, setBusy] = React.useState(false);
@@ -758,9 +824,18 @@ window.__ModuleLoader__.load({
       const [formDir, setFormDir] = React.useState('.ai-for-memory');
       const [formMode, setFormMode] = React.useState('manual');
       const [formRounds, setFormRounds] = React.useState(5);
+      // Automatic snapshots: independent of automatic tidying, on by default,
+      // every N turns, capped at M entries (near-duplicates pruned by similarity).
+      const [formAutoSnapshot, setFormAutoSnapshot] = React.useState(true);
+      const [formSnapshotEvery, setFormSnapshotEvery] = React.useState(5);
+      const [formSnapshotMax, setFormSnapshotMax] = React.useState(10);
       // Percentage of the context window that also triggers a tidy, next to the
       // every-N-rounds trigger (both coexist; default 70%).
       const [formUsage, setFormUsage] = React.useState(70);
+      // One export button with three selectable, multi-pick types.
+      const [exportOpen, setExportOpen] = React.useState(false);
+      const [exportTypes, setExportTypes] = React.useState(['knowledge']);
+      const [exportFormat, setExportFormat] = React.useState('json');
       const [formDefaultPublic, setFormDefaultPublic] = React.useState(true);
       const [formTopical, setFormTopical] = React.useState(true);
       const [formThreshold, setFormThreshold] = React.useState(0.06);
@@ -779,6 +854,14 @@ window.__ModuleLoader__.load({
       const [formEmbedModel, setFormEmbedModel] = React.useState('');
       const [formRerankBase, setFormRerankBase] = React.useState('');
       const [formRerankModel, setFormRerankModel] = React.useState('');
+      // Cloud keys are write-only: the panel only knows whether one is stored.
+      const [formExternalKey, setFormExternalKey] = React.useState('');
+      const [formEmbedKey, setFormEmbedKey] = React.useState('');
+      const [formRerankKey, setFormRerankKey] = React.useState('');
+      const [hasExternalKey, setHasExternalKey] = React.useState(false);
+      const [hasEmbedKey, setHasEmbedKey] = React.useState(false);
+      const [hasRerankKey, setHasRerankKey] = React.useState(false);
+      const [formPreset, setFormPreset] = React.useState('custom');
       const [externalProbing, setExternalProbing] = React.useState(false);
       const [externalStatus, setExternalStatus] = React.useState('');
       const [formArchiveExternal, setFormArchiveExternal] = React.useState(false);
@@ -844,6 +927,9 @@ window.__ModuleLoader__.load({
           if (typeof payload.autoEnabled === 'boolean') setFormMode(payload.autoEnabled ? 'auto' : 'manual');
           else if (payload.mode === 'manual' || payload.mode === 'auto') setFormMode(payload.mode);
           if (Number.isInteger(payload.autoEveryRounds)) setFormRounds(payload.autoEveryRounds);
+          if (typeof payload.autoSnapshot === 'boolean') setFormAutoSnapshot(payload.autoSnapshot);
+          if (Number.isInteger(payload.autoSnapshotEvery)) setFormSnapshotEvery(payload.autoSnapshotEvery);
+          if (Number.isInteger(payload.autoSnapshotMax)) setFormSnapshotMax(payload.autoSnapshotMax);
           if (Number.isInteger(payload.contextUsagePercent)) setFormUsage(payload.contextUsagePercent);
           if (typeof payload.defaultPublic === 'boolean') setFormDefaultPublic(payload.defaultPublic);
           if (typeof payload.topicalClear === 'boolean') setFormTopical(payload.topicalClear);
@@ -861,6 +947,12 @@ window.__ModuleLoader__.load({
           if (typeof payload.externalEmbedModel === 'string') setFormEmbedModel(payload.externalEmbedModel);
           if (typeof payload.externalRerankBaseUrl === 'string') setFormRerankBase(payload.externalRerankBaseUrl);
           if (typeof payload.externalRerankModel === 'string') setFormRerankModel(payload.externalRerankModel);
+          setHasExternalKey(payload.externalHasApiKey === true);
+          setHasEmbedKey(payload.externalEmbedHasApiKey === true);
+          setHasRerankKey(payload.externalRerankHasApiKey === true);
+          setFormExternalKey('');
+          setFormEmbedKey('');
+          setFormRerankKey('');
           if (typeof payload.archiveExternal === 'boolean') setFormArchiveExternal(payload.archiveExternal);
           if (typeof payload.knowledgeExternal === 'boolean') setFormKnowledgeExternal(payload.knowledgeExternal);
           if (typeof payload.contextExternal === 'boolean') setFormContextExternal(payload.contextExternal);
@@ -956,6 +1048,8 @@ window.__ModuleLoader__.load({
           : (data?.sessionUnknown ? t.scopeHintUnknown : t.scopeHintSession);
       const hasNothingHere = ['staging', 'archive', 'snapshots', 'knowledge', 'decisions', 'contexts']
         .every((key) => (counts[key] ?? 0) === 0);
+      // RAG needs two models; check the form so the toggle reacts before saving.
+      const ragFormReady = formEmbedModel.trim() !== '' && formRerankModel.trim() !== '';
       const sharedNote = scope?.kind === 'session' && hasNothingHere && data?.shared?.hasData
         ? `${t.scopeShared}：过程记录 ${data.shared.counts?.staging ?? 0} 条，知识库 ${data.shared.counts?.knowledge ?? 0} 篇。`
         : '';
@@ -1015,6 +1109,9 @@ window.__ModuleLoader__.load({
               directoryName: formDir.trim(),
               autoEnabled: formMode === 'auto',
               autoEveryRounds: Number(formRounds) || 5,
+              autoSnapshot: formAutoSnapshot,
+              autoSnapshotEvery: Number(formSnapshotEvery) || 5,
+              autoSnapshotMax: Number(formSnapshotMax) || 10,
               contextUsagePercent: Number(formUsage) || 70,
               defaultPublic: formDefaultPublic,
               topicalClear: formTopical,
@@ -1029,6 +1126,10 @@ window.__ModuleLoader__.load({
               externalEmbedModel: formEmbedModel.trim(),
               externalRerankBaseUrl: formRerankBase.trim(),
               externalRerankModel: formRerankModel.trim(),
+              // Empty = keep the stored key; "-" clears it; anything else sets it.
+              externalApiKey: formExternalKey.trim(),
+              externalEmbedApiKey: formEmbedKey.trim(),
+              externalRerankApiKey: formRerankKey.trim(),
               archiveExternal: formArchiveExternal,
               knowledgeExternal: formKnowledgeExternal,
               contextExternal: formContextExternal,
@@ -1048,6 +1149,23 @@ window.__ModuleLoader__.load({
         setExternalProbing(true);
         setExternalStatus('');
         try {
+          // Save the form first so the probe tests exactly what the user typed
+          // (an unsaved cloud key would otherwise be missing from the host).
+          await callApi('/config', {
+            method: 'POST',
+            body: {
+              externalBaseUrl: formExternalBase.trim(),
+              externalModel: formExternalModel.trim(),
+              externalTimeoutMs: Number(formExternalTimeout) || 60000,
+              externalEmbedBaseUrl: formEmbedBase.trim(),
+              externalEmbedModel: formEmbedModel.trim(),
+              externalRerankBaseUrl: formRerankBase.trim(),
+              externalRerankModel: formRerankModel.trim(),
+              externalApiKey: formExternalKey.trim(),
+              externalEmbedApiKey: formEmbedKey.trim(),
+              externalRerankApiKey: formRerankKey.trim(),
+            },
+          });
           const payload = await callApi('/external?deep=1');
           const probe = payload?.probe ?? {};
           const parts = [probe.ok ? t.externalOk : t.externalFail];
@@ -1099,6 +1217,43 @@ window.__ModuleLoader__.load({
         } finally {
           setRagBusy(false);
         }
+      };
+      /**
+       * One export button, three optional types (knowledge / SQL / RAG index),
+       * any combination. Each selected type is downloaded as its own file via
+       * the API's `content-disposition: attachment`; the browser picks the
+       * download folder, so nothing is written to the nearly-full memory disk.
+       */
+      const toggleExportType = (type) => {
+        setExportTypes((current) => (current.includes(type)
+          ? current.filter((item) => item !== type)
+          : [...current, type]));
+      };
+      const exportSelected = () => {
+        if (exportTypes.length === 0) {
+          setNotice({ kind: 'err', text: t.exportPick });
+          return;
+        }
+        const params = new URLSearchParams();
+        if (selectedRoot) params.set('root', selectedRoot);
+        params.set('scope', scope?.kind === 'shared' ? 'shared' : 'session');
+        const session = data?.currentSessionId
+          || data?.selectedSession?.session_id
+          || (scope?.kind === 'session' ? scope?.key : '');
+        if (session) params.set('session', session);
+        params.set('format', exportFormat);
+        const base = apiBase();
+        exportTypes.forEach((type, index) => {
+          setTimeout(() => {
+            const anchor = document.createElement('a');
+            anchor.href = `${base}/ai-for-memory/api/knowledge/export?${params.toString()}&type=${type}`;
+            anchor.rel = 'noopener';
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+          }, index * 250);
+        });
+        setNotice({ kind: 'ok', text: t.exportStarted.replace('{n}', String(exportTypes.length)) });
       };
       const saveConversation = async () => {
         if (!selectedSession) return;
@@ -1257,12 +1412,63 @@ window.__ModuleLoader__.load({
         content = h('div', { style: styles.list },
           h('div', { style: styles.actions },
             h('input', {
-              style: { ...styles.input, maxWidth: '360px' },
+              style: { ...styles.input, maxWidth: '320px' },
               placeholder: t.searchPlaceholder,
               value: query,
               onChange: (event) => setQuery(event.target.value),
             }),
-            query !== '' ? h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => setQuery('') }, t.clearSearch) : null),
+            query !== '' ? h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => setQuery('') }, t.clearSearch) : null,
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              onClick: () => setExportOpen((current) => !current),
+            }, exportOpen ? t.exportClose : t.exportButton)),
+          exportOpen
+            ? h('div', {
+              style: {
+                display: 'flex', gap: '14px', flexWrap: 'wrap', alignItems: 'center',
+                padding: '8px 10px', border: '1px solid rgba(127, 127, 127, 0.28)', borderRadius: '8px',
+              },
+            },
+            h('label', { style: { display: 'inline-flex', gap: '4px', alignItems: 'center', fontSize: '12.5px' } },
+              h('input', {
+                type: 'checkbox',
+                checked: exportTypes.includes('knowledge'),
+                onChange: () => toggleExportType('knowledge'),
+              }), t.exportKnowledge),
+            h('label', { style: { display: 'inline-flex', gap: '4px', alignItems: 'center', fontSize: '12.5px' } },
+              h('input', {
+                type: 'checkbox',
+                checked: exportTypes.includes('sql'),
+                onChange: () => toggleExportType('sql'),
+              }), t.exportSql),
+            h('label', { style: { display: 'inline-flex', gap: '4px', alignItems: 'center', fontSize: '12.5px' } },
+              h('input', {
+                type: 'checkbox',
+                checked: exportTypes.includes('rag'),
+                onChange: () => toggleExportType('rag'),
+              }), t.exportRag),
+            exportTypes.includes('knowledge')
+              ? h('label', { style: { display: 'inline-flex', gap: '6px', alignItems: 'center', fontSize: '12.5px' } },
+                t.exportFormat,
+                h('select', {
+                  style: { ...styles.input, width: 'auto', padding: '2px 6px' },
+                  value: exportFormat,
+                  onChange: (event) => setExportFormat(event.target.value),
+                },
+                h('option', { value: 'json' }, 'JSON'),
+                h('option', { value: 'markdown' }, 'Markdown')))
+              : null,
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              disabled: exportTypes.length === 0,
+              onClick: exportSelected,
+            }, `${t.exportRun}（${exportTypes.length}）`))
+            : null,
+          h('p', { style: styles.hint }, t.exportHint),
           h('p', { style: styles.hint },
             pending > 0 ? `${t.knowledgePending}: ${pending}` : t.knowledgeHint),
           knowledge.length === 0
@@ -1580,6 +1786,55 @@ window.__ModuleLoader__.load({
           h('p', { style: styles.hint }, t.externalHint),
           h('div', { style: styles.grid2 },
             h('label', { style: styles.label },
+              t.externalPreset,
+              h('select', {
+                style: styles.input,
+                value: formPreset,
+                onChange: (event) => {
+                  const preset = EXTERNAL_PRESETS.find((row) => row.id === event.target.value);
+                  setFormPreset(event.target.value);
+                  if (!preset || preset.id === 'custom') return;
+                  setFormExternalBase(preset.baseUrl);
+                  setFormEmbedBase('');
+                  setFormRerankBase('');
+                  setFormEmbedModel(preset.embedModel);
+                  setFormRerankModel(preset.rerankModel);
+                },
+              }, EXTERNAL_PRESETS.map((preset) => h('option', {
+                key: preset.id,
+                value: preset.id,
+              }, preset.label)))),
+            h('label', { style: styles.label },
+              t.externalApiKey,
+              h('input', {
+                style: styles.input,
+                type: 'password',
+                autoComplete: 'off',
+                value: formExternalKey,
+                placeholder: hasExternalKey ? t.externalKeySaved : t.externalKeyEmpty,
+                onChange: (event) => setFormExternalKey(event.target.value),
+              })),
+            h('label', { style: styles.label },
+              t.externalEmbedApiKey,
+              h('input', {
+                style: styles.input,
+                type: 'password',
+                autoComplete: 'off',
+                value: formEmbedKey,
+                placeholder: hasEmbedKey ? t.externalKeySaved : t.externalKeyEmpty,
+                onChange: (event) => setFormEmbedKey(event.target.value),
+              })),
+            h('label', { style: styles.label },
+              t.externalRerankApiKey,
+              h('input', {
+                style: styles.input,
+                type: 'password',
+                autoComplete: 'off',
+                value: formRerankKey,
+                placeholder: hasRerankKey ? t.externalKeySaved : t.externalKeyEmpty,
+                onChange: (event) => setFormRerankKey(event.target.value),
+              })),
+            h('label', { style: styles.label },
               t.externalBase,
               h('input', {
                 style: styles.input,
@@ -1641,6 +1896,7 @@ window.__ModuleLoader__.load({
                 placeholder: 'qwen3-reranker-0.6b',
                 onChange: (event) => setFormRerankModel(event.target.value),
               }))),
+          h('p', { style: styles.hint }, t.externalCloudHint),
           h('div', { style: styles.actions },
             h('button', {
               type: 'button',
@@ -1755,6 +2011,48 @@ window.__ModuleLoader__.load({
                 })))
             : null,
           h('div', { style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.snapshotTitle),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': formAutoSnapshot,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formAutoSnapshot ? styles.switchOptionOn : {}) },
+              onClick: () => setFormAutoSnapshot(true),
+            }, t.switchOn),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': !formAutoSnapshot,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(!formAutoSnapshot ? styles.switchOptionOn : {}) },
+              onClick: () => setFormAutoSnapshot(false),
+            }, t.switchOff)),
+          h('p', { style: styles.hint }, t.snapshotHint),
+          formAutoSnapshot
+            ? h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+              h('label', { style: { ...styles.label, maxWidth: '220px' } },
+                t.snapshotEvery,
+                h('input', {
+                  style: styles.input,
+                  type: 'number',
+                  min: 1,
+                  max: 100,
+                  value: formSnapshotEvery,
+                  onChange: (event) => setFormSnapshotEvery(event.target.value),
+                })),
+              h('label', { style: { ...styles.label, maxWidth: '220px' } },
+                t.snapshotMax,
+                h('input', {
+                  style: styles.input,
+                  type: 'number',
+                  min: 1,
+                  max: 200,
+                  value: formSnapshotMax,
+                  onChange: (event) => setFormSnapshotMax(event.target.value),
+                })))
+            : null,
+          h('div', { style: styles.modeRow },
             h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.ragTitle),
             h('button', {
               type: 'button',
@@ -1762,7 +2060,13 @@ window.__ModuleLoader__.load({
               'aria-checked': formRagMount,
               className: 'aim-switch',
               style: { ...styles.switchOption, ...(formRagMount ? styles.switchOptionOn : {}) },
-              onClick: () => setFormRagMount(true),
+              onClick: () => {
+                if (!ragFormReady) {
+                  setNotice({ kind: 'err', text: t.ragNeedModels });
+                  return;
+                }
+                setFormRagMount(true);
+              },
             }, t.switchOn),
             h('button', {
               type: 'button',
@@ -1772,18 +2076,24 @@ window.__ModuleLoader__.load({
               style: { ...styles.switchOption, ...(!formRagMount ? styles.switchOptionOn : {}) },
               onClick: () => setFormRagMount(false),
             }, t.switchOff)),
-          h('p', { style: styles.hint }, formRagMount ? t.ragHintOn : t.ragHintOff),
+          h('p', { style: styles.hint }, formRagMount
+            ? t.ragHintOn
+            : (ragFormReady ? t.ragHintOff : `${t.ragHintOff} ${t.ragNeedModels}`)),
           h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
             h('button', {
               type: 'button',
               className: 'aim-btn',
               style: styles.button,
-              disabled: ragBusy,
+              disabled: ragBusy || !ragFormReady,
               onClick: buildRag,
             }, ragBusy ? t.ragBuilding : t.ragBuild),
             h('span', { style: styles.hint }, ragIndex?.built
               ? `${t.ragIndexed} ${ragIndex.docs} 篇 · ${ragIndex.dim}d · ${ragIndex.model || 'local'}`
               : t.ragNoIndex)),
+          ragIndex?.stale
+            ? h('p', { style: { ...styles.hint, color: '#c2410c', margin: '6px 0 0' } },
+              `${t.ragStale}（${ragIndex.dim}d · ${ragIndex.model || 'local'} → ${ragIndex.current_model || 'local'}）`)
+            : null,
           h('p', { style: { ...styles.hint, margin: '8px 0 0' } }, t.storageBase),
           h('div', { style: styles.modeRow },
             h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.storageSqlTitle),

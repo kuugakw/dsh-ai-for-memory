@@ -16,7 +16,7 @@
  * be tested with `node --test` without booting the Harness.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import { MemoryScopes, sessionKey, shortSessionId } from './lib/scopes.js';
@@ -30,6 +30,7 @@ import {
   buildContextSnapshot, collectTurns, formatRestoreContext, snapshotOfTurns,
 } from './lib/context.js';
 import { SIMILARITY_DEFAULT, describeTurns, selectTurnsByTopic } from './lib/similarity.js';
+import { AUTO_SNAPSHOT_PREFIX, isAutoSnapshot, planSnapshotPrune } from './lib/snapshot.js';
 import { exceedsUsageThreshold, formatPressure, usagePercentOf } from './lib/pressure.js';
 import {
   chat as externalChat,
@@ -46,8 +47,10 @@ import {
   summarizeTurns as summarizeTurnsExternally,
 } from './lib/external-ops.js';
 import {
-  buildRagIndex, ragCandidates, ragStats, rerankCandidates,
+  buildRagIndex, embeddingIdentity, ragCandidates, ragModelStatus, ragStats, rerankCandidates,
 } from './lib/rag.js';
+import { writeExportArtifacts } from './lib/export.js';
+import { boostScore, weightLabel } from './lib/usage.js';
 import {
   formatSqlResult, routeKnowledgeQuery, runSqlQuery,
 } from './lib/knowledge-query.js';
@@ -62,6 +65,12 @@ const DEFAULTS = Object.freeze({
   root: '',
   autoEnabled: false,
   autoEveryRounds: 5,
+  // Automatic exact snapshots: every N completed turns a recent context window
+  // is written to snapshots/. They are cheap, restore any state, and are pruned
+  // by similarity once the cap is exceeded (near-duplicates go first).
+  autoSnapshot: true,
+  autoSnapshotEvery: 5,
+  autoSnapshotMax: 10,
   // Percentage of the routed context window that also triggers a clear, on top
   // of the every-N-rounds trigger. Measured from the provider's last prompt size.
   contextUsagePercent: 70,
@@ -90,8 +99,10 @@ const DEFAULTS = Object.freeze({
   // can live on their own process/port/provider. Empty = same as above.
   externalEmbedBaseUrl: '',
   externalEmbedModel: '',
+  externalEmbedApiKey: '',
   externalRerankBaseUrl: '',
   externalRerankModel: '',
+  externalRerankApiKey: '',
   // Per-layer mode switch: false = the deterministic pipeline (always works,
   // offline), true = the external local model (same pipeline, model does the
   // reading). Every external pass falls back to the deterministic one on failure.
@@ -116,6 +127,8 @@ const DEFAULTS = Object.freeze({
 /** Integer bounds for the numeric settings; `null` marks a float setting. */
 const NUMERIC_BOUNDS = Object.freeze({
   autoEveryRounds: [1, 100],
+  autoSnapshotEvery: [1, 100],
+  autoSnapshotMax: [1, 200],
   contextUsagePercent: [1, 100],
   maxContextChars: [1000, 200000],
   keepRecentTurns: [1, 20],
@@ -487,8 +500,10 @@ function formatHits(query, hits, mode) {
     const metric = mode === 'rag'
       ? `（RAG 相似度=${hit.score.toFixed(4)}）`
       : `（bm25=${hit.bm25_score.toFixed(4)}，vector=${hit.vector_score.toFixed(4)}）`;
+    const usage = Number.isFinite(hit.usage_weight) ? `｜${weightLabel(hit.usage_weight)}` : '';
     lines.push(`${index + 1}. [${hit.category}] ${hit.doc_id}  score=${hit.score.toFixed(4)}`
       + metric
+      + usage
       + (hit.source && hit.source !== 'unknown' ? `｜知识来源：${hit.source}` : '')
       + (hit.origin_label ? `｜对话：${hit.origin_label}` : ''));
     lines.push(`   ${clip(hit.text, 320)}`);
@@ -504,7 +519,16 @@ function formatHits(query, hits, mode) {
  * failure returns a note so the caller can fall back to local retrieval.
  */
 async function searchWithRag(config, sources, query, options = {}) {
+  const models = ragModelStatus(config);
+  if (!models.ready) {
+    return {
+      ok: false,
+      note: `RAG 需要同时配置 Embedding 和 Rerank 两个模型，当前缺少：${models.missing.join('、')}。`
+        + '\n请在面板「外部模型」里分别填写 Embedding 模型与 Rerank 模型后再挂载；已回退本地检索。',
+    };
+  }
   const endpoint = externalOpEndpointFrom(config, 30000);
+  const identity = embeddingIdentity(endpoint);
   const embedded = await externalEmbed(endpoint, query);
   if (!embedded.ok) {
     return {
@@ -516,16 +540,47 @@ async function searchWithRag(config, sources, query, options = {}) {
   const candidates = [];
   let indexedStores = 0;
   let unindexedStores = 0;
+  let staleStores = 0;
+  let staleDetail = '';
+  const describeStale = (row) => {
+    if (row.reason === 'dim-mismatch') {
+      return `索引维度 ${row.indexDim}d，当前查询维度 ${row.queryDim}d`;
+    }
+    if (row.reason === 'model-mismatch') {
+      return `索引模型 ${row.indexModel || '未知'}，当前模型 ${row.currentModel}`;
+    }
+    if (row.reason === 'endpoint-mismatch') {
+      return `索引地址 ${row.indexEndpoint || '未知'}，当前地址 ${row.currentEndpoint}`;
+    }
+    return '';
+  };
   for (const source of sources) {
-    const result = ragCandidates(source.store, vector, { topK: 40, category: options.category ?? null });
+    const result = ragCandidates(source.store, vector, {
+      topK: 40,
+      category: options.category ?? null,
+      model: identity.model,
+      endpoint: identity.endpoint,
+    });
     if (!result.ok) {
-      unindexedStores += 1;
+      if (result.reason === 'no-index') {
+        unindexedStores += 1;
+      } else {
+        staleStores += 1;
+        if (staleDetail === '') staleDetail = describeStale(result);
+      }
       continue;
     }
     indexedStores += 1;
     for (const row of result.candidates) candidates.push({ ...row, source });
   }
   if (indexedStores === 0) {
+    if (staleStores > 0) {
+      return {
+        ok: false,
+        note: `RAG 索引与当前嵌入配置不一致（${staleDetail}）——`
+          + '换 provider / 模型后索引需要重建：请在面板点「建立/更新索引」，或运行 aim_memory action=index。\n已回退本地检索。',
+      };
+    }
     return {
       ok: false,
       note: `RAG 已挂载，但所选范围还没有索引（${unindexedStores} 个存储）——先运行 aim_memory action=index。\n已回退本地检索。`,
@@ -538,32 +593,54 @@ async function searchWithRag(config, sources, query, options = {}) {
   if (reranked.ok !== true) {
     return { ok: false, note: `RAG 检索失败：${reranked.error ?? '未知错误'}\n已回退本地检索。` };
   }
+  if (reranked.via !== 'rerank') {
+    return {
+      ok: false,
+      note: `RAG 需要 Rerank 模型参与重排，但重排服务不可用：${reranked.rerankError ?? '未配置 Rerank 模型'}`
+        + '\n已在结果上回退本地检索；请启动/配置 Rerank 模型，或关闭「RAG 挂载」。',
+    };
+  }
   const covers = `范围：${sources.map((source) => source.label).join(' + ')}`
-    + (unindexedStores > 0 ? `（${unindexedStores} 个存储还没有索引，未参与）` : '');
-  if (reranked.hits.length === 0) {
+    + (unindexedStores > 0 ? `（${unindexedStores} 个存储还没有索引，未参与）` : '')
+    + (staleStores > 0 ? `（${staleStores} 个存储的索引与当前嵌入配置不一致，已跳过；请重建索引）` : '');
+  // Recency weight is conversation-scoped: every hit is scored with the *caller
+  // conversation's* usage log, even when the document lives in another store.
+  const callerStore = options.store ?? null;
+  const weights = callerStore && typeof callerStore.knowledgeWeights === 'function'
+    ? callerStore.knowledgeWeights()
+    : {};
+  const weighted = reranked.hits.map((row) => {
+    const weight = Number.isFinite(weights[row.doc.doc_id]) ? weights[row.doc.doc_id] : 0;
+    return { ...row, usage_weight: weight, score: boostScore(row.score, weight) };
+  }).sort((left, right) => right.score - left.score);
+  if (weighted.length === 0) {
     return {
       ok: true,
       empty: true,
       text: `RAG 检索（${reranked.via === 'rerank' ? '嵌入 + 重排' : '嵌入'}）没有命中「${query}」。\n${covers}`,
     };
   }
-  const hits = reranked.hits.map((row) => ({
+  const hits = weighted.map((row) => ({
     doc_id: row.doc.doc_id,
     text: row.doc.text,
     category: row.doc.category,
     source: row.doc.source,
     url: row.doc.url,
     score: row.score,
+    usage_weight: row.usage_weight,
     origin_label: row.source.label,
     origin_key: row.source.key,
     origin_scope: row.source.scope,
   }));
+  if (callerStore && typeof callerStore.recordKnowledgeUsage === 'function') {
+    callerStore.recordKnowledgeUsage(weighted.map((row) => row.doc.doc_id));
+  }
   return {
     ok: true,
     empty: false,
     text: `检索方式：RAG（${reranked.via === 'rerank' ? '嵌入 + 重排' : '嵌入'}）｜${covers}\n`
       + formatHits(query, hits, 'rag')
-      + '\n（RAG 只覆盖已建索引的知识文档；在面板关闭「RAG 挂载」即可回到本地 BM25 检索。）',
+      + '\n（RAG 只覆盖已建索引的知识文档；权重按本对话最近使用时间排序，在面板关闭「RAG 挂载」即可回到本地 BM25 检索。）',
   };
 }
 
@@ -595,6 +672,8 @@ function externalEndpointOf(config) {
     rerankBaseUrl: config.externalRerankBaseUrl,
     rerankModel: config.externalRerankModel,
     apiKey: config.externalApiKey,
+    embedApiKey: config.externalEmbedApiKey,
+    rerankApiKey: config.externalRerankApiKey,
     timeoutMs: config.externalTimeoutMs,
   });
 }
@@ -662,6 +741,79 @@ function formatDecision(result) {
 // ---- tool definitions ----------------------------------------------------
 
 /**
+ * Normalize the optional `sources` argument of `aim_ask action=chat`.
+ *
+ * Each source becomes a numbered evidence item the model must cite as `[n]`;
+ * the tool result then maps every number back to an id/url/text so a generated
+ * summary can be audited afterwards. Both strings and `{id,text,url}` objects
+ * are accepted.
+ */
+export function normalizeChatSources(raw, limit = 20) {
+  if (!Array.isArray(raw)) return [];
+  const rows = [];
+  let total = 0;
+  const maxChars = 12000;
+  for (const item of raw.slice(0, limit)) {
+    let text = '';
+    let id = '';
+    let url = '';
+    if (typeof item === 'string') {
+      text = item;
+    } else if (item && typeof item === 'object') {
+      text = typeof item.text === 'string'
+        ? item.text
+        : (typeof item.content === 'string' ? item.content : '');
+      id = typeof item.id === 'string' && item.id.trim() !== ''
+        ? item.id.trim()
+        : (typeof item.doc_id === 'string' ? item.doc_id.trim() : '');
+      url = typeof item.url === 'string' ? item.url.trim() : '';
+    }
+    text = clip(text.trim(), 2000);
+    if (text === '') continue;
+    if (total + text.length > maxChars) break;
+    total += text.length;
+    rows.push({
+      id: id !== '' ? id : `S${rows.length + 1}`,
+      url,
+      text,
+    });
+  }
+  return rows;
+}
+
+/** System instruction + numbered evidence block for a chat call with sources. */
+export function buildChatSourcePrompt(sources, { json = false } = {}) {
+  if (!Array.isArray(sources) || sources.length === 0) return '';
+  const block = sources
+    .map((source, index) => `[${index + 1}] id=${source.id}${source.url ? ` url=${source.url}` : ''}\n${source.text}`)
+    .join('\n\n');
+  const rule = json === true
+    ? '以下是编号来源材料，作为回答的事实依据；不要编造材料之外的事实。\n\n'
+    : '以下是编号来源材料。只依据这些材料回答；每个结论后必须用 [1]、[2] 这样的编号标注依据；'
+      + '来源不足时明确说“来源未覆盖”，不要编造来源编号。\n\n';
+  return rule + block;
+}
+
+/** One-line audit footer for an external chat call. */
+export function formatChatTrace({ endpoint, result, inputText, output, truncated }) {
+  const hash = createHash('sha256').update(String(inputText ?? '')).digest('hex').slice(0, 12);
+  const parts = [
+    `model=${result.model || endpoint.model || 'local'}`,
+    `地址=${endpoint.baseUrl}`,
+    `时间=${new Date().toISOString()}`,
+    `输入 sha256:${hash}（${String(inputText ?? '').length} 字）`,
+    `输出 ${String(output ?? '').length} 字${truncated ? '（已截断，原文更长）' : ''}`,
+  ];
+  if (result.id) parts.push(`请求 id=${result.id}`);
+  if (Number.isFinite(result.created)) {
+    parts.push(`服务时间=${new Date(result.created * 1000).toISOString()}`);
+  }
+  if (Number.isFinite(result.usage?.total_tokens)) parts.push(`tokens=${result.usage.total_tokens}`);
+  if (result.finishReason) parts.push(`结束=${result.finishReason}`);
+  return `— 调用记录：${parts.join('｜')}`;
+}
+
+/**
  * Build the model-facing tools.
  *
  * @param {ReturnType<typeof normalizeConfig>} config
@@ -683,18 +835,23 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         + '需要检索时用 aim_search（默认跨对话）。不要写入密钥、令牌或用户没有说过的事实。'
         + '面板可把「归档 / 知识库提炼 / 上下文清理」分别切到外部模型模式（任何 OpenAI 兼容服务）；'
         + '外部模式失败会自动回退本地规则，结果里会写明用了哪条路。'
-        + 'RAG：索引建在知识库上（action=index），是否挂到 aim_search 由面板「RAG 挂载」开关控制，可随时挂/摘。',
+        + 'RAG：索引建在知识库上（action=index），是否挂到 aim_search 由面板「RAG 挂载」开关控制，可随时挂/摘。'
+        + '事故：出现文件损坏、数据丢失、严重误操作等事故时，用 action=incident 把事故单独记为 incidents 类型'
+        + '（title 必填，what_happened/impact/cause/fix/prevention 选填），不要混进普通知识。',
       parameters: {
         action: {
           type: 'string',
           required: true,
-          enum: ['stage', 'archive', 'snapshot', 'restore', 'list', 'remember', 'learn', 'promote', 'forget', 'index', 'status'],
+          enum: ['stage', 'archive', 'snapshot', 'restore', 'list', 'remember', 'learn', 'promote', 'forget', 'index', 'export', 'incident', 'status'],
           description:
             'stage=追加一条过程记录（content 必填）；archive=按 kind 归档（可传 category 强制分类）；'
             + 'snapshot=保存 state 快照（name 必填）；restore=按 snapshot_id 恢复；list=列出快照；'
             + 'remember=写入一条知识（text 必填，doc_id 可省）；learn=批量写知识（items 必填）；'
             + 'promote=从过程记录/归档/上下文提炼知识（dry_run 可预览）；forget=删除一条错误知识（doc_id 必填）；'
-            + 'index=为当前范围的知识库建立/更新 RAG 索引（需要外部嵌入服务）；status=查看统计。',
+            + 'index=为当前范围的知识库建立/更新 RAG 索引（需要 Embedding + Rerank 两个模型都配置好）；'
+            + 'export=把知识库全量导出（可选一种或多种：knowledge=JSON/Markdown、sql=SQLite 数据库、rag=向量索引）；'
+            + 'incident=把一次事故写进知识库，单独归为 incidents 类型（title 必填）；'
+            + 'status=查看统计。',
         },
         scope: {
           type: 'string',
@@ -749,6 +906,24 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           type: 'string',
           description: 'remember 用：知识文档 id，可省略——省略时按正文生成稳定 id，同一条知识重复写入会合并。',
         },
+        dest: {
+          type: 'string',
+          description:
+            'export 用：导出目标，可以是另一块盘上的目录（每个类型一个文件）或完整文件路径；'
+            + '省略时写到记忆目录的 exports/ 下。',
+        },
+        types: {
+          type: 'array',
+          items: { type: 'string', enum: ['knowledge', 'sql', 'rag'] },
+          description:
+            'export 用：可多选——knowledge=知识库（JSON 或 Markdown，格式由 format 决定）、'
+            + 'sql=完整 SQLite 数据库（knowledge.sqlite）、rag=RAG 向量索引；默认只导出 knowledge。',
+        },
+        format: {
+          type: 'string',
+          enum: ['json', 'markdown'],
+          description: 'export 用（仅 knowledge）：json=无损全量（默认，含证据字段），markdown=人直接阅读。',
+        },
         text: {
           type: 'string',
           description: 'remember 用：知识正文，一句话一条结论，避免罗列琐碎条目。',
@@ -759,6 +934,49 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           description:
             'learn 用：批量知识条目，每项 {text, category?, tags?, url?, source?, confidence?}；'
             + '适合一次写入多轮对话里得到的若干条结论。',
+        },
+        title: {
+          type: 'string',
+          description: 'incident 用：事故标题（必填），例如「index.js 被 PowerShell 改写后中文编码损坏」。',
+        },
+        what_happened: {
+          type: 'string',
+          description: 'incident 用：发生了什么（触发条件、现象、报错原文）。',
+        },
+        impact: {
+          type: 'string',
+          description: 'incident 用：影响范围与损失（哪些文件/数据/功能受影响，是否已恢复）。',
+        },
+        cause: {
+          type: 'string',
+          description: 'incident 用：根因（不是「手滑」这种结论，要写到具体操作与机制）。',
+        },
+        fix: {
+          type: 'string',
+          description: 'incident 用：怎么处理的（恢复步骤、验证方式）。',
+        },
+        prevention: {
+          type: 'string',
+          description: 'incident 用：以后怎么避免（会写进知识库，供后续对话检索）。',
+        },
+        severity: {
+          type: 'string',
+          enum: ['low', 'medium', 'high'],
+          description: 'incident 用：严重度，默认 medium。',
+        },
+        incident_status: {
+          type: 'string',
+          enum: ['open', 'mitigated', 'resolved'],
+          description: 'incident 用：当前状态，默认 open（也可用 status 传入）。',
+        },
+        status: {
+          type: 'string',
+          enum: ['open', 'mitigated', 'resolved'],
+          description: 'incident 用：incident_status 的别名，默认 open。',
+        },
+        occurred_at: {
+          type: 'string',
+          description: 'incident 用：发生时间（ISO 字符串），省略时用当前时间。',
         },
         tags: {
           type: 'array',
@@ -909,6 +1127,11 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             evidence: [{ kind: 'authored', ref: String(args?.source ?? 'authored') }],
           }, { confirm: args?.confirm === true });
           if (doc && doc.needs_confirm) return formatConflict(doc);
+          // Writing a document counts as using it: it becomes the most recent
+          // knowledge in this conversation and ranks higher on next search.
+          if (typeof source.store.recordKnowledgeUsage === 'function') {
+            source.store.recordKnowledgeUsage([doc.doc_id]);
+          }
           return [
             `${doc.merged ? '知识已合并' : '知识已写入'}（${source.label}）：${doc.doc_id}`,
             `分类：${doc.category}｜来源：${doc.source}`
@@ -948,6 +1171,9 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             }
           }
           const merged = written.filter((doc) => doc.merged).length;
+          if (written.length > 0 && typeof source.store.recordKnowledgeUsage === 'function') {
+            source.store.recordKnowledgeUsage(written.map((doc) => doc.doc_id));
+          }
           const lines = [
             `已写入知识 ${written.length} 条（新增 ${written.length - merged}，合并 ${merged}）`
               + (blocked.length > 0 ? `，待确认 ${blocked.length} 条` : '')
@@ -962,6 +1188,37 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           }
           for (const row of failed.slice(0, 5)) lines.push(`  ! ${row}`);
           return lines.join('\n');
+        }
+
+        if (action === 'incident') {
+          const title = String(args?.title ?? '').trim();
+          if (title === '') throw new Error('incident 需要 title');
+          const severity = ['low', 'medium', 'high'].includes(args?.severity) ? args.severity : 'medium';
+          const incidentStatusRaw = args?.incident_status ?? args?.status;
+          const incidentStatus = ['open', 'mitigated', 'resolved'].includes(incidentStatusRaw)
+            ? incidentStatusRaw
+            : 'open';
+          const doc = store.recordIncident({
+            title,
+            what_happened: args?.what_happened,
+            impact: args?.impact,
+            cause: args?.cause,
+            fix: args?.fix,
+            prevention: args?.prevention,
+            severity,
+            status: incidentStatus,
+            occurred_at: args?.occurred_at,
+            source: args?.source,
+            tags: args?.tags,
+          });
+          if (typeof store.recordKnowledgeUsage === 'function') store.recordKnowledgeUsage([doc.doc_id]);
+          return [
+            `事故已写入知识库（${source.label}）：${doc.doc_id}`,
+            `分类：incidents（独立类型「事故」）｜严重度：${severity}｜状态：${incidentStatus}`,
+            clip(doc.text, 800),
+            '事故记录不触发知识冲突闸门，也不会被普通知识的冲突确认拦下；'
+              + '之后可用 aim_search（category=incidents 或直接搜「事故」）检索。',
+          ].join('\n');
         }
 
         if (action === 'promote') {
@@ -1012,6 +1269,11 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         }
 
         if (action === 'index') {
+          const models = ragModelStatus(config);
+          if (!models.ready) {
+            return `RAG 索引未建立：需要同时配置 Embedding 和 Rerank 两个模型，当前缺少：${models.missing.join('、')}。\n`
+              + '请在面板「外部模型」中分别填写 Embedding 模型与 Rerank 模型后重试。';
+          }
           const endpoint = externalOpEndpointFrom(config, 60000);
           const built = await buildRagIndex(store, endpoint);
           if (!built.ok) {
@@ -1019,20 +1281,53 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
               + '已索引的旧条目保持不变；确认外部嵌入服务可用后重试 aim_memory action=index。';
           }
           const mount = config.ragMount ? '已挂载，aim_search 将优先用 RAG' : '未挂载（可在面板打开「RAG 挂载」）';
-          return `RAG 索引已更新（${source.label}）：${built.indexed} 篇知识文档，本次嵌入 ${built.embedded} 篇`
-            + `，清理 ${built.removed} 条失效向量，维度 ${built.dim}（模型 ${built.model}）。\n${mount}。`;
+          const switchNote = built.changed
+            ? '已按当前嵌入配置全量重建（旧索引可能来自其他地址/模型，与当前维度不兼容）。\n'
+            : '';
+          return `${switchNote}RAG 索引已更新（${source.label}）：${built.indexed} 篇知识文档，本次嵌入 ${built.embedded} 篇`
+            + `，语义去冗余 ${built.deduped} 篇（同分类且相似度 ≥0.95 的旧重复），清理 ${built.removed} 条失效向量，`
+            + `维度 ${built.dim}（模型 ${built.model}），分片 ${built.shards} 个（只在内容变化时重写对应分片）。\n${mount}。`;
         }
 
+        if (action === 'export') {
+          const written = writeExportArtifacts(store, {
+            scope: source.scope === 'shared' ? 'shared' : 'session',
+            label: source.label,
+            sessionId: source.sessionId ?? context.sessionId ?? '',
+            dest: typeof args?.dest === 'string' ? args.dest : '',
+            format: typeof args?.format === 'string' ? args.format : 'json',
+            types: args?.types,
+          });
+          if (!written.ok) return `知识库导出失败：${written.error}`;
+          const lines = written.files.map((row) => `- ${row.type}：${row.path}`
+            + `（${row.bytes} 字节${row.docs > 0 ? `，${row.docs} 篇` : ''}）`);
+          return `知识库已导出 ${written.files.length} 个文件，共 ${written.bytes} 字节：\n${lines.join('\n')}\n`
+            + '导出是完整副本，不删除本地任何内容；三个类型可任意组合，内容全在文件里，'
+            + '没有为了省空间而遗忘或裁剪。';
+        }
         if (action === 'status') {
           const others = readableConversations(context)
             .filter((row) => source.scope !== 'session' || row.key !== source.key)
             .map((row) => ({ ...row, counts: context.scopes.counts(row.key) }));
           const rag = ragStats(store.root);
+          const currentEmbedding = embeddingIdentity(externalEndpointOf(config));
+          const ragStale = rag.built
+            && (rag.model !== currentEmbedding.model
+              || (rag.endpoint !== '' && rag.endpoint !== currentEmbedding.endpoint));
           const ragLine = `RAG：${config.ragMount ? '已挂载到知识库检索' : '未挂载（面板可切换）'}｜`
             + (rag.built
               ? `索引 ${rag.docs} 篇，维度 ${rag.dim}，${rag.built_at}`
-              : '索引未建立（aim_memory action=index）');
+              : '索引未建立（aim_memory action=index）')
+            + (ragStale ? '｜索引来自其他嵌入模型/地址，检索会回退本地，请重建' : '');
           const storage = store.knowledgeBackendInfo();
+          const usageCount = Object.keys(
+            typeof store.knowledgeUsage === 'function' ? store.knowledgeUsage() : {},
+          ).length;
+          const usageLine = `知识权重：本对话已记录 ${usageCount} 条最近使用（半衰期 14 天，只影响本对话排序）`;
+          const incidentCount = store.documents()
+            .filter((doc) => doc.category === 'incidents').length;
+          const incidentLine = `事故记录：${incidentCount} 条（独立类型 incidents；`
+            + '出现事故用 aim_memory action=incident 记录）';
           const storageLine = '知识库底座：JSON（始终启用，供审查）'
             + (storage.sqlMirror
               ? `｜SQL 只读镜像：${storage.file}`
@@ -1045,7 +1340,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             otherRows: others,
             closedCount: closedConversationCount(context),
             sharedCounts: source.scope === 'shared' ? null : context.scopes.sharedCounts(),
-          })}\n${storageLine}\n${ragLine}`;
+          })}\n${storageLine}\n${ragLine}\n${usageLine}\n${incidentLine}`;
         }
 
         throw new Error(`未知 action：${String(action)}`);
@@ -1060,6 +1355,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         + '两者兼有的问题走混合（SQL 出统计 + 向量补相关文档）；'
         + 'SQL 翻译不了时回退向量，向量零命中时反向用 SQL 兜底。'
         + 'JSON 是基础底座，SQL 与 RAG 都是从 JSON 派生出来的视图。'
+        + '排序会叠加本对话的最近使用权重（14 天半衰期，只影响本对话），结果里标出权重。'
         + '默认跨对话检索：本对话、其他对话、共享层都会命中，结果逐条标注来源对话。'
         + '需要历史约定、先前决策、错误修复记录或界面事实时先检索，不要凭空猜测。',
       parameters: {
@@ -1114,6 +1410,11 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         const scope = ['all', 'session', 'shared'].includes(args?.scope) ? args.scope : 'all';
         const context = memoryContext(config, exec, deps, runtime);
         const sources = memorySources(context, scope);
+        // Usage weights belong to the caller: own conversation, or the shared
+        // layer when the caller explicitly searches it.
+        const callerStore = scope === 'shared'
+          ? context.scopes.sharedStore()
+          : memorySources(context, 'session')[0].store;
         const topK = Number.isInteger(args?.top_k) && args.top_k > 0 ? args.top_k : config.defaultTopK;
 
         // Route: metrics / aggregation / exact ids → SQL; fuzzy documents → vector;
@@ -1138,6 +1439,11 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         // fallback when SQL translation fails, and can itself be backed by SQL
         // when the vector side has no hits.
         const localRun = () => {
+          // Usage weights belong to the caller's conversation: a cross-conversation
+          // hit is scored with the caller's own usage, not the owner's.
+          const weights = typeof callerStore.knowledgeWeights === 'function'
+            ? callerStore.knowledgeWeights()
+            : {};
           const merged = [];
           for (const source of sources) {
             const hits = source.store.search(query, {
@@ -1146,8 +1452,11 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
               topK,
             });
             for (const hit of hits) {
+              const weight = Number.isFinite(weights[hit.doc_id]) ? weights[hit.doc_id] : 0;
               merged.push({
                 ...hit,
+                usage_weight: weight,
+                score: boostScore(hit.score, weight),
                 origin_label: source.label,
                 origin_key: source.key,
                 origin_scope: source.scope,
@@ -1161,9 +1470,15 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             return { empty: true, text: `没有命中「${query}」的知识文档（mode=${mode}，范围=${scope}）。` };
           }
           const hits = merged.slice(0, topK);
+          // A returned hit counts as "used" for the caller's conversation, which
+          // lifts it on later searches here (and only here).
+          if (typeof callerStore.recordKnowledgeUsage === 'function') {
+            callerStore.recordKnowledgeUsage(hits.map((hit) => hit.doc_id));
+          }
           return {
             empty: false,
-            text: `检索范围：${sources.map((source) => source.label).join(' + ')}\n` + formatHits(query, hits, mode),
+            text: `检索范围：${sources.map((source) => source.label).join(' + ')}`
+              + '（排序含本对话最近使用权重）\n' + formatHits(query, hits, mode),
           };
         };
 
@@ -1176,6 +1491,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           const rag = await searchWithRag(config, sources, query, {
             topK,
             category: args?.category ?? null,
+            store: callerStore,
           });
           if (rag.ok === true) {
             picked = { empty: rag.empty === true, text: rag.text };
@@ -1482,6 +1798,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         + 'chat=一次性补全；embed=取文本向量；rerank=按 query 给候选文档打分排序；'
         + 'models=列出模型；probe=检查连通性（deep=true 时顺带探测 embed/rerank 能力）。'
         + '这里的模型主要用作 Embedding 和 Rerank：三层记忆的「外部模型」模式靠 embed + rerank 工作，不依赖 chat。'
+        + 'chat 可传 sources 作为编号来源，回答里用 [n] 标注依据，结果末尾会附「来源对照 + 调用记录」'
+        + '（模型、地址、请求 id、输入 sha256、输出长度、截断状态），方便追溯一次摘要具体来自哪次调用、哪些材料。'
         + '只连插件配置的地址（默认 http://127.0.0.1:8080；填 .../v1 或完整接口地址也认），不写任何记忆。',
       parameters: {
         action: {
@@ -1499,6 +1817,13 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           type: 'array',
           items: { type: 'object', additionalProperties: true },
           description: 'chat 用：[{role, content}]，适合多轮或自定义角色；与 prompt 二选一。',
+        },
+        sources: {
+          type: 'array',
+          items: { type: 'object', additionalProperties: true },
+          description:
+            'chat 用：可选来源材料，每项 {id?, text, url?}（字符串也可）。会编号并要求模型用 [n] 标注依据；'
+            + '结果末尾附每条来源是否被引用，以及调用记录。',
         },
         temperature: { type: 'number', description: 'chat 用：0~2，默认交给模型。' },
         max_tokens: { type: 'integer', description: 'chat 用：最多生成多少 token。' },
@@ -1574,20 +1899,54 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         }
 
         if (action !== 'chat') throw new Error(`未知 action：${String(action)}`);
+        const sources = normalizeChatSources(args?.sources);
+        const sourcePrompt = buildChatSourcePrompt(sources, { json: args?.json === true });
+        const system = [typeof args?.system === 'string' ? args.system : '', sourcePrompt]
+          .filter((part) => part !== '').join('\n\n');
+        let messages = args?.messages;
+        if (sources.length > 0 && Array.isArray(messages) && messages.length > 0) {
+          const copied = messages
+            .filter((message) => message && typeof message.content === 'string')
+            .map((message) => ({ ...message }));
+          if (copied[0] && copied[0].role === 'system') {
+            copied[0].content = `${sourcePrompt}\n\n${copied[0].content}`;
+          } else {
+            copied.unshift({ role: 'system', content: sourcePrompt });
+          }
+          messages = copied;
+        }
+        const inputText = Array.isArray(messages) && messages.length > 0
+          ? messages.map((message) => `${message.role ?? 'user'}: ${message.content}`).join('\n')
+          : `${system}\n${String(args?.prompt ?? '')}`;
         const result = await externalChat(endpoint, {
-          messages: args?.messages,
+          messages,
           prompt: args?.prompt,
-          system: args?.system,
+          system,
           temperature: args?.temperature,
           maxTokens: args?.max_tokens,
           json: args?.json === true,
         });
         if (!result.ok) return `调用外部模型失败：${result.error}`;
-        const usage = result.usage && typeof result.usage === 'object'
-          ? `｜tokens ${result.usage.total_tokens ?? '?'}`
-          : '';
-        return `${clip(result.text, 4000)}\n\n— ${describeEndpoint(endpoint)}${usage}`
-          + `${result.finishReason ? `｜结束：${result.finishReason}` : ''}`;
+        const output = clip(result.text, 4000);
+        const truncated = output.length < result.text.length;
+        const cited = new Set();
+        for (const match of result.text.matchAll(/\[(\d{1,2})\]|【(\d{1,2})】/g)) {
+          const index = Number(match[1] ?? match[2]);
+          if (index >= 1 && index <= sources.length) cited.add(index);
+        }
+        const sourceLines = sources.length > 0
+          ? [`— 来源对照：传入 ${sources.length} 条，模型引用 ${cited.size} 条`]
+            .concat(sources.map((source, index) => (
+              `[${index + 1}] ${cited.has(index + 1) ? '✓ 已引用' : '· 未引用'}`
+              + `｜${source.id}${source.url ? `｜${source.url}` : ''}`
+            )))
+          : [];
+        return [
+          output,
+          '',
+          formatChatTrace({ endpoint, result, inputText, output, truncated }),
+          ...sourceLines,
+        ].join('\n');
       },
     },
   ];
@@ -2011,6 +2370,31 @@ export function installContextManagement(ctx, config, deps, runtime) {
     runTopicalClear(session, { label });
   };
 
+  /** Keep automatic snapshots at or below the cap, deleting near-duplicates first. */
+  const pruneAutoSnapshots = (store, max) => {
+    const rows = store.listSnapshots().filter(isAutoSnapshot);
+    if (rows.length <= max) return [];
+    const entries = [];
+    for (const row of rows) {
+      const data = store.loadSnapshot(row.snapshot_id);
+      if (!data) continue;
+      entries.push({
+        snapshot_id: row.snapshot_id,
+        name: row.name,
+        timestamp: row.timestamp,
+        state: data.state,
+      });
+    }
+    const plan = planSnapshotPrune(entries, { max });
+    for (const removed of plan.removed) store.removeSnapshot(removed.snapshot_id);
+    return plan.removed;
+  };
+
+  const snapshotCounters = runtime.snapshotCounters instanceof Map
+    ? runtime.snapshotCounters
+    : new Map();
+  runtime.snapshotCounters = snapshotCounters;
+
   const onSessionEvent = (session, event) => {
     if (!session || !event || event.type !== 'turn/end') return;
     const id = String(session.id);
@@ -2023,6 +2407,53 @@ export function installContextManagement(ctx, config, deps, runtime) {
       // Fallback for conversations that predate this plugin load: ensure the
       // directory exists and refresh the generated title.
       rememberConversation(session);
+    }
+
+    // Automatic exact snapshots run independently of the tidying switch: every
+    // N turns the recent window is written to snapshots/. They are deliberately
+    // not tied to `autoEnabled`, so a conversation can keep checkpoints while
+    // automatic clearing stays off. Subagents never write them.
+    if (!isSubagent && config.autoSnapshot !== false) {
+      const count = (snapshotCounters.get(id) ?? 0) + 1;
+      if (count >= config.autoSnapshotEvery) {
+        snapshotCounters.delete(id);
+        try {
+          const context = memoryContext(config, { agent: { session } }, deps, runtime);
+          const store = writeSource(context, 'session').store;
+          const built = buildContextSnapshot(session.ownEvents(), { maxChars: config.maxContextChars });
+          if (built) {
+            const info = store.snapshot({
+              name: `${AUTO_SNAPSHOT_PREFIX}t${built.turnTo}`,
+              state: {
+                kind: 'auto-snapshot',
+                session_id: id,
+                turn_from: built.turnFrom,
+                turn_to: built.turnTo,
+                turn_count: built.turnCount,
+                chars: built.chars,
+                text: built.text,
+              },
+              metadata: {
+                kind: 'auto-snapshot',
+                session_id: id,
+                turn_from: built.turnFrom,
+                turn_to: built.turnTo,
+              },
+            });
+            const removed = pruneAutoSnapshots(store, config.autoSnapshotMax);
+            // eslint-disable-next-line no-console
+            console.log(`[ai-for-memory] 自动快照：${info.snapshot_id}（第 ${built.turnFrom}-${built.turnTo} 轮）`
+              + (removed.length > 0
+                ? `；清理 ${removed.length} 个（${removed.map((row) => `${row.snapshot_id} 相似度 ${row.similarity}`).join('，')}）`
+                : ''));
+          }
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.error(`[ai-for-memory] 自动快照失败：${error?.message ?? error}`);
+        }
+      } else {
+        snapshotCounters.set(id, count);
+      }
     }
 
     // Automatic archiving never runs for subagents; a manual `clear` still

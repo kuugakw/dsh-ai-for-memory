@@ -9,7 +9,7 @@ import { MemoryScopes, sessionKey } from '../lib/scopes.js';
 import { decodeWorkspaceBucket, encodeWorkspace, resolveWorkspacePath, workspaceIndex } from '../lib/dsh-workspace.js';
 import {
   chat, embed, listModels, normalizeExternal, parseEmbeddingResponse, parseRerankResponse,
-  probe, resolveBaseUrl,
+  probe, resolveBaseUrl, embedEndpoint, rerankEndpoint, buildRequest,
 } from '../lib/external.js';
 import {
   classifyRecord,
@@ -21,8 +21,12 @@ import {
 } from '../lib/external-ops.js';
 import { evaluateDecision } from '../lib/decision.js';
 import {
-  buildRagIndex, cosine, ragCandidates, ragStats, readRagIndex, rerankCandidates,
+  buildRagIndex, cosine, ragCandidates, ragManifestPath, ragModelStatus, ragStats, readRagIndex, rerankCandidates,
 } from '../lib/rag.js';
+import {
+  exportArtifact, knowledgeExportPayload, normalizeExportFormat, normalizeExportTypeList,
+  writeExportArtifacts, writeKnowledgeExport,
+} from '../lib/export.js';
 import { knowledgeDatabasePath, sqliteAvailable } from '../lib/knowledge-sqlite.js';
 import {
   formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
@@ -33,10 +37,14 @@ import { buildUiState } from '../lib/ui-state.js';
 import { collectTurnDigest } from '../lib/auto.js';
 import { buildContextSnapshot } from '../lib/context.js';
 import { contentTokens, selectTurnsByTopic, topicSimilarity } from '../lib/similarity.js';
+import {
+  AUTO_SNAPSHOT_PREFIX, isAutoSnapshot, planSnapshotPrune, snapshotText,
+} from '../lib/snapshot.js';
 import { exceedsUsageThreshold, formatPressure, usagePercentOf } from '../lib/pressure.js';
+import { boostScore, recencyWeight, USAGE_HALF_LIFE_DAYS } from '../lib/usage.js';
 import {
   candidatesFromDecision, candidatesFromRecord, candidatesFromTurn, findDuplicate,
-  knowledgeKey, normalizeCategory, normalizeSource, stripInjectedText, withTokens,
+  KNOWLEDGE_CATEGORIES, knowledgeKey, normalizeCategory, normalizeSource, stripInjectedText, withTokens,
 } from '../lib/knowledge.js';
 import { listRootRows, readRoots, rememberRoot, resolveRegisteredRoot } from '../lib/registry.js';
 import { apply, compileParameterSchema, Config, createTools, installContextManagement, normalizeConfig, workspaceOf } from '../index.js';
@@ -1929,6 +1937,249 @@ test('RAG candidates honour the category filter and rerank falls back to embeddi
   assert.equal(reranked.hits.length, 1);
 });
 
+test('knowledge export is lossless JSON and keeps every field', () => {
+  const root = tempRoot();
+  const store = new MemoryStore(root).init();
+  store.remember({
+    doc_id: 'k_export',
+    text: '导出必须是完整副本，不裁剪任何字段',
+    category: 'project_facts',
+    source: 'user',
+    tags: ['export', 'backup'],
+    url: 'https://example.com/export',
+    confidence: 0.9,
+  });
+  const payload = knowledgeExportPayload(store, { scope: 'session', label: '本对话', format: 'json' });
+  assert.equal(payload.ok, true);
+  assert.equal(payload.docs, 1);
+  assert.ok(payload.bytes > 0);
+  assert.ok(payload.filename.endsWith('.json'));
+  const bundle = JSON.parse(payload.content);
+  assert.equal(bundle.kind, 'ai-for-memory-knowledge');
+  assert.equal(bundle.version, 1);
+  assert.equal(bundle.counts.total, 1);
+  const doc = bundle.docs[0];
+  assert.equal(doc.doc_id, 'k_export');
+  assert.equal(doc.text, '导出必须是完整副本，不裁剪任何字段');
+  assert.deepEqual(doc.tags, ['export', 'backup']);
+  assert.equal(doc.url, 'https://example.com/export');
+  assert.equal(doc.confidence, 0.9);
+  assert.ok(Array.isArray(doc.evidence));
+  assert.equal(normalizeExportFormat('md'), 'markdown');
+  assert.equal(normalizeExportFormat('json'), 'json');
+  assert.equal(normalizeExportFormat('pdf'), '');
+});
+
+test('knowledge export writes to another directory and renders Markdown', () => {
+  const root = tempRoot();
+  const store = new MemoryStore(root).init();
+  store.remember({ doc_id: 'k_a', text: '归档分类要稳定', category: 'project_facts', source: 'user' });
+  const dest = path.join(root, 'offline-disk');
+  const written = writeKnowledgeExport(store, { dest, format: 'json' });
+  assert.equal(written.ok, true);
+  assert.equal(written.docs, 1);
+  assert.equal(path.dirname(written.path), dest);
+  assert.equal(fs.existsSync(written.path), true);
+  const parsed = JSON.parse(fs.readFileSync(written.path, 'utf8'));
+  assert.equal(parsed.docs[0].doc_id, 'k_a');
+
+  const md = knowledgeExportPayload(store, { scope: 'shared', label: '共享', format: 'markdown' });
+  assert.equal(md.ok, true);
+  assert.ok(md.filename.endsWith('.md'));
+  assert.match(md.content, /# 知识库导出/);
+  assert.match(md.content, /## project_facts/);
+  assert.match(md.content, /归档分类要稳定/);
+  assert.match(md.content, /来源 user/);
+  assert.equal(normalizeExportFormat('markdown'), 'markdown');
+
+  const badFormat = writeKnowledgeExport(store, { dest, format: 'pdf' });
+  assert.equal(badFormat.ok, false);
+  assert.match(badFormat.error, /json|markdown/);
+});
+
+test('knowledge, SQL and RAG exports can be selected in any combination', async (t) => {
+  if (!sqliteAvailable()) {
+    t.skip('node:sqlite is unavailable on this Node build');
+    return;
+  }
+  const root = tempRoot();
+  const store = new MemoryStore(root).init();
+  store.remember({ doc_id: 'k_a', text: '组合导出必须完整', category: 'project_facts', source: 'user' });
+
+  assert.deepEqual(normalizeExportTypeList(['knowledge', 'sqlite']), ['knowledge', 'sql']);
+  assert.deepEqual(normalizeExportTypeList(['rag']), ['rag']);
+  assert.deepEqual(normalizeExportTypeList(['knowledge', 'pdf']), []);
+
+  // Missing RAG index is reported, not silently skipped.
+  const missingRag = exportArtifact(store, { type: 'rag' });
+  assert.equal(missingRag.ok, false);
+  assert.match(missingRag.error, /RAG/);
+
+  const dest = path.join(root, 'multi-export');
+  const written = writeExportArtifacts(store, { types: ['knowledge', 'sql'], dest, format: 'json' });
+  assert.equal(written.ok, true);
+  assert.equal(written.files.length, 2);
+  assert.ok(written.bytes > 0);
+  const sqlFile = written.files.find((row) => row.type === 'sql').path;
+  assert.equal(path.dirname(sqlFile), dest);
+  assert.ok(sqlFile.endsWith('.sqlite'));
+  const knowledgeFile = written.files.find((row) => row.type === 'knowledge').path;
+  assert.equal(JSON.parse(fs.readFileSync(knowledgeFile, 'utf8')).docs[0].doc_id, 'k_a');
+
+  // The exported .sqlite is a complete, queryable copy of the JSON base.
+  const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
+  const db = new DatabaseSync(sqlFile);
+  const rows = db.prepare('SELECT doc_id, text FROM knowledge_docs').all();
+  db.close();
+  assert.deepEqual(rows.map((row) => row.doc_id), ['k_a']);
+  assert.equal(rows[0].text, '组合导出必须完整');
+
+  // With a sharded index present, RAG export merges it into one JSON file.
+  const fakeEmbed = async (url, init) => {
+    const body = JSON.parse(init.body);
+    const inputs = Array.isArray(body.input) ? body.input : [body.input];
+    return new Response(JSON.stringify({ data: inputs.map(() => ({ embedding: [1, 0, 0] })) }), { status: 200 });
+  };
+  await buildRagIndex(store, normalizeExternal({}), { fetchImpl: fakeEmbed });
+  const rag = exportArtifact(store, { type: 'rag' });
+  assert.equal(rag.ok, true);
+  assert.ok(rag.filename.endsWith('.json'));
+  const exportedRag = JSON.parse(rag.buffer.toString('utf8'));
+  assert.ok(exportedRag.docs.k_a);
+  assert.equal(exportedRag.docs.k_a.text, '组合导出必须完整');
+});
+
+test('RAG index is sharded and rewrites only changed shards', async () => {
+  const root = tempRoot();
+  let docs = [
+    { doc_id: 'k_a', text: 'aaaa', category: 'ui_facts', source: 'user' },
+    { doc_id: 'k_b', text: 'bbbb', category: 'errors_fixes', source: 'user' },
+  ];
+  const store = { root, documents: () => docs };
+  const fake = async (url, init) => {
+    const body = JSON.parse(init.body);
+    const inputs = Array.isArray(body.input) ? body.input : [body.input];
+    return new Response(JSON.stringify({
+      data: inputs.map((text) => ({ embedding: [text.length, 1, 0] })),
+    }), { status: 200 });
+  };
+  const first = await buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake });
+  assert.equal(first.ok, true);
+  assert.equal(first.shards, 2);
+  const manifest1 = JSON.parse(fs.readFileSync(ragManifestPath(root), 'utf8'));
+  assert.equal(manifest1.layout, 'sharded');
+  assert.equal(manifest1.count, 2);
+  assert.equal(manifest1.shards.length, 2);
+  assert.equal(fs.existsSync(path.join(root, 'rag', 'index.json')), false);
+  for (const shard of manifest1.shards) {
+    assert.equal(fs.existsSync(path.join(root, 'rag', shard.file)), true);
+  }
+  const hashes1 = Object.fromEntries(manifest1.shards.map((shard) => [shard.id, shard.hash]));
+
+  // Nothing changed: no embedding and no shard rewrite.
+  const second = await buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake });
+  assert.equal(second.embedded, 0);
+  const manifest2 = JSON.parse(fs.readFileSync(ragManifestPath(root), 'utf8'));
+  assert.deepEqual(Object.fromEntries(manifest2.shards.map((shard) => [shard.id, shard.hash])), hashes1);
+
+  // Only the touched category's shard changes.
+  docs = docs.map((doc) => (doc.doc_id === 'k_a' ? { ...doc, text: 'aaaa-changed' } : doc));
+  const third = await buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake });
+  assert.equal(third.embedded, 1);
+  const manifest3 = JSON.parse(fs.readFileSync(ragManifestPath(root), 'utf8'));
+  const hashes3 = Object.fromEntries(manifest3.shards.map((shard) => [shard.id, shard.hash]));
+  assert.notEqual(hashes3.ui_facts, hashes1.ui_facts);
+  assert.equal(hashes3.errors_fixes, hashes1.errors_fixes);
+});
+
+test('single-file RAG indexes are rejected and deleted on rebuild', async () => {
+  const root = tempRoot();
+  fs.mkdirSync(path.join(root, 'rag'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'rag', 'index.json'), JSON.stringify({
+    version: 1,
+    model: 'old-model',
+    dim: 3,
+    built_at: '2026-01-01T00:00:00.000Z',
+    docs: { k_old: { hash: 'h_old', vector: [1, 0, 0] } },
+  }));
+  // The old layout is no longer readable at all.
+  assert.equal(readRagIndex(root), null);
+  assert.equal(ragStats(root).built, false);
+  fs.writeFileSync(ragManifestPath(root), JSON.stringify({
+    version: 2, layout: 'sharded', model: 'old', endpoint: 'http://old', dim: 3, shards: [],
+  }));
+  // Older sharded manifests are invalidated too, forcing a rebuild.
+  assert.equal(readRagIndex(root), null);
+  assert.equal(ragStats(root).built, false);
+
+  const docs = [{ doc_id: 'k_new', text: 'nn', category: 'ui_facts', source: 'user' }];
+  const store = { root, documents: () => docs };
+  const fake = async () => new Response(JSON.stringify({ data: [{ embedding: [2, 1, 0] }] }), { status: 200 });
+  const built = await buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake });
+  assert.equal(built.ok, true);
+  // Rebuilding cleans up the old file instead of migrating it.
+  assert.equal(fs.existsSync(path.join(root, 'rag', 'index.json')), false);
+  assert.equal(fs.existsSync(ragManifestPath(root)), true);
+  assert.equal(readRagIndex(root).docs.k_new.hash.length > 0, true);
+  assert.equal(ragStats(root).layout, 'sharded');
+});
+
+test('RAG requires both embedding and rerank models', () => {
+  assert.equal(ragModelStatus({}).ready, false);
+  assert.deepEqual(ragModelStatus({}).missing.length, 2);
+  assert.equal(ragModelStatus({ externalEmbedModel: 'bge-m3' }).ready, false);
+  assert.equal(ragModelStatus({ externalRerankModel: 'reranker' }).ready, false);
+  assert.equal(ragModelStatus({
+    externalEmbedModel: 'bge-m3',
+    externalRerankModel: 'reranker',
+  }).ready, true);
+});
+
+test('concurrent RAG builds serialize and a stale writer lock is ignored', async () => {
+  const root = tempRoot();
+  const docs = Array.from({ length: 6 }, (_, index) => ({
+    doc_id: `k_${index}`,
+    text: `text-${index}`,
+    category: index % 2 === 0 ? 'ui_facts' : 'errors_fixes',
+    source: 'user',
+  }));
+  const store = { root, documents: () => docs };
+  const fake = async (url, init) => {
+    const body = JSON.parse(init.body);
+    const inputs = Array.isArray(body.input) ? body.input : [body.input];
+    return new Response(JSON.stringify({
+      data: inputs.map((text) => {
+        const vector = [0, 0, 0, 0, 0, 0];
+        const index = Number(String(text).split('-')[1]);
+        vector[Number.isInteger(index) ? index % 6 : 0] = 1;
+        return { embedding: vector };
+      }),
+    }), { status: 200 });
+  };
+  // A stale lock from a dead writer must not block the build.
+  fs.mkdirSync(path.join(root, 'rag'), { recursive: true });
+  const lockFile = path.join(root, 'rag', '.lock');
+  fs.writeFileSync(lockFile, 'stale');
+  const past = new Date(Date.now() - 120_000);
+  fs.utimesSync(lockFile, past, past);
+
+  const [a, b] = await Promise.all([
+    buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake }),
+    buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake }),
+  ]);
+  assert.equal(a.ok, true);
+  assert.equal(b.ok, true);
+  const manifest = JSON.parse(fs.readFileSync(ragManifestPath(root), 'utf8'));
+  assert.equal(manifest.count, docs.length);
+  assert.equal(fs.existsSync(lockFile), false);
+  const candidates = ragCandidates(store, [1, 1, 1, 1, 1, 1], { topK: 10 });
+  assert.equal(candidates.ok, true);
+  assert.equal(candidates.candidates.length, 6);
+  // Cached text/category in shards means the search path does not need this.
+  const textOnly = { root, documents: () => [] };
+  assert.equal(ragCandidates(textOnly, [1, 1, 1, 1, 1, 1], { topK: 10 }).candidates.length, 6);
+});
+
 test('knowledge backend config accepts json / sqlite and rejects unknown values', () => {
   assert.equal(normalizeConfig({}).knowledgeBackend, 'json');
   assert.equal(normalizeConfig({ knowledgeBackend: 'sqlite' }).knowledgeBackend, 'sqlite');
@@ -2053,4 +2304,535 @@ test('SQL route answers counts and groups from the JSON base', (t) => {
   const merged = store.documents().map((doc) => ({ ...doc, origin: '本对话' }));
   const mergedTotal = runSqlQuery(merged, '知识一共有多少条');
   assert.equal(mergedTotal.rows[0].n, 3);
+});
+
+test('知识权重按最近使用衰减，且只作用于本对话', () => {
+  const now = Date.parse('2026-11-17T12:00:00.000Z');
+  const day = 24 * 60 * 60 * 1000;
+  assert.equal(recencyWeight(new Date(now).toISOString(), now), 1);
+  assert.ok(Math.abs(recencyWeight(new Date(now - 14 * day).toISOString(), now) - 0.5) < 1e-9);
+  assert.ok(Math.abs(recencyWeight(new Date(now - 28 * day).toISOString(), now) - 0.25) < 1e-9);
+  assert.equal(USAGE_HALF_LIFE_DAYS, 14);
+  assert.equal(recencyWeight('not-a-date', now), 0);
+  assert.equal(boostScore(1, 0), 1);
+  assert.equal(boostScore(1, 1), 1.25);
+
+  const memoryRoot = tempRoot();
+  const scopes = new MemoryScopes(memoryRoot);
+  const a = scopes.sessionStore(sessionKey('conv-weight-a'));
+  const b = scopes.sessionStore(sessionKey('conv-weight-b'));
+  const doc = a.remember({
+    text: '知识权重按对话隔离，A 对话最近使用不会抬高 B 对话的排序。',
+    category: 'project_facts',
+    source: 'user',
+  }, { confirm: true });
+  assert.equal(doc.needs_confirm, undefined);
+
+  // 刚用过：A 权重约 1；B 从未使用：0。
+  a.recordKnowledgeUsage([doc.doc_id], { at: new Date(now).toISOString() });
+  assert.ok(a.knowledgeWeight(doc.doc_id, now) > 0.999);
+  assert.equal(b.knowledgeWeight(doc.doc_id, now), 0);
+  assert.equal(a.knowledgeUsage()[doc.doc_id].count, 1);
+
+  // 同一份文档在 B 里的权重来自 B 自己的使用时间（28 天前 -> 0.25）。
+  b.recordKnowledgeUsage([doc.doc_id], { at: new Date(now - 28 * day).toISOString() });
+  assert.ok(Math.abs(b.knowledgeWeight(doc.doc_id, now) - 0.25) < 1e-9);
+  assert.ok(a.knowledgeWeight(doc.doc_id, now) > 0.999);
+
+  // 使用记录不进入文档列表；forget 后记录一并清掉。
+  assert.equal(a.documents().some((row) => row.doc_id === doc.doc_id), true);
+  a.forgetKnowledge(doc.doc_id);
+  assert.equal(a.knowledgeUsage()[doc.doc_id], undefined);
+});
+
+test('aim_search 记录本对话使用并标注权重', async () => {
+  const root = tempRoot();
+  const previousHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = path.join(root, 'dsh-home');
+  try {
+    const memoryRoot = path.join(root, 'memory');
+    const registered = [];
+    apply({
+      tools: { register: (tool) => { registered.push(tool); return () => {}; } },
+      effect: (fn) => fn(),
+      on: () => () => {},
+      get: () => undefined,
+    }, { root: memoryRoot });
+    const memory = registered.find((tool) => tool.name === 'aim_memory');
+    const searchTool = registered.find((tool) => tool.name === 'aim_search');
+    const execA = {
+      agent: { session: { id: 'conv-weight-a', header: { cwd: root }, ownEvents: () => [] } },
+    };
+    const execB = {
+      agent: { session: { id: 'conv-weight-b', header: { cwd: root }, ownEvents: () => [] } },
+    };
+
+    await memory.execute({
+      action: 'remember',
+      doc_id: 'weight_marker_doc',
+      text: '权重标记测试：本对话最近使用过的知识应该排得更靠前。',
+      category: 'project_facts',
+      source: 'user',
+    }, execA);
+
+    const first = await searchTool.execute({ query: '权重标记测试', scope: 'session' }, execA);
+    assert.match(first, /排序含本对话最近使用权重/);
+    assert.match(first, /权重 1\.00（最近使用）/);
+    assert.match(first, /weight_marker_doc/);
+
+    // A 的搜索只写 A 自己的使用记录。
+    const aStore = new MemoryScopes(memoryRoot).sessionStore(sessionKey('conv-weight-a'));
+    const aUsage = aStore.knowledgeUsage();
+    assert.ok(Object.keys(aUsage).length >= 1);
+    assert.ok(aUsage.weight_marker_doc.count >= 1);
+
+    // B 从未用过这条知识：即使跨对话命中，也按 B 自己的 0 权重展示。
+    const second = await searchTool.execute({ query: '权重标记测试' }, execB);
+    assert.match(second, /weight_marker_doc/);
+    assert.match(second, /权重 0\.00（未使用）/);
+
+    // B 这次检索之后才记录了自己的使用，A 的记录没有被改动。
+    assert.equal(aStore.knowledgeUsage().weight_marker_doc.count, aUsage.weight_marker_doc.count);
+  } finally {
+    process.env.DSH_HOME = previousHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('事故记录是独立类型，写入知识库且不吃冲突闸门', () => {
+  const store = new MemoryStore(tempRoot());
+  store.remember({
+    doc_id: 'deploy_fact',
+    text: '部署脚本在 scripts/deploy.sh，发布前先跑测试',
+    category: 'errors_fixes',
+  });
+  const incident = store.recordIncident({
+    title: 'PowerShell 改写 index.js 导致中文编码损坏',
+    what_happened: '用 Get-Content | Set-Content 做替换，UTF-8 中文被按 ANSI 解码后写回。',
+    impact: 'index.js 中文乱码、语法检查失败；从 git HEAD 与会话编辑日志恢复。',
+    cause: 'Shell 以 ANSI 读取 UTF-8 文件，再以 UTF-8 写回乱码字符串。',
+    fix: '重放提交之后的 edit 恢复文件，68 个测试全过。',
+    prevention: '不再用 shell 管道改写源码，只用 edit/write。',
+    severity: 'high',
+    status: 'resolved',
+    occurred_at: '2026-11-17T14:30:00.000Z',
+  });
+  assert.equal(incident.category, 'incidents');
+  assert.equal(incident.source, 'incident');
+  assert.equal(incident.needs_confirm, undefined);
+  assert.match(incident.text, /^\[事故\] PowerShell/);
+  assert.match(incident.text, /发生时间：2026-11-17T14:30:00.000Z/);
+  assert.match(incident.text, /严重度：high/);
+  assert.match(incident.text, /状态：resolved/);
+  assert.match(incident.text, /预防：不再用 shell/);
+  assert.deepEqual(incident.tags.slice(0, 3), ['incident', 'high', 'resolved']);
+  assert.equal(store.documents().filter((doc) => doc.category === 'incidents').length, 1);
+  assert.equal(normalizeCategory('事故'), 'incidents');
+  assert.ok(KNOWLEDGE_CATEGORIES.includes('incidents'));
+
+  // 普通知识仍然经过冲突闸门，事故类型没有削弱它。
+  const conflict = store.remember({
+    text: '部署脚本在 scripts/deploy.sh，上线前先跑测试',
+    category: 'errors_fixes',
+  });
+  assert.equal(conflict.needs_confirm, true);
+});
+
+test('aim_memory incident 动作单独记录事故并可检索', async () => {
+  const root = tempRoot();
+  const previousHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = path.join(root, 'dsh-home');
+  try {
+    const registered = [];
+    apply({
+      tools: { register: (tool) => { registered.push(tool); return () => {}; } },
+      effect: (fn) => fn(),
+      on: () => () => {},
+      get: () => undefined,
+    }, { root: path.join(root, 'memory') });
+    const memory = registered.find((tool) => tool.name === 'aim_memory');
+    const searchTool = registered.find((tool) => tool.name === 'aim_search');
+    const exec = {
+      agent: { session: { id: 'conv-incident', header: { cwd: root }, ownEvents: () => [] } },
+    };
+
+    const written = await memory.execute({
+      action: 'incident',
+      title: '测试事故：缓存目录写满',
+      what_happened: '临时目录被测试数据写满，写入失败。',
+      impact: '只有临时数据，业务库未受影响。',
+      cause: '测试结束没有清理临时文件。',
+      fix: '删除临时文件后恢复。',
+      prevention: '测试脚本结束时清理临时目录。',
+      severity: 'low',
+      status: 'resolved',
+    }, exec);
+    assert.match(written, /事故已写入知识库/);
+    assert.match(written, /分类：incidents/);
+    assert.match(written, /严重度：low/);
+    assert.match(written, /状态：resolved/);
+
+    const status = await memory.execute({ action: 'status' }, exec);
+    assert.match(status, /事故记录：1 条/);
+    assert.match(status, /独立类型 incidents/);
+
+    const found = await searchTool.execute({
+      query: '缓存目录写满', scope: 'session', route: 'vector', mode: 'bm25',
+    }, exec);
+    assert.match(found, /\[incidents\]/);
+    assert.match(found, /测试事故：缓存目录写满/);
+  } finally {
+    process.env.DSH_HOME = previousHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('云端服务可分别配置嵌入/重排的地址、模型与 API Key', async () => {
+  const config = normalizeExternal({
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini',
+    apiKey: 'sk-main',
+    embedBaseUrl: 'https://api.siliconflow.cn/v1',
+    embedModel: 'BAAI/bge-m3',
+    embedApiKey: 'sk-embed',
+    rerankBaseUrl: 'https://api.jina.ai/v1',
+    rerankModel: 'jina-reranker-v2-base-multilingual',
+    rerankApiKey: 'sk-rerank',
+  });
+  assert.equal(config.embedApiKey, 'sk-embed');
+  assert.equal(config.rerankApiKey, 'sk-rerank');
+
+  const embedEp = embedEndpoint(config);
+  assert.equal(embedEp.apiKey, 'sk-embed');
+  assert.equal(embedEp.model, 'BAAI/bge-m3');
+  const rerankEp = rerankEndpoint(config);
+  assert.equal(rerankEp.apiKey, 'sk-rerank');
+  assert.equal(rerankEp.model, 'jina-reranker-v2-base-multilingual');
+
+  // 没单独配置 key 的端点沿用主 key（本地服务一般留空）。
+  const inherited = normalizeExternal({ apiKey: 'sk-main' });
+  assert.equal(embedEndpoint(inherited).apiKey, 'sk-main');
+  assert.equal(rerankEndpoint(inherited).apiKey, 'sk-main');
+
+  // 云端 HTTPS 地址 + Bearer 鉴权头。
+  const request = buildRequest(embedEp, '/embeddings', { body: { input: 'hi' } });
+  assert.equal(request.url, 'https://api.siliconflow.cn/v1/embeddings');
+  assert.equal(request.init.headers.authorization, 'Bearer sk-embed');
+
+  // 真发一次，确认 request 与响应解析都走云端的形状。
+  const seen = [];
+  const fake = async (url, init) => {
+    seen.push({ url, auth: init.headers.authorization });
+    return new Response(JSON.stringify({ data: [{ embedding: [0.1, 0.2] }] }), { status: 200 });
+  };
+  const result = await embed(config, 'hello', fake);
+  assert.equal(result.ok, true);
+  assert.deepEqual(seen[0], {
+    url: 'https://api.siliconflow.cn/v1/embeddings',
+    auth: 'Bearer sk-embed',
+  });
+});
+
+test('RAG rebuilds every vector when the embedding provider or model changes', async () => {
+  const root = tempRoot();
+  const docs = [
+    { doc_id: 'k_a', text: '面板截图显示按钮位置', category: 'ui_facts', source: 'agent' },
+    { doc_id: 'k_b', text: '超时先重试三次', category: 'errors_fixes', source: 'agent' },
+  ];
+  const store = { root, documents: () => docs };
+  const vectorsOf = (dim) => async (url, init) => {
+    const body = JSON.parse(init.body);
+    const inputs = Array.isArray(body.input) ? body.input : [body.input];
+    return new Response(JSON.stringify({
+      data: inputs.map((text) => ({
+        embedding: Array.from({ length: dim }, (_, index) => (index === 0 ? text.length : 0)),
+      })),
+    }), { status: 200 });
+  };
+  const endpointA = normalizeExternal({ baseUrl: 'http://127.0.0.1:8080', model: 'bge-m3' });
+  const first = await buildRagIndex(store, endpointA, { fetchImpl: vectorsOf(3) });
+  assert.equal(first.dim, 3);
+  assert.equal(first.changed, false);
+  assert.ok(ragStats(root).endpoint.endsWith('/v1'));
+
+  // Same provider + model: unchanged documents keep their vectors.
+  const same = await buildRagIndex(store, endpointA, { fetchImpl: vectorsOf(3) });
+  assert.equal(same.embedded, 0);
+
+  // Same model name, another provider, another dimension: nothing is reused.
+  const endpointB = normalizeExternal({ baseUrl: 'https://api.siliconflow.cn/v1', model: 'bge-m3' });
+  const switched = await buildRagIndex(store, endpointB, { fetchImpl: vectorsOf(5) });
+  assert.equal(switched.ok, true);
+  assert.equal(switched.changed, true);
+  assert.equal(switched.embedded, 2);
+  assert.equal(switched.dim, 5);
+  const reopened = readRagIndex(root);
+  assert.equal(reopened.dim, 5);
+  assert.equal(reopened.endpoint, 'https://api.siliconflow.cn/v1');
+  for (const entry of Object.values(reopened.docs)) assert.equal(entry.vector.length, 5);
+
+  // A query embedded at the old dimension is refused instead of scoring zeros.
+  const oldQuery = ragCandidates(store, [1, 0, 0], {});
+  assert.equal(oldQuery.ok, false);
+  assert.equal(oldQuery.reason, 'dim-mismatch');
+  assert.equal(oldQuery.indexDim, 5);
+  const fresh = ragCandidates(store, [1, 0, 0, 0, 0], {
+    model: 'bge-m3', endpoint: 'https://api.siliconflow.cn/v1',
+  });
+  assert.equal(fresh.ok, true);
+  // Even with the same dimension, model/endpoint drift is reported.
+  assert.equal(ragCandidates(store, [1, 0, 0, 0, 0], { model: 'other' }).reason, 'model-mismatch');
+  assert.equal(ragCandidates(store, [1, 0, 0, 0, 0], {
+    model: 'bge-m3', endpoint: 'https://other.example/v1',
+  }).reason, 'endpoint-mismatch');
+});
+
+test('RAG rebuild never mixes dimensions when the endpoint changes its output', async () => {
+  const root = tempRoot();
+  const docs = [{ doc_id: 'k_a', text: 'alpha', category: 'ui_facts', source: 'agent' }];
+  const store = { root, documents: () => docs };
+  const vectorsOf = (dim) => async (url, init) => {
+    const body = JSON.parse(init.body);
+    const inputs = Array.isArray(body.input) ? body.input : [body.input];
+    return new Response(JSON.stringify({
+      data: inputs.map(() => ({ embedding: Array.from({ length: dim }, (_, index) => (index === 0 ? 1 : 0)) })),
+    }), { status: 200 });
+  };
+  const endpoint = normalizeExternal({});
+  await buildRagIndex(store, endpoint, { fetchImpl: vectorsOf(3) });
+  // A new document arrives after the server silently changed to 4 dimensions.
+  docs.push({ doc_id: 'k_b', text: 'beta', category: 'errors_fixes', source: 'agent' });
+  const rebuilt = await buildRagIndex(store, endpoint, { fetchImpl: vectorsOf(4) });
+  assert.equal(rebuilt.ok, true);
+  assert.equal(rebuilt.dim, 4);
+  assert.equal(rebuilt.embedded, 2);
+  const index = readRagIndex(root);
+  assert.equal(index.dim, 4);
+  assert.equal(index.docs.k_a.vector.length, 4);
+  assert.equal(index.docs.k_b.vector.length, 4);
+});
+
+test('aim_ask chat returns a call trace and a source citation map', async () => {
+  const tools = createTools(normalizeConfig({
+    externalBaseUrl: 'http://127.0.0.1:18099/v1',
+    externalModel: 'mock-chat',
+    externalTimeoutMs: 5000,
+  }));
+  const ask = tools.find((tool) => tool.name === 'aim_ask');
+  assert.ok(ask);
+  const originalFetch = globalThis.fetch;
+  let seen = null;
+  globalThis.fetch = async (url, init) => {
+    seen = { url, body: JSON.parse(init.body) };
+    return new Response(JSON.stringify({
+      id: 'chatcmpl-trace-1',
+      created: 1700000000,
+      model: 'mock-chat-v2',
+      choices: [{ message: { content: '面板范围是两级目录 [1]' }, finish_reason: 'stop' }],
+      usage: { total_tokens: 12 },
+    }), { status: 200 });
+  };
+  try {
+    const out = await ask.execute({
+      action: 'chat',
+      prompt: '总结面板范围',
+      sources: [
+        { id: 'k_a', text: '面板范围是两级目录', url: 'https://example.com/a' },
+        { id: 'k_b', text: '未被引用的来源' },
+      ],
+    });
+    // 调用记录：模型、地址、时间、输入指纹、输出长度、请求 id、tokens。
+    assert.match(out, /调用记录：model=mock-chat-v2/);
+    assert.match(out, /地址=http:\/\/127\.0\.0\.1:18099\/v1/);
+    assert.match(out, /时间=\d{4}-\d{2}-\d{2}T/);
+    assert.match(out, /输入 sha256:[0-9a-f]{12}/);
+    assert.match(out, /输出 \d+ 字/);
+    assert.match(out, /请求 id=chatcmpl-trace-1/);
+    assert.match(out, /tokens=12/);
+    // 来源对照：编号 → id/url，并标明模型是否真的引用。
+    assert.match(out, /来源对照：传入 2 条，模型引用 1 条/);
+    assert.match(out, /\[1\] ✓ 已引用｜k_a｜https:\/\/example\.com\/a/);
+    assert.match(out, /\[2\] · 未引用｜k_b/);
+    // 编号材料确实发给了模型，system 里带引用规则。
+    assert.equal(seen.url, 'http://127.0.0.1:18099/v1/chat/completions');
+    const system = seen.body.messages.find((message) => message.role === 'system');
+    assert.match(system.content, /\[1\] id=k_a url=https:\/\/example\.com\/a/);
+    assert.match(system.content, /每个结论后必须用 \[1\]/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('automatic snapshots prune near-duplicates and keep distinct states', () => {
+  const textA = '面板范围是两级目录，设置页新增自动快照开关';
+  const entries = [
+    { snapshot_id: 's1', state: { text: textA } },
+    { snapshot_id: 's2', state: { text: textA } },
+    { snapshot_id: 's3', state: { text: '数据库迁移前必须备份知识目录' } },
+    { snapshot_id: 's4', state: { text: textA } },
+  ];
+  const plan = planSnapshotPrune(entries, { max: 2 });
+  assert.equal(plan.keep.length, 2);
+  // The distinct topic survives; the newest near-duplicate is the representative.
+  assert.equal(plan.keep[0].snapshot_id, 's3');
+  assert.equal(plan.keep[1].snapshot_id, 's4');
+  assert.deepEqual(plan.removed.map((row) => row.snapshot_id), ['s1', 's2']);
+  assert.ok(plan.removed.every((row) => row.reason === 'similar'));
+
+  // Under the cap nothing is removed at all.
+  assert.equal(planSnapshotPrune(entries, { max: 10 }).removed.length, 0);
+
+  // All-distinct overflow falls back to dropping the oldest entry.
+  const diverse = ['alpha beta', 'gamma delta', 'epsilon zeta']
+    .map((text, index) => ({ snapshot_id: `d${index}`, state: { text } }));
+  const fallback = planSnapshotPrune(diverse, { max: 2, threshold: 0.99 });
+  assert.deepEqual(fallback.removed.map((row) => row.snapshot_id), ['d0']);
+  assert.equal(fallback.removed[0].reason, 'oldest');
+
+  // Name/metadata detection and text extraction.
+  const row = { name: `${AUTO_SNAPSHOT_PREFIX}t5`, state: { text: 'hello' } };
+  assert.equal(isAutoSnapshot(row), true);
+  assert.equal(snapshotText(row), 'hello');
+  assert.equal(isAutoSnapshot({ name: 'manual' }), false);
+});
+
+test('automatic snapshot config defaults and store deletion', () => {
+  const defaults = normalizeConfig({});
+  assert.equal(defaults.autoSnapshot, true);
+  assert.equal(defaults.autoSnapshotEvery, 5);
+  assert.equal(defaults.autoSnapshotMax, 10);
+  assert.equal(normalizeConfig({ autoSnapshot: false }).autoSnapshot, false);
+  assert.equal(normalizeConfig({ autoSnapshotMax: 25 }).autoSnapshotMax, 25);
+  assert.equal(Config['~standard'].validate({ autoSnapshot: 'yes' }).issues.length, 1);
+  assert.equal(Config['~standard'].validate({ autoSnapshotMax: 0 }).issues.length, 1);
+
+  const root = tempRoot();
+  const store = new MemoryStore(root, {});
+  try {
+    const info = store.snapshot({
+      name: `${AUTO_SNAPSHOT_PREFIX}t5`,
+      state: { kind: 'auto-snapshot', text: '面板范围是两级目录' },
+      metadata: { kind: 'auto-snapshot' },
+    });
+    assert.equal(store.listSnapshots().length, 1);
+    assert.equal(store.removeSnapshot(info.snapshot_id), true);
+    assert.equal(store.listSnapshots().length, 0);
+    assert.equal(store.removeSnapshot('missing'), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('automatic snapshots fire every N turns and hold the cap', () => {
+  const root = tempRoot();
+  const workspace = path.join(root, 'workspace');
+  fs.mkdirSync(workspace, { recursive: true });
+  const memoryRoot = path.join(root, 'memory');
+  const registryDir = path.join(root, 'registry');
+  try {
+    const events = [];
+    for (let turn = 1; turn <= 4; turn += 1) {
+      events.push({ type: 'turn/start', data: { turn } });
+      events.push({ type: 'user/message', data: { content: [{ type: 'text', text: `第 ${turn} 轮的问题` }] } });
+      events.push({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: `第 ${turn} 轮的回答` }] } } });
+      events.push({ type: 'turn/end', data: { turn } });
+    }
+    const session = {
+      id: 'session-snapshot',
+      header: { cwd: workspace },
+      ownEvents: () => events,
+    };
+    const handlers = new Map();
+    const agent = { whenIdle: async () => {} };
+    const ctx = {
+      effect: (fn) => fn(),
+      on: (event, handler) => { handlers.set(event, handler); return () => {}; },
+      get: (service) => {
+        if (service === 'agents') return { get: () => agent };
+        return undefined;
+      },
+    };
+    const config = normalizeConfig({
+      root: memoryRoot,
+      autoEnabled: false,
+      autoSnapshot: true,
+      autoSnapshotEvery: 2,
+      autoSnapshotMax: 1,
+    });
+    const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
+    installContextManagement(ctx, config, { registryDir, getService: ctx.get }, runtime);
+    const onSessionEvent = handlers.get('session/event');
+    const store = new MemoryScopes(memoryRoot)
+      .sessionStoreFor('session-snapshot', {}).store;
+
+    onSessionEvent(session, { type: 'turn/end', data: { turn: 1 } });
+    assert.equal(store.listSnapshots().length, 0);
+    onSessionEvent(session, { type: 'turn/end', data: { turn: 2 } });
+    assert.equal(store.listSnapshots().length, 1);
+    assert.match(store.listSnapshots()[0].name, /^auto-snapshot-t/);
+
+    // Another interval creates a snapshot, but the cap keeps exactly one.
+    onSessionEvent(session, { type: 'turn/end', data: { turn: 3 } });
+    onSessionEvent(session, { type: 'turn/end', data: { turn: 4 } });
+    assert.equal(store.listSnapshots().length, 1);
+    const saved = store.loadSnapshot(store.listSnapshots()[0].snapshot_id);
+    assert.equal(saved.state.kind, 'auto-snapshot');
+    assert.match(saved.state.text, /第 1 轮/);
+
+    // Disabled snapshotting leaves the layer untouched.
+    const quietRuntime = { counters: new Map(), pending: new Map(), activity: new Map() };
+    const quietHandlers = new Map();
+    const quietCtx = {
+      effect: (fn) => fn(),
+      on: (event, handler) => { quietHandlers.set(event, handler); return () => {}; },
+      get: (service) => (service === 'agents' ? { get: () => agent } : undefined),
+    };
+    const quiet = normalizeConfig({ root: path.join(root, 'quiet'), autoSnapshot: false, autoSnapshotEvery: 1 });
+    installContextManagement(quietCtx, quiet, { registryDir, getService: quietCtx.get }, quietRuntime);
+    quietHandlers.get('session/event')(session, { type: 'turn/end', data: { turn: 1 } });
+    assert.equal(new MemoryScopes(path.join(root, 'quiet'))
+      .sessionStoreFor('session-snapshot', {}).store.listSnapshots().length, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('RAG build dedupes near-identical documents by embedding', async () => {
+  const root = tempRoot();
+  const docs = [
+    { doc_id: 'k_new', text: '面板范围是两级目录（新）', category: 'ui_facts', source: 'agent', updated_at: '2026-01-03' },
+    { doc_id: 'k_old', text: '面板范围是两级目录（旧）', category: 'ui_facts', source: 'agent', updated_at: '2026-01-02' },
+    { doc_id: 'k_other_cat', text: '面板范围是两级目录（跨分类）', category: 'project_facts', source: 'user', updated_at: '2026-01-01' },
+    { doc_id: 'k_distinct', text: '数据库迁移前必须备份', category: 'ui_facts', source: 'user', updated_at: '2026-01-01' },
+  ];
+  const store = { root, documents: () => docs };
+  const fake = async (url, init) => {
+    const body = JSON.parse(init.body);
+    const inputs = Array.isArray(body.input) ? body.input : [body.input];
+    return new Response(JSON.stringify({
+      data: inputs.map((text) => ({
+        embedding: String(text).includes('面板') ? [1, 0, 0] : [0, 1, 0],
+      })),
+    }), { status: 200 });
+  };
+  try {
+    const built = await buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake });
+    assert.equal(built.ok, true);
+    // k_old is a near-duplicate of k_new in the same category; the cross-category
+    // document and the distinct fact stay indexed.
+    assert.equal(built.indexed, 3);
+    assert.equal(built.deduped, 1);
+    assert.equal(built.duplicates[0].doc_id, 'k_old');
+    assert.equal(built.duplicates[0].duplicate_of, 'k_new');
+    assert.ok(built.duplicates[0].similarity >= 0.95);
+    const index = readRagIndex(root);
+    assert.equal(index.docs.k_old, undefined);
+    assert.ok(index.docs.k_new);
+    assert.ok(index.docs.k_other_cat);
+    assert.ok(index.docs.k_distinct);
+    assert.equal(ragStats(root).docs, 3);
+    assert.equal(ragStats(root).deduped, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
