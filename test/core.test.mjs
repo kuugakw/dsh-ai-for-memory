@@ -3395,7 +3395,13 @@ test('git sync never adopts or excludes files from a parent project repository',
       encoding: 'utf8',
     }).trim();
     assert.equal(path.resolve(top), path.resolve(memory));
-    assert.equal(fs.readFileSync(parentExclude, 'utf8'), parentRules);
+    assert.match(fs.readFileSync(parentExclude, 'utf8'), /project-owned exclude/);
+    assert.match(fs.readFileSync(parentExclude, 'utf8'), /memory\//);
+    const parentStatus = execFileSync('git', ['status', '--porcelain'], {
+      cwd: project,
+      encoding: 'utf8',
+    });
+    assert.doesNotMatch(parentStatus, /memory/);
     assert.equal((await syncStatus(memory)).initialized, true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

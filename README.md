@@ -439,7 +439,7 @@ models/
 - 上传被拒或拉取不能 fast-forward 时停止并报告，不自动合并、不覆盖本地；
 - 主机和普通设备都使用同一个 remote；主机角色只用于组织项目组和操作方向。
 
-Git 仓库建在当前记忆目录根部，本地同步配置放在 `.sync/config.json`，该目录不会进入同步。
+Git 仓库建在当前记忆目录根部，本地同步配置放在 `.sync/config.json`，该目录不会进入同步。默认记忆目录位于项目仓库内时，初始化会把该目录加入父仓库的 `.git/info/exclude`（只在本机生效、不提交），避免项目 `git add .` 把它当成 embedded repository；不会改写项目的 `.gitignore`。
 
 ### 设置
 
