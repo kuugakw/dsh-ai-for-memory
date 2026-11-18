@@ -71,11 +71,51 @@ window.__ModuleLoader__.load({
         exportPick: '至少选择一种导出类型',
         exportStarted: '已开始下载 {n} 个文件。',
         exportHint: '勾选任意组合：知识库（可选 JSON 无损 / Markdown 可读）、SQL 镜像（完整 .sqlite）、RAG 索引（向量文件）。导出是完整副本，不裁剪、不遗忘，浏览器直接下载到你选定的位置。',
-        externalTitle: '外部模型（RAG 用）',
+        externalTitle: '外部模型（检索、归档、提炼、清理）',
         externalBase: 'API 地址',
         externalModel: '模型名（可留空）',
         externalTimeout: '超时（毫秒）',
-        externalHint: '主要用 Embedding 和 Rerank 模型：嵌入地址/模型 + 重排地址/模型留空就沿用主地址。三个开关打开后，归档靠「嵌入找分类 + 重排定胜负」，知识库靠「句子嵌入取最中心」，上下文靠「句子嵌入挑重点」。主地址只在显式调用 chat 时才用。测试连接会顺带检查 embed/rerank 是否启用。',
+        externalHint: 'Embedding 和 Rerank 不只给 RAG 用：归档分类、知识库提炼和上下文清理也可以走它们。本插件不在进程内加载权重或做推理；推荐用 llama.cpp / Ollama / LM Studio 等工具启动模型，再通过 API 接入。模型文件夹放在插件的 models/ 下，详见「本地模型目录」。',
+        localModelsTitle: '本地模型目录（手动放置）',
+        localModelsHint: '插件只读取 models/ 下的分类目录和 model.json，不加载权重、不运行推理。把文件夹放进 models/Embedding 或 models/Rerank，启动本地服务后在下面一键填入地址。',
+        localModelsEmpty: '还没有发现已登记模型。在插件的 models/ 下新建模型文件夹和 model.json。',
+        localModelsRoot: '目录',
+        localModelReady: '已配置 API',
+        localModelUnconfigured: '未配置 API',
+        localModelUse: '填入地址',
+        localModelApplied: '已填入模型地址；确认后点「保存设置」。',
+        localModelReserved: '预留分类，尚未接入调用。',
+        localModelFuture: '其他目录会按名字显示，插件不限制未来的能力类型。',
+        networkTitle: '网络同步（Git，默认关闭）',
+        networkHint: '用于多人项目：每台设备是一个 Git 工作副本，主机提供 SSH/HTTP remote，其他设备推送到主机或从主机拉取。默认不联网；请先手动启用。冲突时只报告，不自动覆盖。',
+        networkEnable: '启用网络同步',
+        networkRole: '本机角色',
+        networkHost: '主机',
+        networkPeer: '非主机',
+        networkRemote: '主机 Git 地址（SSH / HTTP）',
+        networkGroup: '项目组（同一局域网）',
+        networkPaths: '同步内容',
+        networkPathKnowledge: '知识库',
+        networkPathArchive: '归档',
+        networkPathDecisions: '决策',
+        networkPathSnapshots: '快照',
+        networkPathStaging: '过程记录',
+        networkPathContexts: '上下文（含完整对话，慎选）',
+        networkPathSessions: '全部对话目录',
+        networkSave: '保存同步设置',
+        networkInit: '初始化仓库',
+        networkCommit: '提交本地变化',
+        networkUpload: '上传到主机',
+        networkPull: '从主机拉取',
+        networkScan: '检测主机',
+        networkStatus: '状态',
+        networkClean: '工作区干净',
+        networkDirty: '有 {n} 个未提交变化',
+        networkNoRepo: '尚未初始化 Git 仓库',
+        networkSaved: '同步设置已保存',
+        networkDone: '操作完成',
+        networkFailed: '同步操作失败',
+        networkConflict: '拉取/上传被拒绝：主机已有新提交或本地已分叉。不会自动合并，请手动处理后再试。',
         externalTest: '测试连接',
         externalTesting: '测试中…',
         externalOk: '连接正常',
@@ -271,11 +311,51 @@ window.__ModuleLoader__.load({
         exportPick: 'Pick at least one export type',
         exportStarted: 'Started downloading {n} file(s).',
         exportHint: 'Pick any combination: knowledge base (JSON lossless / Markdown readable), SQL mirror (full .sqlite), RAG index (vector file). The export is a complete copy — nothing trimmed or forgotten — and the browser saves it where you choose.',
-        externalTitle: 'External model (for RAG)',
+        externalTitle: 'External model (search, archive, extraction, cleanup)',
         externalBase: 'API address',
         externalModel: 'Model name (optional)',
         externalTimeout: 'Timeout (ms)',
-        externalHint: 'Built around embedding and rerank models: the embedding address/model and the rerank address/model fall back to the main address when empty. With a switch on, archive = embedding picks the category and the reranker breaks ties, knowledge = the most central sentences by embedding, context = the most central sentences of the turns being cleared. The main address is only used for an explicit chat call. Test connection also reports whether embeddings and rerank are enabled.',
+        externalHint: 'Embedding and Rerank are not only for RAG: archive classification, knowledge extraction and context cleanup can use them too. This plugin does not load weights or run inference in-process; run the model with llama.cpp / Ollama / LM Studio and connect over API. Put model folders under the plugin models/ directory; see "Local model folder".',
+        localModelsTitle: 'Local model folder (manual)',
+        localModelsHint: 'The plugin only reads category folders and model.json under models/; it never loads weights or runs inference. Put a folder in models/Embedding or models/Rerank, start the local server, then fill the address below.',
+        localModelsEmpty: 'No registered model found. Create a model folder and model.json under the plugin models/ directory.',
+        localModelsRoot: 'Directory',
+        localModelReady: 'API configured',
+        localModelUnconfigured: 'API not configured',
+        localModelUse: 'Use this address',
+        localModelApplied: 'Model address filled; click "Save settings" to apply.',
+        localModelReserved: 'Reserved category; not wired into calls yet.',
+        localModelFuture: 'Other folders are shown by name; future capabilities are not restricted.',
+        networkTitle: 'Network sync (Git, off by default)',
+        networkHint: 'For multi-person projects: each device is a Git worktree; the host provides an SSH/HTTP remote, peers push/pull from it. No network activity until enabled. Conflicts are reported, never auto-overwritten.',
+        networkEnable: 'Enable network sync',
+        networkRole: 'This device',
+        networkHost: 'Host',
+        networkPeer: 'Peer',
+        networkRemote: 'Host Git remote (SSH / HTTP)',
+        networkGroup: 'Project group (same LAN)',
+        networkPaths: 'Sync content',
+        networkPathKnowledge: 'Knowledge',
+        networkPathArchive: 'Archive',
+        networkPathDecisions: 'Decisions',
+        networkPathSnapshots: 'Snapshots',
+        networkPathStaging: 'Process log',
+        networkPathContexts: 'Contexts (full conversations; use with care)',
+        networkPathSessions: 'All conversation folders',
+        networkSave: 'Save sync settings',
+        networkInit: 'Initialize repository',
+        networkCommit: 'Commit local changes',
+        networkUpload: 'Upload to host',
+        networkPull: 'Pull from host',
+        networkScan: 'Probe host',
+        networkStatus: 'Status',
+        networkClean: 'Working tree clean',
+        networkDirty: '{n} uncommitted change(s)',
+        networkNoRepo: 'Git repository not initialized',
+        networkSaved: 'Sync settings saved',
+        networkDone: 'Done',
+        networkFailed: 'Sync failed',
+        networkConflict: 'Push/pull rejected: the host has newer commits or histories diverged. Nothing was auto-merged; resolve manually and retry.',
         externalTest: 'Test connection',
         externalTesting: 'Testing…',
         externalOk: 'Connected',
@@ -878,6 +958,14 @@ window.__ModuleLoader__.load({
       const [ragBusy, setRagBusy] = React.useState(false);
       // Knowledge storage backend: 'json' (files) or 'sqlite' (queryable db).
       const [formStorage, setFormStorage] = React.useState('json');
+      // Git network sync is device-local and off by default.
+      const [formNetworkEnabled, setFormNetworkEnabled] = React.useState(false);
+      const [formNetworkRole, setFormNetworkRole] = React.useState('peer');
+      const [formNetworkRemote, setFormNetworkRemote] = React.useState('');
+      const [formNetworkGroup, setFormNetworkGroup] = React.useState('');
+      const [formNetworkPaths, setFormNetworkPaths] = React.useState(['knowledge', 'archive', 'decisions', 'snapshots']);
+      const [networkStatus, setNetworkStatus] = React.useState(null);
+      const [networkBusy, setNetworkBusy] = React.useState(false);
       const [formExternalBase, setFormExternalBase] = React.useState('');
       const [formExternalModel, setFormExternalModel] = React.useState('');
       const [formExternalTimeout, setFormExternalTimeout] = React.useState(60000);
@@ -969,6 +1057,13 @@ window.__ModuleLoader__.load({
           if (payload.ragIndex && typeof payload.ragIndex === 'object') setRagIndex(payload.ragIndex);
           if (payload.knowledgeBackend === 'sqlite' || payload.knowledgeBackend === 'json') {
             setFormStorage(payload.knowledgeBackend);
+          }
+          if (payload.network && typeof payload.network === 'object') {
+            setFormNetworkEnabled(payload.network.enabled === true);
+            setFormNetworkRole(payload.network.role === 'host' ? 'host' : 'peer');
+            setFormNetworkRemote(typeof payload.network.remote === 'string' ? payload.network.remote : '');
+            setFormNetworkGroup(typeof payload.network.group === 'string' ? payload.network.group : '');
+            if (Array.isArray(payload.network.paths)) setFormNetworkPaths(payload.network.paths);
           }
           if (typeof payload.similarityThreshold === 'number') setFormThreshold(payload.similarityThreshold);
           if (Number.isInteger(payload.keepRecentTurns)) setFormKeepRecent(payload.keepRecentTurns);
@@ -1185,7 +1280,17 @@ window.__ModuleLoader__.load({
           && payload.knowledgeBackend === body.knowledgeBackend
           && payload.similarityThreshold === body.similarityThreshold
           && payload.keepRecentTurns === body.keepRecentTurns
-          && payload.restoreMaxChars === body.restoreMaxChars;
+          && payload.restoreMaxChars === body.restoreMaxChars
+          && payload.externalBaseUrl === body.externalBaseUrl
+          && payload.externalModel === body.externalModel
+          && payload.externalTimeoutMs === body.externalTimeoutMs
+          && payload.externalEmbedBaseUrl === body.externalEmbedBaseUrl
+          && payload.externalEmbedModel === body.externalEmbedModel
+          && payload.externalRerankBaseUrl === body.externalRerankBaseUrl
+          && payload.externalRerankModel === body.externalRerankModel
+          && payload.archiveExternal === body.archiveExternal
+          && payload.knowledgeExternal === body.knowledgeExternal
+          && payload.contextExternal === body.contextExternal;
         try {
           await callApi('/config', { method: 'POST', body });
           setNotice({ kind: 'ok', text: t.saved });
@@ -1246,6 +1351,76 @@ window.__ModuleLoader__.load({
         } finally {
           setExternalProbing(false);
         }
+      };
+      /** Fill endpoint fields from a discovered models/<category>/<name>/model.json. */
+      const applyLocalModel = (category, model) => {
+        if (!model || model.configured !== true) return;
+        const capability = String(category ?? '').toLowerCase();
+        if (capability.includes('embed')) {
+          setFormEmbedBase(model.baseUrl);
+          setFormEmbedModel(model.model);
+        } else if (capability.includes('rerank')) {
+          setFormRerankBase(model.baseUrl);
+          setFormRerankModel(model.model);
+        } else {
+          // Routing and future categories are discovery-only until the plugin
+          // has a consumer for them. Do not silently stuff them into the chat
+          // endpoint.
+          setNotice({ kind: 'ok', text: t.localModelReserved });
+          return;
+        }
+        setNotice({ kind: 'ok', text: t.localModelApplied });
+      };
+      /** Persist device-local Git sync settings; network stays idle until enabled. */
+      const saveNetwork = async () => {
+        setNetworkBusy(true);
+        setNotice(null);
+        try {
+          const payload = await callApi('/network', {
+            method: 'POST',
+            body: {
+              root: selectedRoot,
+              enabled: formNetworkEnabled,
+              role: formNetworkRole,
+              remote: formNetworkRemote.trim(),
+              group: formNetworkGroup.trim(),
+              paths: formNetworkPaths,
+            },
+          });
+          setNetworkStatus(payload.status ?? null);
+          setNotice({ kind: 'ok', text: t.networkSaved });
+        } catch (error) {
+          setNotice({ kind: 'err', text: `${t.networkFailed}: ${String(error?.message ?? error)}` });
+        } finally {
+          setNetworkBusy(false);
+        }
+      };
+      const runNetwork = async (action) => {
+        setNetworkBusy(true);
+        setNotice(null);
+        try {
+          const payload = await callApi('/network/action', {
+            method: 'POST',
+            body: { root: selectedRoot, action, message: `AI for Memory sync ${new Date().toISOString()}` },
+          });
+          setNetworkStatus(payload.status ?? null);
+          if (payload.ok === true) {
+            setNotice({ kind: 'ok', text: `${t.networkDone}: ${action}` });
+          } else {
+            const detail = payload.result?.error ?? payload.error ?? '';
+            const conflict = /fast-forward|rejected|分叉|non-fast-forward/i.test(detail);
+            setNotice({ kind: 'err', text: conflict ? t.networkConflict : `${t.networkFailed}: ${detail}` });
+          }
+        } catch (error) {
+          setNotice({ kind: 'err', text: `${t.networkFailed}: ${String(error?.message ?? error)}` });
+        } finally {
+          setNetworkBusy(false);
+        }
+      };
+      const toggleNetworkPath = (id) => {
+        setFormNetworkPaths((current) => (current.includes(id)
+          ? current.filter((item) => item !== id)
+          : [...current, id]));
       };
       /** Build/refresh the RAG index for the currently visible scope. */
       const buildRag = async () => {
@@ -1931,6 +2106,42 @@ window.__ModuleLoader__.load({
         h('section', { style: styles.card },
           h('h3', { style: styles.cardTitle }, t.externalTitle),
           h('p', { style: styles.hint }, t.externalHint),
+          h('div', {
+            style: {
+              margin: '8px 0', padding: '8px 10px', border: `1px solid ${colors.border}`,
+              borderRadius: '8px', background: colors.bg2,
+            },
+          },
+          h('div', { style: { fontWeight: 600, fontSize: '12.5px' } }, t.localModelsTitle),
+          h('p', { style: styles.hint }, t.localModelsHint),
+          data?.localModels?.root
+            ? h('p', { style: styles.meta }, `${t.localModelsRoot}: ${data.localModels.root}`)
+            : null,
+          (data?.localModels?.categories ?? []).length === 0
+            ? h('p', { style: styles.hint }, t.localModelsEmpty)
+            : (data.localModels.categories.map((category) => h('div', {
+              key: category.name,
+              style: { marginTop: '6px' },
+            },
+            h('div', { style: { fontWeight: 600, fontSize: '12px' } }, category.name),
+            category.models.length === 0
+              ? h('p', { style: styles.hint }, t.localModelsEmpty)
+              : category.models.map((model) => h('div', {
+                key: model.id,
+                style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginTop: '3px' },
+              },
+              h('span', { style: { fontSize: '12.5px' } }, model.label),
+              h('span', { style: styles.hint },
+                model.configured ? t.localModelReady : (model.error || t.localModelUnconfigured)),
+              model.configured && ['Embedding', 'Rerank'].includes(category.name)
+                ? h('button', {
+                  type: 'button',
+                  className: 'aim-btn',
+                  style: { ...styles.button, padding: '2px 8px', fontSize: '11.5px' },
+                  onClick: () => applyLocalModel(category.name, model),
+                }, t.localModelUse)
+                : null)))),
+          h('p', { style: styles.hint }, t.localModelFuture))),
           h('div', { style: styles.grid2 },
             h('label', { style: styles.label },
               t.externalPreset,
@@ -2111,6 +2322,125 @@ window.__ModuleLoader__.load({
           h('p', { style: styles.hint }, (formArchiveExternal || formKnowledgeExternal || formContextExternal)
             ? t.modeNeedsServer
             : t.modeLocalHint)),
+
+        h('section', { style: styles.card },
+          h('h3', { style: styles.cardTitle }, t.networkTitle),
+          h('p', { style: styles.hint }, t.networkHint),
+          h('div', { style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.networkEnable),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': formNetworkEnabled,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formNetworkEnabled ? styles.switchOptionOn : {}) },
+              onClick: () => setFormNetworkEnabled(true),
+            }, t.switchOn),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': !formNetworkEnabled,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formNetworkEnabled ? {} : styles.switchOptionOn) },
+              onClick: () => setFormNetworkEnabled(false),
+            }, t.switchOff)),
+          h('div', { style: styles.grid2 },
+            h('label', { style: styles.label },
+              t.networkRole,
+              h('select', {
+                style: styles.input,
+                value: formNetworkRole,
+                onChange: (event) => setFormNetworkRole(event.target.value),
+              },
+              h('option', { value: 'host' }, t.networkHost),
+              h('option', { value: 'peer' }, t.networkPeer))),
+            h('label', { style: styles.label },
+              t.networkGroup,
+              h('input', {
+                style: styles.input,
+                value: formNetworkGroup,
+                placeholder: 'project-group',
+                onChange: (event) => setFormNetworkGroup(event.target.value),
+              }))),
+          h('label', { style: styles.label },
+            t.networkRemote,
+            h('input', {
+              style: styles.input,
+              value: formNetworkRemote,
+              placeholder: 'ssh://user@host/path/to/memory.git',
+              onChange: (event) => setFormNetworkRemote(event.target.value),
+            })),
+          h('div', { style: styles.label },
+            t.networkPaths,
+            h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+              ...[
+                ['knowledge', t.networkPathKnowledge],
+                ['archive', t.networkPathArchive],
+                ['decisions', t.networkPathDecisions],
+                ['snapshots', t.networkPathSnapshots],
+                ['staging', t.networkPathStaging],
+                ['contexts', t.networkPathContexts],
+                ['sessions', t.networkPathSessions],
+              ].map(([id, label]) => h('label', {
+                key: id,
+                style: { display: 'inline-flex', gap: '4px', alignItems: 'center', fontSize: '12px' },
+              },
+              h('input', {
+                type: 'checkbox',
+                checked: formNetworkPaths.includes(id),
+                onChange: () => toggleNetworkPath(id),
+              }), label)))),
+          h('div', { style: styles.logBar },
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.primary,
+              disabled: networkBusy,
+              onClick: saveNetwork,
+            }, t.networkSave),
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              disabled: networkBusy || !formNetworkEnabled,
+              onClick: () => runNetwork('init'),
+            }, t.networkInit),
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              disabled: networkBusy || !formNetworkEnabled,
+              onClick: () => runNetwork('commit'),
+            }, t.networkCommit),
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              disabled: networkBusy || !formNetworkEnabled,
+              onClick: () => runNetwork('push'),
+            }, t.networkUpload),
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              disabled: networkBusy || !formNetworkEnabled,
+              onClick: () => runNetwork('pull'),
+            }, t.networkPull),
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              disabled: networkBusy || !formNetworkEnabled,
+              onClick: () => runNetwork('scan'),
+            }, t.networkScan)),
+          networkStatus
+            ? h('p', { style: styles.hint },
+              networkStatus.error
+                ? networkStatus.error
+                : `${t.networkStatus}: ${networkStatus.initialized ? (networkStatus.branch || 'git') : t.networkNoRepo}`
+                  + (networkStatus.dirty > 0 ? `｜${t.networkDirty.replace('{n}', String(networkStatus.dirty))}` : `｜${t.networkClean}`)
+                  + (networkStatus.lastCommit ? `｜${networkStatus.lastCommit.hash} ${networkStatus.lastCommit.subject}` : ''))
+            : null),
 
         h('section', { style: styles.card },
           h('h3', { style: styles.cardTitle }, t.storageSettings),

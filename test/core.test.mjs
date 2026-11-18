@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { execFileSync } from 'node:child_process';
 
 import { MemoryStore } from '../lib/store.js';
 import { ensureDefaultMemoryDirIgnored, ensureGitignoreEntry } from '../lib/gitignore.js';
@@ -35,8 +36,12 @@ import {
 import { RRF_K, reciprocalRankFusion, search, tokenize } from '../lib/retrieval.js';
 import { CATEGORIES, hourKey, listJsonlFiles } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
+import { listLocalModels } from '../lib/model-catalog.js';
+import {
+  commitSync, initSync, pullSync, pushSync, readSyncConfig, syncStatus, writeSyncConfig,
+} from '../lib/git-sync.js';
 import { collectTurnDigest } from '../lib/auto.js';
-import { buildContextSnapshot, formatRestoreContext } from '../lib/context.js';
+import { buildContextSnapshot, collectTurns, formatRestoreContext, snapshotOfTurns } from '../lib/context.js';
 import { contentTokens, selectTurnsByTopic, topicSimilarity } from '../lib/similarity.js';
 import {
   AUTO_SNAPSHOT_PREFIX, isAutoSnapshot, planSnapshotPrune, snapshotText,
@@ -1922,6 +1927,81 @@ test('similarity clear removes unrelated turns and their archive stays restorabl
   }
 });
 
+test('raw context archives keep tool results and untruncated message tails', () => {
+  const long = `${'长'.repeat(5000)}TAIL_MARKER`;
+  const events = [
+    { type: 'turn/start', data: { turn: 1 } },
+    { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: long }] } },
+    { type: 'assistant/message', data: { message: { role: 'assistant', content: [{ type: 'text', text: '调用工具' }] } } },
+    { type: 'tool/result', data: { content: [{ type: 'text', text: 'TOOL_OUTPUT_MARKER' }] } },
+    { type: 'turn/end', data: { turn: 1 } },
+  ];
+  const turns = collectTurns(events);
+  const snapshot = snapshotOfTurns(turns, { maxChars: Infinity });
+  // The display field is intentionally capped, but the raw archive is not.
+  assert.ok(snapshot.turns[0].user.length < long.length);
+  const record = {
+    ...snapshot,
+    raw_events: events.map((event, seq) => ({ ...event, seq })),
+  };
+  const restored = formatRestoreContext(record, { maxChars: 100000 });
+  assert.match(restored, /TOOL_OUTPUT_MARKER/);
+  assert.match(restored, /TAIL_MARKER/);
+});
+
+test('usage pressure resets the whole window instead of keeping topic-similar turns', async () => {
+  const root = tempRoot();
+  try {
+    const { session, log, nodes } = fakeSession(onTopicEvents());
+    const handlers = new Map();
+    const ctx = {
+      effect: (fn) => fn(),
+      on: (event, handler) => { handlers.set(event, handler); return () => {}; },
+      get: (service) => {
+        if (service === 'agents') {
+          return { get: () => ({ whenIdle: async () => {}, runMaintenance: async (task) => task() }) };
+        }
+        if (service === 'tokenMeter') {
+          return { contextPressure: () => ({ pressureTokens: 70000, contextWindow: 100000 }) };
+        }
+        return undefined;
+      },
+    };
+    const config = normalizeConfig({
+      root: path.join(root, 'memory'),
+      autoEnabled: true,
+      autoEveryRounds: 100,
+      contextUsagePercent: 50,
+      keepRecentTurns: 2,
+    });
+    const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
+    installContextManagement(ctx, config, { registryDir: path.join(root, 'registry'), getService: ctx.get }, runtime);
+
+    const before = nodes.length;
+    handlers.get('session/event')(session, { type: 'turn/end', data: { turn: 4 } });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    // Every completed turn, including the on-topic tail that a similarity
+    // clear would keep, is replaced by the hard-reset note.
+    assert.ok(nodes.length < before);
+    const keptText = nodes.map((seq) => log[seq])
+      .flatMap((event) => event.data?.content ?? event.data?.message?.content ?? [])
+      .map((block) => block.text ?? '')
+      .join('\n');
+    assert.doesNotMatch(keptText, /相似度高的留下/);
+    assert.doesNotMatch(keptText, /明白/);
+
+    const store = new MemoryScopes(path.join(root, 'memory')).sessionStoreFor('session-clear', {}).store;
+    const contexts = store.listContexts();
+    assert.equal(contexts.length, 1);
+    assert.match(contexts[0].label, /^auto-usage-/);
+    assert.equal(store.readCompactionStatus().state, 'reset');
+    assert.equal(store.readCompactionStatus().kept, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('manual clear runs at the next pre-step and keeps the in-flight turn', async () => {
   const root = tempRoot();
   try {
@@ -2209,6 +2289,11 @@ test('cache views invalidate across store instances and retention is archive-saf
     assert.equal(second.documents().length, 1);
     first.remember({ text: '第二条跨实例缓存事实', category: 'project_facts' }, { confirm: true });
     assert.equal(second.documents().length, 2);
+    // Cached document objects are frozen; handing them out must not let a caller
+    // poison every later read within the TTL.
+    const visible = first.documents()[0];
+    assert.throws(() => { visible.text = 'MUTATED'; }, TypeError);
+    assert.notEqual(first.documents()[0].text, 'MUTATED');
 
     // A staging hour file older than the cutoff stays until it is archived.
     first.stage({ content: '一条等待归档的旧记录', kind: 'action' });
@@ -2218,6 +2303,8 @@ test('cache views invalidate across store instances and retention is archive-saf
     assert.equal(first.pruneStaging(30), 0);
     assert.equal(fs.existsSync(stagingFile), true);
     first.archive();
+    assert.equal(fs.existsSync(stagingFile), true);
+    assert.equal(first.pruneStaging(30), 1);
     assert.equal(fs.existsSync(stagingFile), false);
     assert.equal(first.archivedCount(), 1);
 
@@ -2688,10 +2775,55 @@ test('knowledge export is lossless JSON and keeps every field', () => {
   assert.deepEqual(doc.tags, ['export', 'backup']);
   assert.equal(doc.url, 'https://example.com/export');
   assert.equal(doc.confidence, 0.9);
+  assert.equal(doc.provenance, 'authored');
+  assert.equal(doc.verified, true);
+  assert.ok(Array.isArray(doc.changes));
   assert.ok(Array.isArray(doc.evidence));
   assert.equal(normalizeExportFormat('md'), 'markdown');
   assert.equal(normalizeExportFormat('json'), 'json');
   assert.equal(normalizeExportFormat('pdf'), '');
+});
+
+test('knowledge export round-trips provenance, verification and changes', () => {
+  const root = tempRoot();
+  try {
+    const sourceStore = new MemoryStore(path.join(root, 'source')).init();
+    const first = sourceStore.remember({
+      text: '本地服务端口默认是 8081',
+      category: 'tools_apis',
+      source: 'reasoning',
+      provenance: 'model',
+      verified: true,
+      changes: [{
+        at: '2026-01-01T00:00:00.000Z',
+        kind: 'number',
+        before: ['8080'],
+        after: ['8081'],
+        previous_text: '本地服务端口默认是 8080',
+      }],
+    }, { confirm: true });
+    const original = sourceStore.documents()[0];
+    assert.equal(original.doc_id, first.doc_id);
+    assert.equal(original.provenance, 'model');
+    assert.equal(original.verified, true);
+    assert.ok(original.changes.length > 0);
+
+    const payload = knowledgeExportPayload(sourceStore, { format: 'json' });
+    const exported = JSON.parse(payload.content).docs[0];
+    assert.equal(exported.provenance, 'model');
+    assert.equal(exported.verified, true);
+    assert.equal(exported.changes.length, original.changes.length);
+
+    // Re-import the full exported document (not just text) into a fresh store.
+    const importedStore = new MemoryStore(path.join(root, 'imported')).init();
+    const imported = importedStore.remember(exported, { confirm: true });
+    assert.equal(imported.provenance, 'model');
+    assert.equal(imported.verified, true);
+    assert.equal(imported.changes.length, original.changes.length);
+    assert.equal(imported.doc_id, original.doc_id);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('knowledge export writes to another directory and renders Markdown', () => {
@@ -2714,6 +2846,7 @@ test('knowledge export writes to another directory and renders Markdown', () => 
   assert.match(md.content, /## project_facts/);
   assert.match(md.content, /归档分类要稳定/);
   assert.match(md.content, /来源 user/);
+  assert.match(md.content, /确认状态 已确认｜provenance authored/);
   assert.equal(normalizeExportFormat('markdown'), 'markdown');
 
   const badFormat = writeKnowledgeExport(store, { dest, format: 'pdf' });
@@ -2753,10 +2886,13 @@ test('knowledge, SQL and RAG exports can be selected in any combination', async 
   // The exported .sqlite is a complete, queryable copy of the JSON base.
   const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
   const db = new DatabaseSync(sqlFile);
-  const rows = db.prepare('SELECT doc_id, text FROM knowledge_docs').all();
+  const rows = db.prepare('SELECT doc_id, text, provenance, verified, changes FROM knowledge_docs').all();
   db.close();
   assert.deepEqual(rows.map((row) => row.doc_id), ['k_a']);
   assert.equal(rows[0].text, '组合导出必须完整');
+  assert.equal(rows[0].provenance, 'authored');
+  assert.equal(rows[0].verified, 1);
+  assert.deepEqual(JSON.parse(rows[0].changes), []);
 
   // With a sharded index present, RAG export merges it into one JSON file.
   const fakeEmbed = async (url, init) => {
@@ -3105,6 +3241,200 @@ test('SQL view keeps provenance/changes and counts copies across conversations',
   } finally {
     try { store.knowledgeSql?.close?.(); } catch { /* ignore */ }
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test('local model folders are discovered by category without loading weights', () => {
+  const root = tempRoot();
+  try {
+    const embedding = path.join(root, 'models', 'Embedding', 'bge-m3');
+    fs.mkdirSync(embedding, { recursive: true });
+    fs.writeFileSync(path.join(embedding, 'model.json'), JSON.stringify({
+      name: 'BGE M3 本地',
+      baseUrl: 'http://127.0.0.1:8080',
+      model: 'bge-m3',
+      apiKey: 'must-not-leak',
+    }));
+    const rerank = path.join(root, 'models', 'Rerank', 'ranker');
+    fs.mkdirSync(rerank, { recursive: true });
+    const routing = path.join(root, 'models', 'Routing', 'router');
+    fs.mkdirSync(routing, { recursive: true });
+    const future = path.join(root, 'models', 'Future', 'thing');
+    fs.mkdirSync(future, { recursive: true });
+    fs.writeFileSync(path.join(future, 'model.json'), JSON.stringify({
+      name: 'future', baseUrl: '', model: '', apiKey: 'also-secret',
+    }));
+
+    const catalog = listLocalModels(path.join(root, 'models'));
+    assert.deepEqual(catalog.categories.map((item) => item.name), ['Embedding', 'Rerank', 'Routing', 'Future']);
+    const embed = catalog.categories[0].models[0];
+    assert.equal(embed.label, 'BGE M3 本地');
+    assert.equal(embed.baseUrl, 'http://127.0.0.1:8080');
+    assert.equal(embed.model, 'bge-m3');
+    assert.equal(embed.configured, true);
+    assert.equal(Object.hasOwn(embed, 'apiKey'), false);
+    assert.equal(catalog.categories[1].models[0].configured, false);
+    assert.equal(catalog.categories[2].models[0].configured, false);
+    assert.equal(catalog.categories[3].models[0].configured, false);
+    assert.equal(catalog.categories[3].models[0].error, '');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('git sync commits only selected layers and stays local until enabled', async (t) => {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' });
+  } catch {
+    t.skip('git is not installed');
+    return;
+  }
+  const root = tempRoot();
+  try {
+    writeSyncConfig(root, {
+      enabled: false,
+      role: 'host',
+      remote: 'ssh://example.invalid/memory.git',
+      group: 'demo',
+      paths: ['knowledge'],
+    });
+    assert.equal((await initSync(root)).ok, false, 'disabled sync must not initialize');
+    writeSyncConfig(root, { enabled: true });
+    assert.equal(readSyncConfig(root).enabled, true);
+    const init = await initSync(root);
+    assert.equal(init.ok, true);
+    // Re-running init must preserve user-owned exclude rules and identity.
+    fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '# keep-this-rule\ncustom-rule\n');
+    execFileSync('git', ['config', 'user.name', 'Alice Existing'], { cwd: root });
+    assert.equal((await initSync(root)).ok, true);
+    assert.match(fs.readFileSync(path.join(root, '.git', 'info', 'exclude'), 'utf8'), /custom-rule/);
+    assert.equal(execFileSync('git', ['config', '--get', 'user.name'], { cwd: root, encoding: 'utf8' }).trim(), 'Alice Existing');
+    const knowledgeDir = path.join(root, 'knowledge');
+    const contextsDir = path.join(root, 'contexts');
+    fs.mkdirSync(knowledgeDir, { recursive: true });
+    fs.mkdirSync(contextsDir, { recursive: true });
+    fs.writeFileSync(path.join(knowledgeDir, 'doc.json'), '{"doc_id":"k_a"}\n');
+    fs.writeFileSync(path.join(contextsDir, 'secret.json'), '{"text":"must not sync"}\n');
+    fs.writeFileSync(path.join(root, 'compaction_status.json'), '{"state":"done"}\n');
+    const committed = await commitSync(root, 'test sync');
+    assert.equal(committed.ok, true);
+    assert.equal(committed.committed, true);
+    const tracked = execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8' }).split(/\r?\n/);
+    assert.ok(tracked.includes('knowledge/doc.json'));
+    assert.equal(tracked.some((file) => file.startsWith('contexts/')), false);
+    assert.equal(tracked.some((file) => file.includes('compaction_status')), false);
+    const status = await syncStatus(root);
+    assert.equal(status.initialized, true);
+    assert.equal(status.dirty, 0);
+    assert.equal(status.config.role, 'host');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test('git sync pulls into a fresh peer that has no local commit yet', async (t) => {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' });
+  } catch {
+    t.skip('git is not installed');
+    return;
+  }
+  const root = tempRoot();
+  try {
+    const remote = path.join(root, 'remote.git');
+    const host = path.join(root, 'host');
+    const peer = path.join(root, 'peer');
+    execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
+    fs.mkdirSync(path.join(host, 'knowledge'), { recursive: true });
+    execFileSync('git', ['init'], { cwd: host, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.name', 'Host'], { cwd: host });
+    execFileSync('git', ['config', 'user.email', 'host@example.invalid'], { cwd: host });
+    fs.writeFileSync(path.join(host, 'knowledge', 'host.json'), '{"doc_id":"k_host"}\n');
+    writeSyncConfig(host, { enabled: true, remote, paths: ['knowledge'] });
+    const pushed = await pushSync(host, 'host initial');
+    assert.equal(pushed.ok, true, pushed.error);
+
+    fs.mkdirSync(peer, { recursive: true });
+    writeSyncConfig(peer, { enabled: true, remote, paths: ['knowledge'] });
+    assert.equal((await initSync(peer)).ok, true);
+    const pulled = await pullSync(peer);
+    assert.equal(pulled.ok, true, pulled.error);
+    assert.equal(fs.existsSync(path.join(peer, 'knowledge', 'host.json')), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test('git sync never adopts or excludes files from a parent project repository', async (t) => {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' });
+  } catch {
+    t.skip('git is not installed');
+    return;
+  }
+  const root = tempRoot();
+  try {
+    const project = path.join(root, 'project');
+    const memory = path.join(project, 'memory');
+    fs.mkdirSync(memory, { recursive: true });
+    execFileSync('git', ['init'], { cwd: project, stdio: 'ignore' });
+    const parentExclude = path.join(project, '.git', 'info', 'exclude');
+    const parentRules = '# project-owned exclude\nkeep-me\n';
+    fs.writeFileSync(parentExclude, parentRules);
+
+    writeSyncConfig(memory, {
+      enabled: true,
+      remote: 'ssh://example.invalid/memory.git',
+      paths: ['knowledge'],
+    });
+    const init = await initSync(memory);
+    assert.equal(init.ok, true);
+
+    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: memory,
+      encoding: 'utf8',
+    }).trim();
+    assert.equal(path.resolve(top), path.resolve(memory));
+    assert.equal(fs.readFileSync(parentExclude, 'utf8'), parentRules);
+    assert.equal((await syncStatus(memory)).initialized, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test('harness checkpoints get a current-request anchor, not a repeated answer', async () => {
+  const root = tempRoot();
+  try {
+    const handlers = new Map();
+    const ctx = {
+      effect: (fn) => fn(),
+      on: (event, handler) => { handlers.set(event, handler); return () => {}; },
+      get: () => undefined,
+    };
+    const config = normalizeConfig({ root: path.join(root, 'memory'), requestAnchor: true });
+    const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
+    installContextManagement(ctx, config, { registryDir: path.join(root, 'registry'), getService: ctx.get }, runtime);
+    const appended = [];
+    const session = {
+      id: 'session-anchor',
+      header: {},
+      ownEvents: () => [
+        { type: 'user/message', seq: 1, data: { content: [{ type: 'text', text: '真实请求：加网络层' }] } },
+        { type: 'user/message', seq: 2, data: { content: [{ type: 'text', text: '<system-reminder>\nA skill is reusable.\n</system-reminder>' }] } },
+        { type: 'user/message', seq: 3, data: { content: [{ type: 'text', text: 'Time sampled while preparing turn 1' }] } },
+      ],
+      append: (type, data, options) => { appended.push({ type, data, options }); },
+    };
+    const preStep = handlers.get('agent/pre-step');
+    await preStep({ agent: { session }, signal: new AbortController().signal }, () => {});
+    assert.equal(appended.length, 1);
+    assert.equal(appended[0].type, 'developer/message');
+    assert.match(appended[0].data.message.content[0].text, /真实请求：加网络层/);
+    // Same checkpoint must not add the anchor again on every step.
+    await preStep({ agent: { session }, signal: new AbortController().signal }, () => {});
+    assert.equal(appended.length, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

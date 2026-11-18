@@ -1,11 +1,25 @@
 # AI for Memory — 给项目一个不会忘事的记忆层
 
-[![Status](https://img.shields.io/badge/status-test%20build%200.1-orange.svg)]()
+[![Status](https://img.shields.io/badge/status-stable%200.1-brightgreen.svg)]()
 [![Version](https://img.shields.io/badge/version-0.1.0-lightgrey.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.1.0 测试版。** 接口、面板和存储格式仍可能调整；升级前请先备份记忆目录。
+> **0.1.0 项目级正式版。** 从这一版起按 `主版本.次版本.修订号` 更新；升级前仍建议备份记忆目录。
 > 插件本体零外部依赖，只使用 Node 内置模块。
+
+## 版本号
+
+从 `0.1.0` 起使用三段式版本号：
+
+| 位置 | 含义 | 示例 |
+|---|---|---|
+| 第一位 | 重大更新：工具大范围修改、接口或存储格式调整、需要迁移 | `0.1.0` → `1.0.0` |
+| 第二位 | 功能更新：新增工具、动作、面板能力，保持向后兼容 | `0.1.0` → `0.2.0` |
+| 第三位 | 修复更新：只修 bug，不改变既有接口 | `0.2.0` → `0.2.1` |
+
+0.x 阶段的重大更新直接升到 `1.0.0`；普通功能更新只升第二位，修复只升第三位。
+
+版本号以 `package.json` 的 `version` 为准，README 徽章、发布标签和面板显示必须与它一致。每次发布都要同时更新这三处。
 
 ---
 
@@ -244,6 +258,16 @@ aim_context action=clear
 - 默认 `provenance: model`、`verified: false`、置信度 `0.55`；
 - 事故跳过普通事实冲突闸门，但仍会在检索时降权并显示黄标，确认后才转正。
 
+#### 导出
+
+`export` 支持三种类型：
+
+- `knowledge`：JSON（无损）或 Markdown（按分类、便于阅读）；
+- `sql`：完整 SQLite 数据库；
+- `rag`：当前 RAG 索引的合并副本。
+
+JSON 导出保留 `provenance`、`verified`、`changes`、`confidence`、`evidence` 等完整字段；Markdown 会显示确认状态和 provenance；SQL 导出表也包含这些列。备份或迁移后，确认状态和黄标信息不会丢。
+
 ### `aim_context`：上下文保存、清理和恢复
 
 | action | 作用 |
@@ -307,6 +331,8 @@ aim_context action=clear
 
 审查看的是**可逆性**，不是理由字数。高风险且不可逆会直接拒绝；可逆但没有恢复路径也不会放行。
 
+`reviewHighRiskOnly` 默认 `true`：这个默认值表示 medium 风险直接放行，只有 high 走审查。想让 medium 也审查，把它设为 `false`。这个开关会改变流程，不是只影响显示。
+
 ### `aim_ask`：连接外部模型
 
 只连接插件配置的外部服务，不写记忆。
@@ -358,9 +384,66 @@ aim_context action=clear
 - 归档 / 知识库提炼 / 上下文清理三个“本地规则 | 外部模型”开关；
 - 「测试连接」会先保存当前表单，再请求服务探测能力。
 
+### 本地模型文件夹
+
+插件目录下有一个 `models/` 文件夹，供你手动放置本地模型说明：
+
+```text
+models/
+├── Embedding/
+│   └── bge-m3/
+│       └── model.json
+├── Rerank/
+│   └── bge-reranker/
+│       └── model.json
+├── Routing/
+│   └── my-router/
+│       └── model.json
+└── 未来能力/
+    └── 某个模型/
+        └── model.json
+```
+
+每个模型文件夹放一个 `model.json`：
+
+```json
+{
+  "name": "bge-m3（本地）",
+  "baseUrl": "http://127.0.0.1:8080",
+  "model": "bge-m3"
+}
+```
+
+- `Embedding` 和 `Rerank` 是插件当前使用的两类；
+- `Routing` 是给后续模型路由预留的分类，目前只显示、不参与调用；
+- 以后新增能力时直接新建目录即可，插件会按目录名显示；
+- 没有 `model.json` 的文件夹也会显示，但标记为“未配置 API”；
+- 面板里点「填入地址」只会填地址和模型名，仍需点「保存设置」。
+
+**重要：插件不加载权重、不在进程内做模型推理。** 推荐用 llama.cpp（llama-server）、Ollama、LM Studio、vLLM 等成熟工具启动模型，再通过 API 接入。模型目录只负责登记和填写这些本地服务的地址；不要把大型权重文件提交到插件仓库。
+
+## 网络同步（Git，默认关闭）
+
+用于多人项目：每台设备是同一份 Git 仓库的工作副本，主机提供 SSH/HTTP remote，其他设备 **上传** 时推送到主机，**拉取** 时从主机取回。
+
+- **默认关闭**：不启用时不会执行任何网络命令；
+- 本机角色可设为「主机」或「非主机」；主机地址填 `ssh://user@host/path/memory.git` 或 HTTPS Git 地址；
+- 同一局域网设备填同一个「项目组」名称，便于识别；
+- 传输层使用已有 SSH/HTTP remote，插件**不启动**未认证的 Git daemon；认证、SSH key、端口由你的 Git 环境管理；
+- 同步内容由用户勾选：知识库、归档、决策、快照、过程记录、上下文、全部对话目录；
+- 默认只选知识库、归档、决策、快照；
+- `contexts/` 包含完整对话，勾选前请确认网络和权限可信；
+- `_usage.json`、RAG 索引、`knowledge.sqlite`（含 WAL/SHM）、`compaction_status.json`、导出目录和 `.sync/` 本地设置不会同步；
+- **上传** = 提交本地变化 + `git push`；
+- **拉取** = `git fetch` + `git merge --ff-only`；
+- 上传被拒或拉取不能 fast-forward 时停止并报告，不自动合并、不覆盖本地；
+- 主机和普通设备都使用同一个 remote；主机角色只用于组织项目组和操作方向。
+
+Git 仓库建在当前记忆目录根部，本地同步配置放在 `.sync/config.json`，该目录不会进入同步。
+
 ### 设置
 
-设置保存后会自动重载插件并刷新面板，不需要手动重载。如果重载较慢，会显示“仍在自动重载，稍后会刷新”。
+常规设置保存后会自动重载插件并刷新面板，不需要手动重载。如果重载较慢，会显示“仍在自动重载，稍后会刷新”。网络同步设置只写入当前记忆目录的 `.sync/config.json`，保存后立即生效，不需要重载插件。
 
 ---
 
@@ -368,7 +451,7 @@ aim_context action=clear
 
 ### 自动整理
 
-`autoEnabled` 默认**关闭**。打开后，每个 `turn/end` 检查：
+`autoEnabled` 默认**关闭**。打开后，每个 `turn/end` 检查轮次，每次模型请求前检查一次上下文占用：
 
 - 每 `autoEveryRounds` 轮（默认 5）触发；或
 - 上下文占用达到 `contextUsagePercent`（默认 70%）触发。
@@ -379,7 +462,17 @@ aim_context action=clear
 2. 执行归档；
 3. 如果 `autoKnowledge !== false`，顺带提炼知识。
 
-`topicalClear=false` 时，先保存上下文，再走 DSH 原生压缩；否则按话题相似度清理。
+**上下文超过 `contextUsagePercent` 时走硬重置**：
+
+- 在下一次模型请求前，把已完成的轮次全部存档并清出，只重新载入一条任务续接信息（当前请求 + 最近进展）；
+- 当轮仍在进行时不会被清；工具调用/结果对不会拆开；
+- 如果这一轮已经结束、没有下一次模型请求，则在 `turn/end` 直接全部清出，不再载入旧内容；
+- 硬重置不受 `minClearChars`、`maxClearTurns` 的裁剪限制，避免 60%+ 的窗口只清掉一小段；
+- 手动 `clear` 仍按话题相似度选择，不会强制全清。
+
+`topicalClear=false` 时，手动/每轮触发先保存上下文，再走 DSH 原生压缩；上下文占用阈值仍走全量重置。
+
+上下文占用超过阈值时不再按相似度筛选：已完成轮次全部存档并清出，下一次模型请求前只回载当前请求和最近进展；如果这一轮已经结束，则在轮末直接全部清出。按轮次触发仍遵守话题和字符下限。
 
 ### 自动快照
 
@@ -390,11 +483,19 @@ aim_context action=clear
 - 超限时优先删除相似的旧自动快照；
 - **只剪枝自动快照**，手动快照不会被自动删除。
 
+### 请求锚点
+
+`requestAnchor` 默认开启。它只在最新输入是系统检查点（`Time sampled...`、工具 schema 更新、插件重载提示等）而不是新的用户请求时，追加一条很短的内部提醒，重申上一轮真实用户请求，并要求模型不要回答历史问题或重复上一轮。
+
+它不会在每个正常请求前重复注入，所以不会变成常驻记忆开销；关闭它可以完全移除这段行为。
+
 ### 保留策略
 
 - `stagingRetentionDays` 默认 30 天：只删除“整份都已归档”的旧过程记录文件，未归档内容永不因保留策略丢失；
 - `contextRetentionDays` 默认 0：不自动删除上下文存档，因为它是 restore 的来源；
 - `decisionRetentionDays` 默认 0：不自动删除决策审计。
+
+保留策略**不依赖自动整理开关**：每个对话每天第一次 `turn/end` 时检查一次；即使自动整理关闭，staging 的 30 天清理也会执行。归档操作本身不再重复重建全量去重集合，分类文件的去重集合按文件签名增量维护。
 
 ---
 
@@ -535,15 +636,16 @@ RAG 是知识库上的可选索引，不是默认检索。启用前需要同时�
 | `defaultTopK` | 5 | 默认返回条数 |
 | `knowledgeBackend` | `json` | `json` 或 `sqlite` |
 | `defaultPublic` | `false` | 新对话是否默认对其他对话开放 |
+| `reviewHighRiskOnly` | `true` | `true`=只审查 high，medium 直接放行；设为 `false` 才审查 medium |
 | `autoEnabled` | `false` | 自动整理总开关 |
 | `autoEveryRounds` | 5 | 每几轮自动整理 |
-| `contextUsagePercent` | 70 | 上下文占用达到多少百分比触发 |
+| `contextUsagePercent` | 70 | 上下文占用达到多少百分比触发全量重置 |
 | `autoKnowledge` | `true` | 自动整理时顺带提炼知识 |
 | `autoKnowledgeLimit` | 10 | 每次自动提炼上限 |
 | `autoSnapshot` | `true` | 自动快照 |
 | `autoSnapshotEvery` | 5 | 每几轮快照 |
 | `autoSnapshotMax` | 10 | 自动快照上限 |
-| `topicalClear` | `true` | 按话题相似度清理；关掉则用整段压缩 |
+| `topicalClear` | `true` | 按话题相似度清理手动/每轮触发；关掉则用整段压缩（占用阈值仍走全量重置） |
 | `similarityThreshold` | 0.05 | 话题相似度阈值 |
 | `keepRecentTurns` | 2 | 始终保留最近几轮 |
 | `maxClearTurns` | 8 | 单次最多清出轮数 |
@@ -552,6 +654,7 @@ RAG 是知识库上的可选索引，不是默认检索。启用前需要同时�
 | `restoreMaxChars` | 12000 | 单次 restore 最多注入字符数 |
 | `stagingRetentionDays` | 30 | 旧过程记录保留天数；只删已归档文件 |
 | `contextRetentionDays` | 0 | 上下文存档保留天数；0=不自动删 |
+| `requestAnchor` | `true` | 检查点/时间提示到达时，给模型加一条“当前真实请求”提醒，避免答旧题 |
 | `decisionRetentionDays` | 0 | 决策记录保留天数；0=不自动删 |
 | `ragMount` | false | 是否把 RAG 索引挂到检索 |
 | `externalBaseUrl` | 空 | 外部模型主地址 |

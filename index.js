@@ -137,6 +137,10 @@ const DEFAULTS = Object.freeze({
   stagingRetentionDays: 30,
   contextRetentionDays: 0,
   decisionRetentionDays: 0,
+  // When a harness checkpoint (time/schema/reload notice) arrives without a
+  // new user request, append a short anchor so the model does not answer an
+  // older topic. Off only for token-strict setups.
+  requestAnchor: true,
 });
 
 /** Integer bounds for the numeric settings; `null` marks a float setting. */
@@ -770,7 +774,10 @@ export async function searchWithRag(config, sources, query, options = {}) {
   }
   candidates.sort((left, right) => right.score - left.score);
   const reranked = await rerankCandidates(endpoint, query, candidates.slice(0, 20), {
-    topK: Number.isInteger(options.topK) && options.topK > 0 ? options.topK : config.defaultTopK,
+    // Keep the full reranked candidate page for RRF. Passing the final topK here
+    // silently cut the RAG channel to 5 rows and threw away ranks 6–20, exactly
+    // where semantic-only matches live.
+    topK: Math.min(candidates.length, 20),
   });
   if (reranked.ok !== true) {
     return { ok: false, note: `RAG 检索失败：${reranked.error ?? '未知错误'}\n已回退本地检索。` };
@@ -1924,11 +1931,12 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         + 'restore=把保存的上下文重新注入当前会话（不整份注入：按 restoreMaxChars 预算只取最近轮次）；'
         + 'list=列出存档；status=查看清理策略与存档状态；'
         + 'sessions=列出所有对话及其记忆规模。'
-        + '清理不再一刀切：以当轮与上轮的话题为基准，相似度低的老轮次会被清出上下文，相似度高的原样保留；'
-        + '被清出的轮次会先完整存档，随时可以用 restore 调回。'
+        + '手动 clear 按话题相似度：相似度低的老轮次先完整存档再清出，相似度高的保留，随时可用 restore 调回。'
+        + '自动整理开启时，上下文占用达到设定百分比会做硬重置：已完成的轮次全部存档并清出，'
+        + '在下一次模型请求前只重新载入当前请求和最近进展；若这一轮已经结束、没有下一次请求，'
+        + '则在轮末全部清出。每 N 轮的自动整理仍按相似度选择，手动工具始终可用。'
         + '存档默认按对话隔离（每个对话只列出自己的），restore 默认可以跨对话找到别的对话保存过的上下文，'
-        + '但只有已打开的对话可见（新建对话默认不开放）。'
-        + '自动整理开启时每 N 轮、或上下文占用达到设定百分比（默认 70%）时自动执行 save+clear；两个条件任一满足就触发，手动工具始终可用。',
+        + '但只有已打开的对话可见（新建对话默认不开放）。',
       parameters: {
         action: {
           type: 'string',
@@ -2088,12 +2096,12 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           const closed = closedConversationCount(context);
           return [
             `清理策略：${config.topicalClear === false
-              ? `整段压缩（compaction 服务${compaction && typeof compaction.compactNow === 'function' ? '可用' : '不可用'}）`
-              : '话题相似度（低相似度清出，高相似度保留）'}`,
+              ? `整段压缩（compaction 服务${compaction && typeof compaction.compactNow === 'function' ? '可用' : '不可用'}）；占用阈值仍全量重置`
+              : '话题相似度（手动/每 N 轮）；上下文占用达到阈值时全量清出并回载任务续接'}`,
             `相似度设置：阈值 ${config.similarityThreshold}，保留最近 ${config.keepRecentTurns} 轮，`
               + `单次最多 ${config.maxClearTurns} 轮（${config.minClearChars}~${config.maxClearChars} 字符）`,
             `恢复预算：单次 restore 最多注入 ${config.restoreMaxChars ?? 12000} 字符，只取最近轮次`,
-            `自动整理：${config.autoEnabled ? `开启（每 ${config.autoEveryRounds} 轮，或上下文占用到 ${config.contextUsagePercent}%）` : '关闭'}`,
+            `自动整理：${config.autoEnabled ? `开启（每 ${config.autoEveryRounds} 轮按相似度；上下文占用到 ${config.contextUsagePercent}% 时全量重置）` : '关闭'}`,
             `保留策略：staging ${config.stagingRetentionDays ?? 30} 天（仅已归档文件）；`
               + `contexts ${config.contextRetentionDays > 0 ? `${config.contextRetentionDays} 天` : '不自动删除'}；`
               + `decisions ${config.decisionRetentionDays > 0 ? `${config.decisionRetentionDays} 天` : '不自动删除'}`,            (() => {
@@ -2331,7 +2339,73 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
 export function installContextManagement(ctx, config, deps, runtime) {
   const counters = runtime?.counters ?? new Map();
   const pending = runtime?.pending ?? new Map();
+  const retentionChecked = runtime?.retentionChecked ?? new Map();
+  const anchorState = runtime?.anchorState ?? new Map();
+  const pressureResets = runtime?.pressureResets ?? new Map();
   const getService = deps.getService ?? (() => undefined);
+
+  const HARNESS_USER_RE = /^(Time sampled while preparing turn|This is an automatically generated checkpoint|Current runtime context|Current working directory|Current DSH file policy|Current DSH implementation checkout|Browser time zone|Elapsed since|Updated Tool Schemas)/i;
+
+  const textOfUserEvent = (event) => {
+    const content = event?.data?.content;
+    if (!Array.isArray(content)) return '';
+    return content.filter((item) => item && item.type === 'text').map((item) => item.text ?? '').join('\n').trim();
+  };
+
+  /**
+   * When a harness checkpoint/schema notice arrives as the newest "user"
+   * message, keep the last real request in view with one short developer note.
+   * This is deliberately not an every-request memory injection: it only fires
+   * when the newest input is not a real user request.
+   */
+  const maybeAnchorRequest = async (session, payload) => {
+    if (config.requestAnchor === false || payload?.signal?.aborted) return;
+    if (session?.header?.parentSession) return;
+    const events = typeof session.ownEvents === 'function' ? session.ownEvents() : [];
+    const isHarnessText = (text) => {
+      const value = String(text ?? '');
+      if (/^\s*<system-reminder>/i.test(value)) return true;
+      const stripped = value.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, ' ').trim();
+      return HARNESS_USER_RE.test(stripped);
+    };
+    let latestUser = null;
+    let realRequest = null;
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (event?.type !== 'user/message') continue;
+      const text = textOfUserEvent(event);
+      if (text === '') continue;
+      if (latestUser === null) latestUser = { seq: event.seq, text };
+      if (!isHarnessText(text)) {
+        realRequest = { seq: event.seq, text };
+        break;
+      }
+    }
+    if (latestUser === null || realRequest === null) return;
+    if (!isHarnessText(latestUser.text)) return;
+    const id = String(session.id);
+    const previous = anchorState.get(id);
+    if (previous && previous.requestSeq === realRequest.seq) return;
+    const anchor = clip(realRequest.text, 260);
+    try {
+      session.append('developer/message', {
+        message: {
+          source: { kind: 'ai-for-memory' },
+          role: 'developer',
+          id: randomUUID(),
+          content: [{
+            type: 'text',
+            text: `【当前请求锚点】上一轮真实用户请求：${anchor}\n`
+              + '这是内部提醒：系统时间、工具 schema 更新、插件重载不是新请求；只处理上面这个请求，不要重复历史回答。',
+          }],
+        },
+        headerSeq: latestUser.seq,
+      }, { surfaceOp: 'append' });
+      anchorState.set(id, { latestSeq: latestUser.seq, requestSeq: realRequest.seq });
+    } catch {
+      // A surface that cannot take developer messages must not break pre-step.
+    }
+  };
 
   /**
    * Latest measured context pressure for one session, or `null` when DSH has not
@@ -2545,6 +2619,9 @@ export function installContextManagement(ctx, config, deps, runtime) {
   const runTopicalClear = (session, options = {}) => {
     const label = String(options.label ?? 'before-clear');
     const signal = options.signal;
+    const pressureFallback = options.pressureFallback === true;
+    const hardReset = options.hardReset === true;
+    const hardReload = options.hardReload === true;
     const store = storeOfSession(session);
     const record = recorderOf(store);
     if (!session || typeof session.ownEvents !== 'function') {
@@ -2577,7 +2654,21 @@ export function installContextManagement(ctx, config, deps, runtime) {
         keepRecent: config.keepRecentTurns,
         anchorTurns: 2,
       });
-      const clearTurns = selection.clear.filter((turn) => turn.inFlight !== true);
+      let clearTurns = selection.clear.filter((turn) => turn.inFlight !== true);
+      // Hard reset for an over-budget window: every completed turn is archived
+      // and replaced. Recent/topic selection is deliberately skipped; the
+      // current in-flight turn stays because its tool call/result pair is not
+      // committed yet.
+      if (hardReset) {
+        clearTurns = turns.filter((turn) => turn.inFlight !== true);
+      } else if (pressureFallback) {
+        const selectedChars = clearTurns.reduce((sum, turn) => sum + Number(turn.chars ?? 0), 0);
+        const candidates = turns.filter((turn) => turn.inFlight !== true);
+        const fallback = candidates.slice(0, Math.max(0, candidates.length - config.keepRecentTurns));
+        if (fallback.length > 0 && (clearTurns.length === 0 || selectedChars < config.minClearChars)) {
+          clearTurns = fallback;
+        }
+      }
       if (clearTurns.length === 0) {
         record({
           state: 'skipped',
@@ -2599,18 +2690,26 @@ export function installContextManagement(ctx, config, deps, runtime) {
       const chosen = [];
       let chars = 0;
       let turnCount = 0;
-      for (const run of runs) {
-        if (turnCount + run.turns.length > config.maxClearTurns) break;
-        if (chars + run.chars > config.maxClearChars) break;
-        chosen.push(run);
-        chars += run.chars;
-        turnCount += run.turns.length;
+      if (hardReset) {
+        // A hard reset is all-or-nothing: do not leave a tail of old turns just
+        // because maxClearTurns/maxClearChars is smaller than the whole window.
+        chosen.push(...runs);
+        chars = runs.reduce((sum, run) => sum + run.chars, 0);
+        turnCount = runs.reduce((sum, run) => sum + run.turns.length, 0);
+      } else {
+        for (const run of runs) {
+          if (turnCount + run.turns.length > config.maxClearTurns) break;
+          if (chars + run.chars > config.maxClearChars) break;
+          chosen.push(run);
+          chars += run.chars;
+          turnCount += run.turns.length;
+        }
       }
       if (chosen.length === 0) {
         record({ state: 'skipped', reason: '超出单次清理预算' });
         return;
       }
-      if (chars < config.minClearChars) {
+      if (chars < config.minClearChars && !pressureFallback && !hardReset) {
         record({ state: 'skipped', reason: '可清理内容太少', chars, cleared: 0 });
         return;
       }
@@ -2634,31 +2733,54 @@ export function installContextManagement(ctx, config, deps, runtime) {
       // The step may have been cancelled while the summary was generated.
       // Never mutate the surface after an abort.
       if (signal?.aborted) return;
+      const latestUser = [...turns].reverse().find((turn) => turn.user)?.user ?? '';
+      const latestAssistant = [...turns].reverse()
+        .find((turn) => turn.inFlight !== true && turn.assistant)?.assistant ?? '';
+      const taskBrief = hardReset && hardReload
+        ? `【任务续接】当前请求：${clip(latestUser, 360)}`
+          + (latestAssistant === '' ? '' : `\n最近进展：${clip(latestAssistant, 420)}`)
+        : '';
+      const replacementNote = [modelNote, taskBrief].filter((text) => text !== '').join('\n');
+      // Keep the raw, untruncated event rows as well. The rendered `turns`
+      // above deliberately cap text for display, but a hard reset must not
+      // discard tool results or the tail of a long message that exists nowhere
+      // else.
+      const rawRanges = chosen.map((run) => [run.startSeq, run.endSeq]);
+      const rawEvents = events
+        .filter((event) => Number.isInteger(event?.seq)
+          && rawRanges.some(([start, end]) => event.seq >= start && event.seq <= end))
+        .filter((event) => ['turn/start', 'turn/end', 'user/message', 'assistant/message', 'tool/result'].includes(event.type))
+        .map((event) => ({ type: event.type, data: event.data, seq: event.seq }));
       // Archive first: nothing leaves the window before it is restorable.
       const saved = store.saveContext({
         label,
         sessionId: String(session.id),
         ...snapshot,
-        ...(modelNote === '' ? {} : { model_summary: modelNote }),
+        raw_events: rawEvents,
+        ...(replacementNote === '' ? {} : { model_summary: replacementNote }),
       });
 
       let shadowed = 0;
+      const lastRun = chosen[chosen.length - 1];
       for (const run of chosen) {
-        clearRun(session, run, saved.context_id, modelNote);
+        // Only the final replacement carries the task brief; repeating it in
+        // every run would waste tokens.
+        clearRun(session, run, saved.context_id, run === lastRun ? replacementNote : modelNote);
         shadowed += run.seqs.length;
       }
       record({
-        state: 'done',
+        state: hardReset ? 'reset' : 'done',
         session: String(session.id),
         cleared: shadowed,
         turns: turnCount,
         chars,
-        kept: selection.keep.length,
+        kept: hardReset ? 0 : selection.keep.length,
         context: saved.context_id,
         threshold: selection.threshold,
       });
       // eslint-disable-next-line no-console
-      console.log(`[ai-for-memory] 已按话题相似度清出 ${turnCount} 轮（保留 ${selection.keep.length} 轮），存档 ${saved.context_id}`);
+      console.log(`[ai-for-memory] ${hardReset ? '已全量清出' : '已按话题相似度清出'} ${turnCount} 轮`
+        + `（保留 ${hardReset ? 0 : selection.keep.length} 轮），存档 ${saved.context_id}`);
     };
 
     // Pre-step mode: run the exact same selection and archive synchronously
@@ -2705,6 +2827,40 @@ export function installContextManagement(ctx, config, deps, runtime) {
     })();
   };
 
+  /**
+   * At the model-request boundary, a window already over the configured usage
+   * threshold gets a hard reset: archive every completed turn, remove it, then
+   * reload a tiny task brief (current request + latest progress). This is the
+   * "delete all, reload the active task" path. The current in-flight turn is
+   * excluded because its tool call/result pair is not committed yet.
+   */
+  const maybePressureReset = async (session, payload) => {
+    if (!session || typeof session.ownEvents !== 'function') return false;
+    if (session.header?.parentSession) return false;
+    if (pending.has(String(session.id))) return false;
+    if (config.autoEnabled !== true || payload?.signal?.aborted) return false;
+    const pressure = contextPressureOf(session);
+    if (!exceedsUsageThreshold(pressure, config.contextUsagePercent)) return false;
+    const id = String(session.id);
+    const turns = collectTurns(session.ownEvents());
+    const currentTurn = turns[turns.length - 1]?.turn ?? 0;
+    if (pressureResets.get(id) === currentTurn) return false;
+    if (!turns.some((turn) => turn.inFlight !== true)) {
+      pressureResets.set(id, currentTurn);
+      return false;
+    }
+    const percent = usagePercentOf(pressure);
+    await runTopicalClear(session, {
+      label: `auto-pressure-${percent}pct`,
+      hardReset: true,
+      hardReload: true,
+      immediate: true,
+      signal: payload.signal,
+    });
+    pressureResets.set(id, currentTurn);
+    return true;
+  };
+
   /** Legacy whole-window compaction, kept behind `topicalClear: false`. */
   const runCompaction = (session) => {
     const agents = getService('agents');
@@ -2743,7 +2899,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
 
   /** Run the configured clear policy for one conversation. */
   const runClear = (session, kind = 'auto', meta = {}) => {
-    if (config.topicalClear === false) {
+    if (config.topicalClear === false && meta.reason !== 'usage') {
       runCompaction(session);
       return;
     }
@@ -2752,7 +2908,15 @@ export function installContextManagement(ctx, config, deps, runtime) {
       : meta.reason === 'usage'
         ? `auto-usage-${meta.percent ?? config.contextUsagePercent}pct`
         : `auto-${config.autoEveryRounds}rounds`;
-    runTopicalClear(session, { label });
+    runTopicalClear(session, {
+      label,
+      // Usage pressure is a hard reset: the whole completed window is archived
+      // and removed. Pre-step resets reload a task brief; turn/end resets are
+      // the "task is ending" case and leave no old context behind.
+      hardReset: kind === 'auto' && meta.reason === 'usage',
+      hardReload: false,
+      pressureFallback: kind === 'auto' && meta.reason === 'usage',
+    });
   };
 
   /** Keep automatic snapshots at or below the cap, deleting near-duplicates first. */
@@ -2794,7 +2958,11 @@ export function installContextManagement(ctx, config, deps, runtime) {
     if (!session || !session.id) return proceed();
     const id = String(session.id);
     const request = pending.get(id);
-    if (!request || typeof request !== 'object' || request.mode !== 'immediate') return proceed();
+    if (!request || typeof request !== 'object' || request.mode !== 'immediate') {
+      await maybePressureReset(session, payload);
+      await maybeAnchorRequest(session, payload);
+      return proceed();
+    }
     // An aborted step must not rewrite the surface; leave the request for the
     // next usable boundary.
     if (payload.signal?.aborted) return proceed();
@@ -2809,6 +2977,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
       // manual request queued meanwhile must survive.
       if (pending.get(id) === request) pending.delete(id);
     }
+    await maybeAnchorRequest(session, payload);
     return proceed();
   };
 
@@ -2824,6 +2993,25 @@ export function installContextManagement(ctx, config, deps, runtime) {
       // Fallback for conversations that predate this plugin load: ensure the
       // directory exists and refresh the generated title.
       rememberConversation(session);
+      // Retention is independent of auto-ledger tidying. Without this, the
+      // default stagingRetentionDays=30 would never run unless autoEnabled was
+      // on or the user manually archived something.
+      if ((Number.isFinite(config.stagingRetentionDays) ? config.stagingRetentionDays : 30) > 0
+        || (Number.isFinite(config.contextRetentionDays) ? config.contextRetentionDays : 0) > 0
+        || (Number.isFinite(config.decisionRetentionDays) ? config.decisionRetentionDays : 0) > 0) {
+        try {
+          const context = memoryContext(config, { agent: { session } }, deps, runtime);
+          const store = writeSource(context, 'session').store;
+          const day = new Date().toISOString().slice(0, 10);
+          if (retentionChecked.get(store.root) !== day) {
+            retentionChecked.set(store.root, day);
+            store.pruneRetention();
+          }
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.warn(`[ai-for-memory] 保留策略清理失败：${error?.message ?? error}`);
+        }
+      }
     }
 
     // Automatic exact snapshots run independently of the tidying switch: every
@@ -2875,7 +3063,11 @@ export function installContextManagement(ctx, config, deps, runtime) {
 
     // Automatic archiving never runs for subagents; a manual `clear` still
     // honors its pending request below.
-    if (!isSubagent && config.autoEnabled) {
+    const handledTurn = Number.isInteger(event?.data?.turn)
+      ? event.data.turn
+      : (collectTurns(session.ownEvents()).at(-1)?.turn ?? -1);
+    if (!isSubagent && config.autoEnabled && !pending.has(id)
+      && pressureResets.get(id) !== handledTurn) {
       // Two independent triggers share one tidy pass: every N rounds, and the
       // measured context usage reaching the configured share of the window.
       // Both firing at once still tidies once.
@@ -2926,7 +3118,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
             // eslint-disable-next-line no-console
             console.warn(`[ai-for-memory] 保留策略清理失败：${error?.message ?? error}`);
           }
-          if (config.topicalClear === false) {
+          if (config.topicalClear === false && trigger !== 'usage') {
             // Legacy mode still snapshots the recent window before compacting.
             const snapshot = buildContextSnapshot(events, { maxChars: config.maxContextChars });
             if (snapshot) {
@@ -2935,7 +3127,9 @@ export function installContextManagement(ctx, config, deps, runtime) {
                 sessionId: id,
                 ...snapshot,
               });
-              pending.set(id, saved.context_id);
+              // The object carries the trigger, but `reason` is rounds so
+              // runClear still takes the legacy compaction path.
+              pending.set(id, { kind: 'auto', reason: trigger, percent, context: saved.context_id });
               // eslint-disable-next-line no-console
               console.log(`[ai-for-memory] 自动整理：已归档上下文 ${saved.context_id}（第 ${saved.turn_from}-${saved.turn_to} 轮）`);
             }
@@ -2967,6 +3161,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
     const id = String(session?.id);
     counters.delete(id);
     pending.delete(id);
+    anchorState.delete(id);
   }));
   ctx.effect(() => ctx.on('session/created', (session) => {
     if (!session || Boolean(session.header?.parentSession)) return;
