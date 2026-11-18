@@ -60,7 +60,7 @@ window.__ModuleLoader__.load({
         pendingUpdates: '待确认知识更新',
         pendingUpdatesHint: '后台提炼想改写已有事实，但没有写入；核对后再决定是否覆盖。',
         pendingUpdateTarget: '目标',
-        knowledgeHint: '知识库只存结论：三层里提炼出的用户规则/错误修复/决策理由，加上我或你直接写入的事实；每条都带分类与出处。新内容与库中已有知识或我的认知冲突时，会先问你，确认后才写入。',
+        knowledgeHint: '知识库只存结论：三层里提炼出的用户规则/错误修复/决策理由，加上模型写入的内容；每条都带分类与出处。模型通过 remember/learn/incident 写入的内容默认是未确认自述，点「确认这条」后才转为已确认。新内容与库中已有知识或我的认知冲突时，会先问你，确认后才写入。',
         exportButton: '导出',
         exportClose: '收起导出',
         exportKnowledge: '知识库（JSON / Markdown）',
@@ -104,7 +104,11 @@ window.__ModuleLoader__.load({
         modeLocalHint: '当前三层都用本地规则，不依赖任何外部服务。',
         evidence: '证据',
         modelClaim: '模型自述（未确认）',
-        modelClaimHint: '这条来自模型自己的过程记录或决策复盘，不是用户确认的事实；检索已降权，请勿当作项目已知事实。',
+        modelClaimHint: '这条来自模型自己的过程记录、推理或事故记录，不是用户确认的事实；检索已降权，请勿当作项目已知事实。确认无误后点「确认这条」清除黄标。',
+        verifyClaim: '确认这条',
+        verifying: '确认中…',
+        verified: '已确认',
+        verifyFailed: '确认失败',
         updated: '已更新',
         updatedHint: '这条知识的正文被修改过；展开可见上一版。',
         previousText: '上一版',
@@ -201,7 +205,9 @@ window.__ModuleLoader__.load({
         dirName: '目录名（跟随项目时使用）',
         save: '保存设置',
         saving: '保存中…',
-        saved: '已保存，插件重载后生效…',
+        saved: '已保存，正在自动重新加载…',
+        savedReloaded: '已保存并自动重新加载',
+        savedPendingReload: '已保存；插件仍在自动重载，稍后会刷新',
         saveFailed: '保存失败',
         counts: {
           staging: '过程记录',
@@ -254,7 +260,7 @@ window.__ModuleLoader__.load({
         pendingUpdates: 'Knowledge updates awaiting confirmation',
         pendingUpdatesHint: 'Background mining wanted to rewrite an existing fact; nothing was written. Review before overwriting.',
         pendingUpdateTarget: 'Target',
-        knowledgeHint: 'Knowledge stores conclusions only: user rules, error→fix pairs and decision reasons mined from the three layers, plus facts written by the model or the user. Each document carries a category and a source. When a new fact conflicts with stored knowledge or with the model’s own understanding, you are asked first and it is stored only after you agree.',
+        knowledgeHint: 'Knowledge stores conclusions only: user rules, error→fix pairs and decision reasons mined from the three layers, plus model-written content. Each document carries a category and a source. Content written through remember/learn/incident starts as an unverified model claim; click "Confirm this" to accept it. When a new fact conflicts with stored knowledge or with the model’s own understanding, you are asked first and it is stored only after you agree.',
         exportButton: 'Export',
         exportClose: 'Close export',
         exportKnowledge: 'Knowledge base (JSON / Markdown)',
@@ -298,7 +304,11 @@ window.__ModuleLoader__.load({
         modeLocalHint: 'All three layers currently use local rules and need no external service.',
         evidence: 'Evidence',
         modelClaim: 'Model claim (unverified)',
-        modelClaimHint: 'This came from the model’s own process log or decision review, not from a user-confirmed fact. Retrieval downranks it; do not treat it as established project knowledge.',
+        modelClaimHint: 'This came from the model’s own process log, reasoning or incident prose, not from a user-confirmed fact. Retrieval downranks it; do not treat it as established project knowledge. Click "Confirm this" to clear the badge.',
+        verifyClaim: 'Confirm this',
+        verifying: 'Confirming…',
+        verified: 'Confirmed',
+        verifyFailed: 'Confirmation failed',
         updated: 'Updated',
         updatedHint: 'The stored text was changed; expand to see the previous version.',
         previousText: 'Previous version',
@@ -395,7 +405,9 @@ window.__ModuleLoader__.load({
         dirName: 'Directory name (used when following the project)',
         save: 'Save settings',
         saving: 'Saving…',
-        saved: 'Saved; the plugin is reloading…',
+        saved: 'Saved; reloading the plugin…',
+        savedReloaded: 'Saved and reloaded',
+        savedPendingReload: 'Saved; the plugin is still reloading and will refresh shortly',
         saveFailed: 'Save failed',
         counts: {
           staging: 'Process log',
@@ -890,6 +902,7 @@ window.__ModuleLoader__.load({
       const [formPublic, setFormPublic] = React.useState(true);
       const [saving, setSaving] = React.useState(false);
       const [sessionSaving, setSessionSaving] = React.useState(false);
+      const [verifyingId, setVerifyingId] = React.useState('');
 
       // `useSessions` is a Hook supplied as a prop by the slot renderer. The
       // renderer always binds it for the root kit, so this branch is stable for
@@ -983,8 +996,10 @@ window.__ModuleLoader__.load({
             kind: typeof payload.scope === 'string' ? payload.scope : kind,
             key: payload?.selectedSession?.key ?? (kind === 'session' ? (active?.key ?? null) : null),
           });
+          return payload;
         } catch (fetchError) {
           setError(String(fetchError?.message ?? fetchError));
+          return null;
         } finally {
           setBusy(false);
         }
@@ -1121,43 +1136,71 @@ window.__ModuleLoader__.load({
       const saveConfig = async () => {
         setSaving(true);
         setNotice(null);
+        const body = {
+          root: formRoot.trim(),
+          directoryName: formDir.trim(),
+          autoEnabled: formMode === 'auto',
+          autoEveryRounds: Number(formRounds) || 5,
+          autoSnapshot: formAutoSnapshot,
+          autoSnapshotEvery: Number(formSnapshotEvery) || 5,
+          autoSnapshotMax: Number(formSnapshotMax) || 10,
+          contextUsagePercent: Number(formUsage) || 70,
+          defaultPublic: formDefaultPublic,
+          topicalClear: formTopical,
+          ragMount: formRagMount,
+          knowledgeBackend: formStorage,
+          similarityThreshold: Number(formThreshold) || 0.05,
+          keepRecentTurns: Number(formKeepRecent) || 2,
+          restoreMaxChars: Number(formRestoreMax) || 12000,
+          externalBaseUrl: formExternalBase.trim(),
+          externalModel: formExternalModel.trim(),
+          externalTimeoutMs: Number(formExternalTimeout) || 60000,
+          externalEmbedBaseUrl: formEmbedBase.trim(),
+          externalEmbedModel: formEmbedModel.trim(),
+          externalRerankBaseUrl: formRerankBase.trim(),
+          externalRerankModel: formRerankModel.trim(),
+          // Empty = keep the stored key; "-" clears it; anything else sets it.
+          externalApiKey: formExternalKey.trim(),
+          externalEmbedApiKey: formEmbedKey.trim(),
+          externalRerankApiKey: formRerankKey.trim(),
+          archiveExternal: formArchiveExternal,
+          knowledgeExternal: formKnowledgeExternal,
+          contextExternal: formContextExternal,
+        };
+        // The config editor reconciles the profile before /config resolves, so
+        // the next state read normally shows the new values. Poll briefly anyway:
+        // a slow reload must not leave the panel displaying stale settings.
+        const configMatches = (payload) => Boolean(payload)
+          && payload.fixedRoot === body.root
+          && payload.directoryName === body.directoryName
+          && payload.autoEnabled === body.autoEnabled
+          && payload.autoEveryRounds === body.autoEveryRounds
+          && payload.autoSnapshot === body.autoSnapshot
+          && payload.autoSnapshotEvery === body.autoSnapshotEvery
+          && payload.autoSnapshotMax === body.autoSnapshotMax
+          && payload.contextUsagePercent === body.contextUsagePercent
+          && payload.defaultPublic === body.defaultPublic
+          && payload.topicalClear === body.topicalClear
+          && payload.ragMount === body.ragMount
+          && payload.knowledgeBackend === body.knowledgeBackend
+          && payload.similarityThreshold === body.similarityThreshold
+          && payload.keepRecentTurns === body.keepRecentTurns
+          && payload.restoreMaxChars === body.restoreMaxChars;
         try {
-          await callApi('/config', {
-            method: 'POST',
-            body: {
-              root: formRoot.trim(),
-              directoryName: formDir.trim(),
-              autoEnabled: formMode === 'auto',
-              autoEveryRounds: Number(formRounds) || 5,
-              autoSnapshot: formAutoSnapshot,
-              autoSnapshotEvery: Number(formSnapshotEvery) || 5,
-              autoSnapshotMax: Number(formSnapshotMax) || 10,
-              contextUsagePercent: Number(formUsage) || 70,
-              defaultPublic: formDefaultPublic,
-              topicalClear: formTopical,
-              ragMount: formRagMount,
-              knowledgeBackend: formStorage,
-              similarityThreshold: Number(formThreshold) || 0.05,
-              keepRecentTurns: Number(formKeepRecent) || 2,
-              restoreMaxChars: Number(formRestoreMax) || 12000,
-              externalBaseUrl: formExternalBase.trim(),
-              externalModel: formExternalModel.trim(),
-              externalTimeoutMs: Number(formExternalTimeout) || 60000,
-              externalEmbedBaseUrl: formEmbedBase.trim(),
-              externalEmbedModel: formEmbedModel.trim(),
-              externalRerankBaseUrl: formRerankBase.trim(),
-              externalRerankModel: formRerankModel.trim(),
-              // Empty = keep the stored key; "-" clears it; anything else sets it.
-              externalApiKey: formExternalKey.trim(),
-              externalEmbedApiKey: formEmbedKey.trim(),
-              externalRerankApiKey: formRerankKey.trim(),
-              archiveExternal: formArchiveExternal,
-              knowledgeExternal: formKnowledgeExternal,
-              contextExternal: formContextExternal,
-            },
-          });
+          await callApi('/config', { method: 'POST', body });
           setNotice({ kind: 'ok', text: t.saved });
-          setTimeout(() => load(''), 2500);
+          const deadline = Date.now() + 8000;
+          let refreshed = null;
+          do {
+            refreshed = await load('');
+            if (configMatches(refreshed)) {
+              setNotice({ kind: 'ok', text: t.savedReloaded });
+              return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 300));
+          } while (Date.now() < deadline);
+          setNotice({ kind: 'ok', text: t.savedPendingReload });
+          setTimeout(() => load(''), 1500);
         } catch (saveError) {
           setNotice({ kind: 'err', text: `${t.saveFailed}: ${String(saveError?.message ?? saveError)}` });
         } finally {
@@ -1296,6 +1339,32 @@ window.__ModuleLoader__.load({
           setNotice({ kind: 'err', text: `${t.conversationSaveFailed}: ${String(saveError?.message ?? saveError)}` });
         } finally {
           setSessionSaving(false);
+        }
+      };
+
+      /** User confirmation for a model-authored claim: clear the yellow badge without changing its text/id. */
+      const verifyKnowledgeDoc = async (doc) => {
+        setVerifyingId(doc.doc_id);
+        setNotice(null);
+        const docScope = doc.session_scope === 'shared' ? 'shared' : 'session';
+        const docSession = doc.session_key
+          || (docScope === 'session' ? (data?.currentSessionId || scope?.key || '') : '');
+        try {
+          await callApi('/knowledge/verify', {
+            method: 'POST',
+            body: {
+              root: selectedRoot,
+              scope: docScope,
+              session: docSession,
+              doc_id: doc.doc_id,
+            },
+          });
+          setNotice({ kind: 'ok', text: t.verified });
+          await load(selectedRoot);
+        } catch (verifyError) {
+          setNotice({ kind: 'err', text: `${t.verifyFailed}: ${String(verifyError?.message ?? verifyError)}` });
+        } finally {
+          setVerifyingId('');
         }
       };
 
@@ -1550,6 +1619,19 @@ window.__ModuleLoader__.load({
                     modelClaim
                       ? h('p', { key: 'claim-hint', style: { ...styles.hint, color: '#92400e' } },
                         `⚠ ${t.modelClaimHint}`)
+                      : null,
+                    modelClaim
+                      ? h('button', {
+                        key: 'verify',
+                        type: 'button',
+                        className: 'aim-btn',
+                        style: styles.primary,
+                        disabled: verifyingId === doc.doc_id,
+                        onClick: (event) => {
+                          event.stopPropagation();
+                          verifyKnowledgeDoc(doc);
+                        },
+                      }, verifyingId === doc.doc_id ? t.verifying : t.verifyClaim)
                       : null,
                     h('p', { key: 'text', style: styles.content }, doc.text),
                     (doc.changes_count ?? 0) > 0

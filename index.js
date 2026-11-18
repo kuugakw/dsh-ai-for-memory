@@ -20,7 +20,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import { MemoryScopes, sessionKey, shortSessionId } from './lib/scopes.js';
-import { findDuplicate } from './lib/knowledge.js';
+import { findDuplicate, withTokens } from './lib/knowledge.js';
 import { ensureDefaultMemoryDirIgnored } from './lib/gitignore.js';
 import { markActivity } from './lib/activity.js';
 import { evaluateDecision } from './lib/decision.js';
@@ -53,7 +53,7 @@ import {
 } from './lib/rag.js';
 import { writeExportArtifacts } from './lib/export.js';
 import { RRF_K, reciprocalRankFusion } from './lib/retrieval.js';
-import { boostScore, weightLabel } from './lib/usage.js';
+import { USAGE_BOOST, boostScore, weightLabel } from './lib/usage.js';
 import {
   formatSqlResult, routeKnowledgeQuery, runSqlQuery,
 } from './lib/knowledge-query.js';
@@ -131,6 +131,12 @@ const DEFAULTS = Object.freeze({
   // the knowledge base grows without an extra prompt from the user.
   autoKnowledge: true,
   autoKnowledgeLimit: 10,
+  // Retention. Staging only loses a file after every record in it is archived;
+  // context/decision retention is opt-in because those layers are restorable
+  // or auditable data, not mirrors of archive/.
+  stagingRetentionDays: 30,
+  contextRetentionDays: 0,
+  decisionRetentionDays: 0,
 });
 
 /** Integer bounds for the numeric settings; `null` marks a float setting. */
@@ -145,6 +151,9 @@ const NUMERIC_BOUNDS = Object.freeze({
   maxClearTurns: [1, 50],
   minClearChars: [0, 20000],
   maxClearChars: [1000, 1000000],
+  stagingRetentionDays: [0, 3650],
+  contextRetentionDays: [0, 3650],
+  decisionRetentionDays: [0, 3650],
   autoKnowledgeLimit: [1, 100],
   similarityThreshold: [0.01, 0.95, 'float'],
   externalTimeoutMs: [1000, 600000],
@@ -290,6 +299,9 @@ function storeOptions(config) {
     maxSnapshotBytes: config.maxSnapshotBytes,
     defaultTopK: config.defaultTopK,
     knowledgeBackend: config.knowledgeBackend,
+    stagingRetentionDays: config.stagingRetentionDays,
+    contextRetentionDays: config.contextRetentionDays,
+    decisionRetentionDays: config.decisionRetentionDays,
   };
 }
 
@@ -527,22 +539,30 @@ function formatSnapshotList(rows) {
  * are kept only as "see also" notes.
  */
 function foldDuplicateHits(rows, topK) {
-  const ordered = [...rows].sort((left, right) => right.score - left.score);
+  // Tokenize once per row. The old code passed kept rows without `tokens`, so
+  // findDuplicate re-tokenized every kept text for every new candidate — O(n²)
+  // tokenization on a cross-conversation RRF page.
+  const ordered = withTokens([...rows].sort((left, right) => right.score - left.score));
   const kept = [];
+  const keptById = new Map();
   let folded = 0;
   for (const row of ordered) {
-    const duplicate = findDuplicate(row.text, kept);
+    const duplicate = findDuplicate(row.text, kept, { tokens: row.tokens });
     if (!duplicate) {
-      kept.push({ ...row, see_also: [] });
+      const hit = { ...row, see_also: [] };
+      kept.push(hit);
+      keptById.set(hit.doc_id, hit);
       continue;
     }
-    const target = kept.find((item) => item.doc_id === duplicate.doc_id);
+    const target = keptById.get(duplicate.doc_id);
     // Folding is for the same fact repeated across conversations. Two distinct
     // docs in the same store are not a cross-source duplicate: the RAG index may
     // have deduplicated the older one, and the local channel must still surface
     // it after RRF instead of hiding it behind its newer twin.
     if (target && target.origin_key === row.origin_key) {
-      kept.push({ ...row, see_also: [] });
+      const hit = { ...row, see_also: [] };
+      kept.push(hit);
+      keptById.set(hit.doc_id, hit);
       continue;
     }
     folded += 1;
@@ -558,7 +578,10 @@ function foldDuplicateHits(rows, topK) {
       target.see_also.push(note);
     }
   }
-  return { hits: kept.slice(0, topK), folded };
+  return {
+    hits: kept.slice(0, topK).map(({ tokens, ...hit }) => hit),
+    folded,
+  };
 }
 
 function formatHits(query, hits, mode, folded = 0) {
@@ -613,6 +636,43 @@ function formatHits(query, hits, mode, folded = 0) {
  * the point of fusion is to complement the semantic RAG channel with a lexical
  * channel, not to reproduce the same ranking twice.
  */
+/**
+ * Apply score-based priors inside one channel, before RRF sees it.
+ *
+ * RRF only consumes rank, and its scores live at 1/(k+rank) — rank 1 and rank 5
+ * differ by ~0.001. Multiplying the *fused* score by 1.25 (usage) or 0.35
+ * (unverified) therefore moves four or more places and destroys the rank
+ * signal. Put those priors where they belong: reorder the channel first, then
+ * let RRF fuse ranks only.
+ */
+function rankChannelWithPriors(rows, weights, owner = null) {
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const owned = owner === null || (
+      (row.origin_key ?? '') === (owner.key ?? '')
+      && (row.origin_scope ?? 'session') === (owner.scope ?? 'session')
+    );
+    const usage = owned && Number.isFinite(weights[row.doc_id]) ? weights[row.doc_id] : 0;
+    const provenance = typeof row.provenance === 'string' ? row.provenance : 'authored';
+    const unverified = row.unverified === true || (provenance === 'model' && row.verified !== true);
+    const confidence = Number.isFinite(row.confidence)
+      ? Math.min(1, Math.max(0, row.confidence))
+      : 0.8;
+    const prior = (1 + USAGE_BOOST * usage)
+      * (unverified ? 0.35 : 1)
+      * (0.85 + 0.15 * confidence);
+    const base = Number.isFinite(row.local_score) ? row.local_score : (Number.isFinite(row.score) ? row.score : 0);
+    return {
+      ...row,
+      provenance,
+      unverified,
+      confidence,
+      usage_weight: usage,
+      channel_prior: prior,
+      channel_score: base * prior,
+    };
+  }).sort((left, right) => right.channel_score - left.channel_score);
+}
+
 function localRrfRows(sources, query, options = {}) {
   const rows = [];
   for (const source of sources) {
@@ -621,11 +681,15 @@ function localRrfRows(sources, query, options = {}) {
       mode: 'bm25',
       topK: 40,
     });
-    const sourceMax = Math.max(0, ...found.map((hit) => hit.score));
+    // `hit.score` already carries confidence/unverified penalties from local
+    // retrieval. Use the raw BM25 component here; the channel prior applies
+    // those factors exactly once, before RRF.
+    const rawScore = (hit) => (Number.isFinite(hit.bm25_score) ? hit.bm25_score : hit.score);
+    const sourceMax = Math.max(0, ...found.map(rawScore));
     for (const hit of found) {
       rows.push({
         ...hit,
-        local_score: sourceMax > 0 ? hit.score / sourceMax : 0,
+        local_score: sourceMax > 0 ? rawScore(hit) / sourceMax : 0,
         origin_label: source.label,
         origin_key: source.key,
         origin_scope: source.scope,
@@ -726,6 +790,7 @@ export async function searchWithRag(config, sources, query, options = {}) {
   // JSON knowledge document, including those the index-level semantic dedupe
   // deliberately left out, so the two paths no longer disagree about existence.
   const callerStore = options.store ?? null;
+  const callerOwner = options.owner && typeof options.owner === 'object' ? options.owner : null;
   const weights = callerStore && typeof callerStore.knowledgeWeights === 'function'
     ? callerStore.knowledgeWeights()
     : {};
@@ -753,32 +818,22 @@ export async function searchWithRag(config, sources, query, options = {}) {
     };
   });
   const localRows = localRrfRows(sources, query, { category: options.category ?? null });
+  // Priors belong inside a channel, not on top of the fused RRF score. This also
+  // makes `RAG#` / `BM25#` in the output describe the order RRF actually saw.
+  const ragChannel = rankChannelWithPriors(ragRows, weights, callerOwner);
+  const localChannel = rankChannelWithPriors(localRows, weights, callerOwner);
   const fused = reciprocalRankFusion([
-    { name: 'rag', rows: ragRows },
-    { name: 'local', rows: localRows },
+    { name: 'rag', rows: ragChannel },
+    { name: 'local', rows: localChannel },
   ], { k: RRF_K });
-  const ranked = fused.map((row) => {
-    const weight = Number.isFinite(weights[row.doc_id]) ? weights[row.doc_id] : 0;
-    const provenance = typeof row.provenance === 'string' ? row.provenance : 'authored';
-    const unverified = row.unverified === true
-      || (provenance === 'model' && row.verified !== true);
-    const confidence = Number.isFinite(row.confidence)
-      ? Math.min(1, Math.max(0, row.confidence))
-      : 0.8;
-    return {
+  const ranked = fused
+    .map((row) => ({
       ...row,
-      provenance,
-      unverified,
-      confidence,
-      usage_weight: weight,
-      // RRF is the base order; the same calibrated modifiers as local retrieval
-      // keep unverified model claims from jumping ahead of confirmed facts.
-      score: row.rrf_score
-        * (1 + 0.25 * weight)
-        * (unverified ? 0.35 : 1)
-        * (0.85 + 0.15 * confidence),
-    };
-  }).sort((left, right) => right.score - left.score);
+      // Pure RRF order: no multiplier here, so the printed RRF and the printed
+      // channel ranks are the same ordering the user sees.
+      score: row.rrf_score,
+    }))
+    .sort((left, right) => right.score - left.score);
   if (ranked.length === 0) {
     return {
       ok: true,
@@ -789,7 +844,11 @@ export async function searchWithRag(config, sources, query, options = {}) {
   const topK = Number.isInteger(options.topK) && options.topK > 0 ? options.topK : config.defaultTopK;
   const { hits, folded } = foldDuplicateHits(ranked, topK);
   if (callerStore && typeof callerStore.recordKnowledgeUsage === 'function') {
-    callerStore.recordKnowledgeUsage(hits.map((hit) => hit.doc_id));
+    const ownedHits = hits.filter((hit) => callerOwner === null || (
+      (hit.origin_key ?? '') === (callerOwner.key ?? '')
+      && (hit.origin_scope ?? 'session') === (callerOwner.scope ?? 'session')
+    ));
+    callerStore.recordKnowledgeUsage(ownedHits.map((hit) => hit.doc_id));
   }
   const channelSummary = `RAG ${ragRows.length} 条 + 本地 BM25 ${localRows.length} 条 → RRF(k=${RRF_K})`;
   return {
@@ -798,7 +857,8 @@ export async function searchWithRag(config, sources, query, options = {}) {
     text: `检索方式：RRF 融合（${channelSummary}）｜${covers}\n`
       + formatHits(query, hits, 'rrf', folded)
       + '\n（RAG 索引会按语义去重；被索引去重掉的旧文档仍由本地 BM25 通道带回，不再出现“知识库里有、RAG 里没有”的两套结论。'
-      + '权重按本对话最近使用时间排序；关闭「RAG 挂载」则只走本地 BM25。）',
+      + 'RAG#/BM25# 是通道内先按使用率、确认状态和置信度重排后的名次；RRF 只融合名次，最终分不再乘先验。'
+      + '关闭「RAG 挂载」则只走本地 BM25。）',
   };
 }
 
@@ -1036,6 +1096,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         + '注意：只改数字（端口/阈值/版本）、URL 或开关（开启/关闭）的“更新”即使措辞高度相似也会返回 kind=update，必须先确认；'
         + '确认后写入原 doc_id 并保留 changes 审计，不要把它当普通重复直接合并。'
         + '需要检索时用 aim_search（默认跨对话）。不要写入密钥、令牌或用户没有说过的事实。'
+        + 'remember/learn/incident 的调用方是模型，写入内容默认标为模型自述（provenance=model、verified=false、检索降权），'
+        + '用户可在面板对单条点「确认这条」，确认后保留原 doc_id 与证据链并清除黄标；不要假装已确认。'
         + '面板可把「归档 / 知识库提炼 / 上下文清理」分别切到外部模型模式（任何 OpenAI 兼容服务）；'
         + '外部模式失败会自动回退本地规则，结果里会写明用了哪条路。'
         + 'RAG：索引建在知识库上（action=index），是否挂到 aim_search 由面板「RAG 挂载」开关控制，可随时挂/摘。'
@@ -1330,6 +1392,11 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             tags: args?.tags,
             url: args?.url,
             confidence: args?.confidence,
+            // The only caller of this tool is the model. Even source=user is a
+            // model transcription, not a verified fact; mark it unverified until
+            // the user confirms it through the panel.
+            provenance: 'model',
+            verified: false,
             evidence: [{ kind: 'authored', ref: String(args?.source ?? 'authored') }],
           }, { confirm: args?.confirm === true });
           if (doc && doc.needs_confirm) return formatConflict(doc);
@@ -1344,7 +1411,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
               : '知识已写入'}（${source.label}）：${doc.doc_id}`,
             `分类：${doc.category}｜来源：${doc.source}`
               + (doc.tags.length > 0 ? `｜标签：${doc.tags.join('，')}` : '')
-              + (doc.url !== '' ? `｜出处：${doc.url}` : ''),
+              + (doc.url !== '' ? `｜出处：${doc.url}` : '')
+              + `｜状态：${doc.verified === true ? '已确认' : '模型自述（未确认）'}`,
             `修订：${doc.revision ?? 1}`
               + ((doc.changes?.length ?? 0) > 0 ? `｜最近变化：${doc.changes[doc.changes.length - 1].kind}` : ''),
             clip(doc.text, 400),
@@ -1370,6 +1438,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
                 tags: item.tags,
                 url: item.url,
                 confidence: item.confidence,
+                provenance: 'model',
+                verified: false,
               }, { confirm: args?.confirm === true });
               if (doc && doc.needs_confirm) {
                 blocked.push(doc);
@@ -1388,6 +1458,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             `已写入知识 ${written.length} 条（新增 ${written.length - merged}，合并 ${merged}）`
               + (blocked.length > 0 ? `，待确认 ${blocked.length} 条` : '')
               + (failed.length > 0 ? `，失败 ${failed.length}` : ''),
+            '模型写入默认是模型自述（未确认）；用户在面板「确认这条」后才转为已确认。',
           ];
           for (const doc of written) {
             lines.push(`- [${doc.category}] ${doc.doc_id}（${doc.source}）：${clip(doc.text, 120)}`);
@@ -1425,6 +1496,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           return [
             `事故已写入知识库（${source.label}）：${doc.doc_id}`,
             `分类：incidents（独立类型「事故」）｜严重度：${severity}｜状态：${incidentStatus}`,
+            `知识状态：模型自述（未确认）｜置信度：${doc.confidence}；面板确认后清除黄标`,
             clip(doc.text, 800),
             '事故记录不触发知识冲突闸门，也不会被普通知识的冲突确认拦下；'
               + '之后可用 aim_search（category=incidents 或直接搜「事故」）检索。',
@@ -1674,10 +1746,18 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
 
         // Vector path: RAG when mounted, local BM25 otherwise. It doubles as the
         // fallback when SQL translation fails, and can itself be backed by SQL
-        // when the vector side has no hits.
+        // Usage weights belong to the caller's conversation. A cross-conversation
+        // hit must not be scored with the caller's history, even when both rows
+        // happen to share a doc_id.
+        const callerSource = sources.find((source) => source.store === callerStore) ?? null;
+        const callerOwner = callerSource === null
+          ? null
+          : { key: callerSource.key ?? '', scope: callerSource.scope ?? 'session' };
+        const ownedHit = (hit) => callerOwner === null || (
+          (hit.origin_key ?? '') === callerOwner.key
+          && (hit.origin_scope ?? 'session') === callerOwner.scope
+        );
         const localRun = () => {
-          // Usage weights belong to the caller's conversation: a cross-conversation
-          // hit is scored with the caller's own usage, not the owner's.
           const weights = typeof callerStore.knowledgeWeights === 'function'
             ? callerStore.knowledgeWeights()
             : {};
@@ -1694,7 +1774,10 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             // drown out a strong hit elsewhere.
             const sourceMax = Math.max(0, ...found.map((hit) => hit.score));
             for (const hit of found) {
-              const weight = Number.isFinite(weights[hit.doc_id]) ? weights[hit.doc_id] : 0;
+              const owned = callerOwner !== null
+                && (source.key ?? '') === callerOwner.key
+                && (source.scope ?? 'session') === callerOwner.scope;
+              const weight = owned && Number.isFinite(weights[hit.doc_id]) ? weights[hit.doc_id] : 0;
               const baseScore = sourceMax > 0 ? hit.score / sourceMax : 0;
               merged.push({
                 ...hit,
@@ -1716,7 +1799,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           // A returned hit counts as "used" for the caller's conversation, which
           // lifts it on later searches here (and only here).
           if (typeof callerStore.recordKnowledgeUsage === 'function') {
-            callerStore.recordKnowledgeUsage(hits.map((hit) => hit.doc_id));
+            callerStore.recordKnowledgeUsage(hits.filter(ownedHit).map((hit) => hit.doc_id));
           }
           return {
             empty: false,
@@ -1735,6 +1818,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             topK,
             category: args?.category ?? null,
             store: callerStore,
+            owner: callerOwner,
           });
           if (rag.ok === true) {
             picked = { empty: rag.empty === true, text: rag.text };
@@ -1836,7 +1920,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
     {
       name: 'aim_context',
       description:
-        '上下文管理：save=把当前已完成对话整理进存储；clear=按话题相似度清理会话上下文；'
+        '上下文管理：save=把当前已完成对话整理进存储；clear=按话题相似度清理会话上下文（默认在下一次模型请求前执行，不等到轮末）；'
         + 'restore=把保存的上下文重新注入当前会话（不整份注入：按 restoreMaxChars 预算只取最近轮次）；'
         + 'list=列出存档；status=查看清理策略与存档状态；'
         + 'sessions=列出所有对话及其记忆规模。'
@@ -1912,11 +1996,17 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             throw new Error('当前调用没有可用的会话上下文');
           }
           if (config.topicalClear !== false) {
-            runtime.pending.set(String(session.id), 'manual');
-            return '已登记清理请求：本轮结束后按话题相似度清理本对话上下文。\n'
+            runtime.pending.set(String(session.id), {
+              kind: 'manual',
+              mode: 'immediate',
+              at: new Date().toISOString(),
+            });
+            return '已登记立即清理：下一次模型请求前按话题相似度清理本对话上下文，不需要等到轮末。\n'
+              + '当轮仍在进行，绝不会被清掉；只有已经完整的旧轮次会进入选择。\n'
               + `保留最近 ${config.keepRecentTurns} 轮（当轮与上轮始终保留）；相似度阈值 ${config.similarityThreshold}；`
               + `单次最多清出 ${config.maxClearTurns} 轮。\n`
-              + '相似度高的轮次原样保留；被清出的轮次会先完整存档，之后可用 restore 调回。';
+              + '相似度高的轮次原样保留；被清出的轮次会先完整存档，之后可用 restore 调回。'
+              + '如果本轮不再发起模型请求，会在本轮收尾时执行，效果等同于下轮开始前已清空。';
           }
           const built = snapshot();
           const saved = store.saveContext({
@@ -2004,7 +2094,9 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
               + `单次最多 ${config.maxClearTurns} 轮（${config.minClearChars}~${config.maxClearChars} 字符）`,
             `恢复预算：单次 restore 最多注入 ${config.restoreMaxChars ?? 12000} 字符，只取最近轮次`,
             `自动整理：${config.autoEnabled ? `开启（每 ${config.autoEveryRounds} 轮，或上下文占用到 ${config.contextUsagePercent}%）` : '关闭'}`,
-            (() => {
+            `保留策略：staging ${config.stagingRetentionDays ?? 30} 天（仅已归档文件）；`
+              + `contexts ${config.contextRetentionDays > 0 ? `${config.contextRetentionDays} 天` : '不自动删除'}；`
+              + `decisions ${config.decisionRetentionDays > 0 ? `${config.decisionRetentionDays} 天` : '不自动删除'}`,            (() => {
               const meter = deps.getService?.('tokenMeter');
               let pressure = null;
               if (meter && typeof meter.contextPressure === 'function' && session) {
@@ -2020,7 +2112,11 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             `当前对话：${source.label}${context.sessionId ? `（${shortSessionId(context.sessionId)}）` : ''}`,
             `上下文存档：${store.listContexts().length} 个（本对话），可见对话共 ${totalContexts} 个`,
             `对话数量：${rows.length} 个${closed > 0 ? `（另有 ${closed} 个未对外开放）` : ''}`,
-            `待清理：${session && session.id && runtime.pending.has(String(session.id)) ? '是' : '否'}`,
+            `待清理：${!session || !session.id || !runtime.pending.has(String(session.id))
+              ? '否'
+              : runtime.pending.get(String(session.id))?.mode === 'immediate'
+                ? '是（下一次模型请求前）'
+                : '是（轮末）'}`,
             (() => {
               const last = store.readCompactionStatus();
               if (!last) return '最近清理：无记录';
@@ -2221,15 +2317,16 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
 /**
  * Context management: archive and clear the conversation window with the
  * configured policy. Auto mode also does this every N turns; manual mode only
- * reacts to explicit `aim_context` tool calls. The listener is always installed
- * so a manual `clear` can finish after the current turn closes.
+ * reacts to explicit `aim_context` tool calls. The default policy is
+ * topic-aware: the turns that still share the current topic stay verbatim, and
+ * only the ones the conversation has moved away from are replaced — after their
+ * full text has been archived, so `restore` can always bring them back.
  *
- * The default policy is topic-aware: the turns that still share the current
- * topic stay verbatim, and only the ones the conversation has moved away from
- * are replaced — after their full text has been archived, so `restore` can
- * always bring them back. Clearing must run while the agent is idle, so it is
- * deferred to `turn/end` and awaited through `agent.whenIdle()`. Subagents are
- * skipped.
+ * A manual clear requested inside a tool call is applied at the next
+ * `agent/pre-step`: the previous tool result is already committed, so the
+ * surface replacement cannot split a tool call/result pair and the old context
+ * is gone before the next model request. `turn/end` remains the fallback when
+ * the turn does not issue another request. Subagents are skipped.
  */
 export function installContextManagement(ctx, config, deps, runtime) {
   const counters = runtime?.counters ?? new Map();
@@ -2447,6 +2544,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
    */
   const runTopicalClear = (session, options = {}) => {
     const label = String(options.label ?? 'before-clear');
+    const signal = options.signal;
     const store = storeOfSession(session);
     const record = recorderOf(store);
     if (!session || typeof session.ownEvents !== 'function') {
@@ -2462,18 +2560,25 @@ export function installContextManagement(ctx, config, deps, runtime) {
 
     /** Everything the clear does, once the agent is safely idle. */
     const clearNow = async () => {
+      if (signal?.aborted) return;
       const events = session.ownEvents();
       const turns = collectTurns(events);
       if (turns.length === 0) {
         record({ state: 'skipped', reason: 'empty' });
         return;
       }
+      // At `agent/pre-step` the current turn is already open. It stays in the
+      // list because it is the best topic anchor for the request that is about
+      // to be sent, but it is never a clear candidate: its surface range is
+      // still growing and removing it would drop the tool call/result that is
+      // about to be committed.
       const selection = selectTurnsByTopic(turns, {
         threshold: config.similarityThreshold,
         keepRecent: config.keepRecentTurns,
         anchorTurns: 2,
       });
-      if (selection.clear.length === 0) {
+      const clearTurns = selection.clear.filter((turn) => turn.inFlight !== true);
+      if (clearTurns.length === 0) {
         record({
           state: 'skipped',
           reason: '全部轮次都与当前话题相关',
@@ -2483,7 +2588,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
         });
         return;
       }
-      const runs = groupRuns(session, selection.clear);
+      const runs = groupRuns(session, clearTurns);
       if (runs.length === 0) {
         record({ state: 'skipped', reason: '没有可安全清理的连续轮次', kept: selection.keep.length, cleared: 0 });
         return;
@@ -2526,6 +2631,9 @@ export function installContextManagement(ctx, config, deps, runtime) {
             + (summarized.topics.length > 0 ? `｜主题：${summarized.topics.join('、')}` : '');
         }
       }
+      // The step may have been cancelled while the summary was generated.
+      // Never mutate the surface after an abort.
+      if (signal?.aborted) return;
       // Archive first: nothing leaves the window before it is restorable.
       const saved = store.saveContext({
         label,
@@ -2552,6 +2660,19 @@ export function installContextManagement(ctx, config, deps, runtime) {
       // eslint-disable-next-line no-console
       console.log(`[ai-for-memory] 已按话题相似度清出 ${turnCount} 轮（保留 ${selection.keep.length} 轮），存档 ${saved.context_id}`);
     };
+
+    // Pre-step mode: run the exact same selection and archive synchronously
+    // (to the caller) before the next model request is built. The agent is
+    // still in its running phase here, but no tool call is pending: the
+    // previous step's tool result has already been committed, so replacing a
+    // completed run cannot split a tool call/result pair.
+    if (options.immediate === true) {
+      return clearNow().catch((error) => {
+        record({ state: 'error', session: String(session.id), error: String(error?.message ?? error), via: 'pre-step' });
+        // eslint-disable-next-line no-console
+        console.error(`[ai-for-memory] 上下文立即清理失败：${error?.message ?? error}`);
+      });
+    }
 
     void (async () => {
       try {
@@ -2658,6 +2779,38 @@ export function installContextManagement(ctx, config, deps, runtime) {
     ? runtime.snapshotCounters
     : new Map();
   runtime.snapshotCounters = snapshotCounters;
+
+  /**
+   * Manual clear requested from inside a tool call cannot rewrite the surface
+   * yet: the current step still owns a pending tool call, and a replacement
+   * appended now would land between that call and its result. Run it at the
+   * next `agent/pre-step` instead — after the previous tool result is
+   * committed and before the next model request is built. That releases the
+   * old context inside the same turn rather than at `turn/end`.
+   */
+  const onPreStep = async (payload, next) => {
+    const proceed = typeof next === 'function' ? next : () => undefined;
+    const session = payload?.agent?.session;
+    if (!session || !session.id) return proceed();
+    const id = String(session.id);
+    const request = pending.get(id);
+    if (!request || typeof request !== 'object' || request.mode !== 'immediate') return proceed();
+    // An aborted step must not rewrite the surface; leave the request for the
+    // next usable boundary.
+    if (payload.signal?.aborted) return proceed();
+    try {
+      await runTopicalClear(session, {
+        label: 'before-clear',
+        immediate: true,
+        signal: payload.signal,
+      });
+    } finally {
+      // Only consume the exact request this handler started with; a newer
+      // manual request queued meanwhile must survive.
+      if (pending.get(id) === request) pending.delete(id);
+    }
+    return proceed();
+  };
 
   const onSessionEvent = (session, event) => {
     if (!session || !event || event.type !== 'turn/end') return;
@@ -2766,6 +2919,13 @@ export function installContextManagement(ctx, config, deps, runtime) {
                 + `${(promoted.pending?.length ?? 0) > 0 ? `，待确认更新 ${promoted.pending.length} 条（未写入）` : ''}`);
             }
           }
+          // Retention is best-effort and must never turn a tidy pass into an error.
+          try {
+            store.pruneRetention();
+          } catch (error) {
+            // eslint-disable-next-line no-console
+            console.warn(`[ai-for-memory] 保留策略清理失败：${error?.message ?? error}`);
+          }
           if (config.topicalClear === false) {
             // Legacy mode still snapshots the recent window before compacting.
             const snapshot = buildContextSnapshot(events, { maxChars: config.maxContextChars });
@@ -2796,10 +2956,12 @@ export function installContextManagement(ctx, config, deps, runtime) {
       const request = pending.get(id);
       pending.delete(id);
       const meta = request && typeof request === 'object' && !Array.isArray(request) ? request : {};
-      runClear(session, request === 'manual' ? 'manual' : 'auto', meta);
+      const manual = request === 'manual' || (request && typeof request === 'object' && request.kind === 'manual');
+      runClear(session, manual ? 'manual' : 'auto', meta);
     }
   };
 
+  ctx.effect(() => ctx.on('agent/pre-step', onPreStep));
   ctx.effect(() => ctx.on('session/event', onSessionEvent));
   ctx.effect(() => ctx.on('session/disposed', (session) => {
     const id = String(session?.id);

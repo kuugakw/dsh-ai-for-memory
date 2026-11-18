@@ -33,7 +33,7 @@ import {
   formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
 } from '../lib/knowledge-query.js';
 import { RRF_K, reciprocalRankFusion, search, tokenize } from '../lib/retrieval.js';
-import { CATEGORIES, hourKey } from '../lib/util.js';
+import { CATEGORIES, hourKey, listJsonlFiles } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { collectTurnDigest } from '../lib/auto.js';
 import { buildContextSnapshot, formatRestoreContext } from '../lib/context.js';
@@ -558,7 +558,8 @@ test('context tool saves, lists and restores a context', async () => {
     assert.match(status, /保留最近 2 轮/);
 
     const cleared = await contextTool.execute({ action: 'clear' }, exec);
-    assert.match(cleared, /已登记清理请求/);
+    assert.match(cleared, /立即清理/);
+    assert.match(cleared, /下一次模型请求前/);
     assert.match(cleared, /按话题相似度/);
     assert.match(cleared, /store|restore/);
   } finally {
@@ -1383,6 +1384,16 @@ test('RAG + local BM25 are fused with RRF and the deduped old doc remains visibl
     assert.match(result.text, /legacy-deploy/);
     assert.match(result.text, /BM25#/);
     assert.match(result.text, /RAG#/);
+    // RRF is the final order. If a post-fusion multiplier reorders hits, the
+    // printed RRF values stop being monotonic — the exact bug users saw as
+    // "RAG#1 is printed below RAG#4".
+    const rrfValues = [...result.text.matchAll(/RRF=([0-9.]+)/g)].map((match) => Number(match[1]));
+    assert.ok(rrfValues.length > 0);
+    for (let index = 1; index < rrfValues.length; index += 1) {
+      assert.ok(rrfValues[index - 1] >= rrfValues[index] - 1e-12,
+        `RRF printout is not monotonic at ${index}: ${rrfValues.join(', ')}`);
+    }
+    assert.match(result.text, /通道内先按使用率/);
   } finally {
     globalThis.fetch = previousFetch;
     fs.rmSync(root, { recursive: true, force: true });
@@ -1425,6 +1436,12 @@ test('knowledge tools write, learn in batch and preview promotion', async () => 
     assert.match(batch, /已写入知识 2 条/);
     assert.match(batch, /新增 2/);
 
+    // The only caller of aim_memory is the model. Even source=user/reasoning is
+    // a model transcription, so tool writes must start unverified.
+    const written = new MemoryScopes(memoryRoot).sessionStoreFor('session-k', {}).store.documents();
+    assert.equal(written.length, 3);
+    assert.ok(written.every((doc) => doc.provenance === 'model' && doc.verified === false));
+
     const st = await memory.execute({ action: 'status' }, exec);
     assert.match(st, /知识库：3 篇/);
     assert.match(st, /知识来源：/);
@@ -1440,6 +1457,49 @@ test('knowledge tools write, learn in batch and preview promotion', async () => 
     assert.match(forgotten, /未删除/);
     const listed = await memory.execute({ action: 'status' }, exec);
     assert.match(listed, /知识库：3 篇/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('verification clears a model claim and incidents are compact unverified prose', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    const claim = store.remember({
+      text: '发布分支可能是 release',
+      category: 'project_facts',
+      source: 'reasoning',
+      provenance: 'model',
+      verified: false,
+    }, { confirm: true });
+    const before = store.documents().find((doc) => doc.doc_id === claim.doc_id);
+    assert.equal(before.provenance, 'model');
+    assert.equal(before.verified, false);
+    const evidenceBefore = before.evidence.length;
+
+    const result = store.verifyKnowledge(claim.doc_id);
+    assert.equal(result.verified, true);
+    assert.equal(result.doc_id, claim.doc_id);
+    const after = store.documents().find((doc) => doc.doc_id === claim.doc_id);
+    assert.equal(after.doc_id, before.doc_id);
+    assert.equal(after.text, before.text, 'confirmation never rewrites the sentence');
+    assert.equal(after.verified, true);
+    assert.equal(after.evidence.length, evidenceBefore + 1);
+    assert.equal(after.evidence.at(-1).kind, 'user-confirm');
+
+    const incident = store.recordIncident({
+      title: '一次测试事故',
+      what_happened: '文件被覆盖',
+      cause: '错误的写入命令',
+      fix: '从快照恢复',
+      prevention: '写入前先备份',
+    });
+    assert.equal(incident.provenance, 'model');
+    assert.equal(incident.verified, false);
+    assert.ok(incident.confidence < 1);
+    assert.equal(/\n/.test(incident.text), false, 'incident is one compact line, not a six-line template');
+    assert.match(incident.text, /\[事故\]/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1862,6 +1922,68 @@ test('similarity clear removes unrelated turns and their archive stays restorabl
   }
 });
 
+test('manual clear runs at the next pre-step and keeps the in-flight turn', async () => {
+  const root = tempRoot();
+  try {
+    const events = offTopicEvents();
+    // Turn 5 is the tool-calling turn that asked for the clear. It has no
+    // `turn/end`, so it is in flight and must never be a clear candidate.
+    events.push(
+      { type: 'turn/start', data: { turn: 5 } },
+      { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '当前这轮正在执行工具，不能被清掉' }] } },
+      { type: 'assistant/message', data: { message: { role: 'assistant', content: [{ type: 'text', text: '正在执行清理工具' }] } } },
+    );
+    const { session, log, nodes } = fakeSession(events);
+    const handlers = new Map();
+    const ctx = {
+      effect: (fn) => fn(),
+      on: (event, handler) => { handlers.set(event, handler); return () => {}; },
+      get: () => undefined,
+    };
+    const config = normalizeConfig({
+      root: path.join(root, 'memory'),
+      keepRecentTurns: 2,
+    });
+    const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
+    installContextManagement(ctx, config, { registryDir: path.join(root, 'registry'), getService: ctx.get }, runtime);
+
+    const before = nodes.length;
+    runtime.pending.set('session-clear', { kind: 'manual', mode: 'immediate' });
+    let nextCalls = 0;
+    const preStep = handlers.get('agent/pre-step');
+    // A cancelled step must not rewrite the surface or consume the request.
+    const aborted = new AbortController();
+    aborted.abort();
+    await preStep({ agent: { session }, signal: aborted.signal }, async () => { nextCalls += 1; });
+    assert.equal(nodes.length, before);
+    assert.equal(runtime.pending.has('session-clear'), true);
+
+    const result = await preStep({
+      agent: { session },
+      signal: new AbortController().signal,
+    }, async () => { nextCalls += 1; });
+    assert.equal(result, undefined);
+    assert.equal(nextCalls, 2);
+    assert.equal(runtime.pending.has('session-clear'), false);
+
+    // Old turns are replaced inside the same turn, before the next request.
+    assert.equal(nodes.length, before - 3);
+    const keptText = nodes.map((seq) => log[seq])
+      .flatMap((event) => event.data?.content ?? event.data?.message?.content ?? [])
+      .map((block) => block.text ?? '')
+      .join('\n');
+    assert.match(keptText, /当前这轮正在执行工具/);
+    assert.doesNotMatch(keptText, /数据库索引/);
+    assert.match(keptText, /上下文清理/);
+
+    const store = new MemoryScopes(path.join(root, 'memory')).sessionStoreFor('session-clear', {}).store;
+    assert.equal(store.readCompactionStatus().state, 'done');
+    assert.equal(store.listContexts()[0].label, 'before-clear');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a busy agent is retried once before the clear gives up', async () => {
   const root = tempRoot();
   try {
@@ -2059,6 +2181,74 @@ test('a conversation groups by the workspace that opened it, not its live cwd', 
 });
 
 
+
+test('workspace buckets decode to the path style DSH actually used', () => {
+  // DSH's projectKey collapses `:`/`\`/`/` into one `-`; a Windows drive
+  // bucket is not a POSIX absolute path and vice versa.
+  assert.equal(encodeWorkspace('D:\\ai\\工作区'), '--D-ai-~5DE5~4F5C~533A--');
+  assert.equal(encodeWorkspace('/tmp/工作区'), '--tmp-~5DE5~4F5C~533A--');
+  assert.equal(decodeWorkspaceBucket('--D-ai-~5DE5~4F5C~533A--'), 'D:\\ai\\工作区');
+  assert.equal(decodeWorkspaceBucket('--tmp-~5DE5~4F5C~533A--'), '/tmp/工作区');
+
+  // A POSIX bucket that no longer exists must still fall back to POSIX, not
+  // to a backslash pseudo-path (which used to split one workspace into many
+  // panel groups).
+  const fallback = resolveWorkspacePath('/definitely/missing/工作区');
+  assert.equal(fallback, '/definitely/missing/工作区');
+});
+
+test('cache views invalidate across store instances and retention is archive-safe', () => {
+  const root = tempRoot();
+  try {
+    const first = new MemoryStore(root);
+    const second = new MemoryStore(root);
+    first.remember({ text: '第一条跨实例缓存事实', category: 'project_facts' }, { confirm: true });
+    assert.equal(second.documents().length, 1);
+    // Prime second's cache, then write through first: the shared epoch must
+    // make second see the new document immediately.
+    assert.equal(second.documents().length, 1);
+    first.remember({ text: '第二条跨实例缓存事实', category: 'project_facts' }, { confirm: true });
+    assert.equal(second.documents().length, 2);
+
+    // A staging hour file older than the cutoff stays until it is archived.
+    first.stage({ content: '一条等待归档的旧记录', kind: 'action' });
+    const stagingFile = listJsonlFiles(first.stagingDir)[0];
+    const old = new Date(Date.now() - 31 * 86400000);
+    fs.utimesSync(stagingFile, old, old);
+    assert.equal(first.pruneStaging(30), 0);
+    assert.equal(fs.existsSync(stagingFile), true);
+    first.archive();
+    assert.equal(fs.existsSync(stagingFile), false);
+    assert.equal(first.archivedCount(), 1);
+
+    // Context/decision retention is explicit; contexts are restorable data.
+    const saved = first.saveContext({
+      label: 'old-context', sessionId: 's1', turnFrom: 1, turnTo: 1, turnCount: 1, chars: 2,
+      turns: [{ turn: 1, user: '旧', assistant: '答案' }], text: '旧 答案',
+    });
+    const contextFile = path.join(first.contextDir, `${saved.context_id}.json`);
+    fs.utimesSync(contextFile, old, old);
+    assert.equal(first.pruneContexts(30), 1);
+    assert.equal(first.listContexts().length, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('promote ledger never evicts old refs just to stay under a cap', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    store.init();
+    const refs = Array.from({ length: 4100 }, (_, index) => ({ ref: `staging:r${index}`, doc_id: '' }));
+    store.markPromoted(refs);
+    const ledger = store.promotedLedger();
+    assert.equal(Object.keys(ledger.refs).length, 4100);
+    assert.ok(ledger.refs['staging:r0'], 'oldest ref must survive');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('a fact that disagrees with stored knowledge waits for the user', () => {
   const root = tempRoot();
@@ -2790,6 +2980,12 @@ test('query router sends metrics to SQL and fuzzy questions to vectors', () => {
   assert.equal(translateToSql('k_5ec4c66a 是什么').kind, 'exact');
   assert.equal(translateToSql('最近 3 条知识').kind, 'recent');
   assert.equal(translateToSql('如何清理上下文'), null);
+  // A bare "最多" is not a category/source aggregate; it must not turn into a
+  // confident SQL answer about workflow_rules.
+  assert.equal(routeKnowledgeQuery('哪个方案最多坑').route, 'vector');
+  assert.equal(translateToSql('哪个方案最多坑'), null);
+  assert.equal(translateToSql('哪个分类最多').kind, 'top');
+  assert.equal(translateToSql('未确认的模型自述有几条').kind, 'unverified');
 });
 
 test('raw SQL is accepted only as one read-only statement', () => {
@@ -2840,6 +3036,78 @@ test('SQL route answers counts and groups from the JSON base', (t) => {
   assert.equal(mergedTotal.rows[0].n, 3);
 });
 
+test('SQL view keeps provenance/changes and counts copies across conversations', (t) => {
+  if (!sqliteAvailable()) {
+    t.skip('node:sqlite is unavailable on this Node build');
+    return;
+  }
+  const root = tempRoot();
+  let store;
+  try {
+    store = new MemoryStore(root, { knowledgeBackend: 'sqlite' });
+    store.remember({
+      text: '模型自己猜的发布分支是 main',
+      category: 'project_facts',
+      source: 'staging',
+      provenance: 'model',
+      verified: false,
+    }, { confirm: true });
+    store.remember({
+      text: '发布分支实际是 release',
+      category: 'project_facts',
+      source: 'user',
+      provenance: 'user',
+      verified: true,
+    }, { confirm: true });
+
+    const docs = store.documents();
+    const merged = [
+      ...docs.map((doc) => ({ ...doc, origin: '对话 A' })),
+      ...docs.map((doc) => ({ ...doc, origin: '对话 B' })),
+    ];
+
+    // The same doc_id exists in two conversations. COUNT(*) must count copies;
+    // COUNT(DISTINCT doc_id) remains the "distinct facts" number.
+    const total = runSqlQuery(merged, '知识一共有多少条');
+    assert.equal(total.ok, true);
+    assert.equal(total.rows[0].n, 4);
+    assert.equal(total.rows[0].distinct_docs, 2);
+    const distinct = runSqlQuery(merged, 'SELECT COUNT(DISTINCT doc_id) AS n FROM knowledge_docs');
+    assert.equal(distinct.ok, true);
+    assert.equal(distinct.rows[0].n, 2);
+
+    // Both schemas expose the same semantic columns.
+    const schemaRow = runSqlQuery(
+      merged,
+      'SELECT provenance, verified, changes, origin FROM knowledge_docs LIMIT 1',
+    );
+    assert.equal(schemaRow.ok, true);
+    assert.ok(Object.hasOwn(schemaRow.rows[0], 'provenance'));
+    assert.ok(Object.hasOwn(schemaRow.rows[0], 'verified'));
+    assert.ok(Object.hasOwn(schemaRow.rows[0], 'changes'));
+    assert.ok(Object.hasOwn(schemaRow.rows[0], 'origin'));
+
+    const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
+    const mirror = new DatabaseSync(knowledgeDatabasePath(root));
+    const columns = mirror.prepare('PRAGMA table_info(knowledge_docs)').all().map((row) => row.name);
+    mirror.close();
+    for (const column of ['provenance', 'verified', 'changes', 'origin']) {
+      assert.ok(columns.includes(column), `persistent mirror is missing ${column}`);
+    }
+
+    const claims = runSqlQuery(merged, '未确认的模型自述有几条');
+    assert.equal(claims.ok, true);
+    assert.equal(claims.rows[0].n, 2);
+
+    const listed = runSqlQuery(merged, '列出未确认的模型自述');
+    assert.equal(listed.ok, true);
+    assert.match(formatSqlResult('列出未确认的模型自述', listed), /模型自述/);
+  } finally {
+    try { store.knowledgeSql?.close?.(); } catch { /* ignore */ }
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
 test('知识权重按最近使用衰减，且只作用于本对话', () => {
   const now = Date.parse('2026-11-17T12:00:00.000Z');
   const day = 24 * 60 * 60 * 1000;
@@ -2868,7 +3136,19 @@ test('知识权重按最近使用衰减，且只作用于本对话', () => {
   assert.equal(b.knowledgeWeight(doc.doc_id, now), 0);
   assert.equal(a.knowledgeUsage()[doc.doc_id].count, 1);
 
-  // 同一份文档在 B 里的权重来自 B 自己的使用时间（28 天前 -> 0.25）
+  // A returned hit from B must not be written into A's usage log. B is empty,
+  // so this is a foreign doc even though doc_id exists in A.
+  b.recordKnowledgeUsage([doc.doc_id], { at: new Date(now - 28 * day).toISOString() });
+  assert.equal(b.knowledgeWeight(doc.doc_id, now), 0);
+  assert.equal(b.knowledgeUsage()[doc.doc_id], undefined);
+
+  // Once B actually owns a copy of the fact, its own usage applies.
+  const bDoc = b.remember({
+    text: '知识权重按对话隔离，A 对话最近使用不会抬高 B 对话的排序。',
+    category: 'project_facts',
+    source: 'user',
+  }, { confirm: true });
+  assert.equal(bDoc.doc_id, doc.doc_id);
   b.recordKnowledgeUsage([doc.doc_id], { at: new Date(now - 28 * day).toISOString() });
   assert.ok(Math.abs(b.knowledgeWeight(doc.doc_id, now) - 0.25) < 1e-9);
   assert.ok(a.knowledgeWeight(doc.doc_id, now) > 0.999);
@@ -2920,14 +3200,32 @@ test('aim_search 记录本对话使用并标注权重', async () => {
     assert.ok(Object.keys(aUsage).length >= 1);
     assert.ok(aUsage.weight_marker_doc.count >= 1);
 
+    // A cross-conversation hit must not enter A's usage log (and must not get
+    // A's +25% boost on the next search).
+    await memory.execute({
+      action: 'remember',
+      doc_id: 'b_only_doc',
+      text: 'B 对话独有的知识，用来验证跨对话使用日志不污染 A。',
+      category: 'project_facts',
+      source: 'user',
+    }, execB);
+    new MemoryScopes(memoryRoot).setPublic(sessionKey('conv-weight-b'), true);
+    const cross = await searchTool.execute({ query: 'B 对话独有' }, execA);
+    assert.match(cross, /b_only_doc/);
+    assert.equal(aStore.knowledgeUsage().b_only_doc, undefined);
+    assert.match(cross, /权重 0\.00（未使用）/);
+
     // B never used this knowledge, and can read it only because A is opened.
     new MemoryScopes(memoryRoot).setPublic(sessionKey('conv-weight-a'), true);
     const second = await searchTool.execute({ query: '权重标记测试' }, execB);
     assert.match(second, /weight_marker_doc/);
     assert.match(second, /权重 0\.00（未使用）/);
 
-    // B 这次检索之后才记录了自己的使用，A 的记录没有被改动
-    assert.equal(aStore.knowledgeUsage().weight_marker_doc.count, aUsage.weight_marker_doc.count);
+    // B's search returned A's doc, but B owns no copy of it, so B's usage log
+    // stays empty for that foreign doc too.
+    const bStore = new MemoryScopes(memoryRoot).sessionStore(sessionKey('conv-weight-b'));
+    assert.equal(bStore.knowledgeUsage().weight_marker_doc, undefined);
+    assert.ok(aStore.knowledgeUsage().weight_marker_doc.count >= aUsage.weight_marker_doc.count);
   } finally {
     process.env.DSH_HOME = previousHome;
     fs.rmSync(root, { recursive: true, force: true });

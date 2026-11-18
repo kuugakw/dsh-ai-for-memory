@@ -34,7 +34,7 @@
     }
   },
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/core.test.mjs"
   },
   "repository": {
     "type": "git",
