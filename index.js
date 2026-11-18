@@ -20,6 +20,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import { MemoryScopes, sessionKey, shortSessionId } from './lib/scopes.js';
+import { findDuplicate } from './lib/knowledge.js';
+import { ensureDefaultMemoryDirIgnored } from './lib/gitignore.js';
 import { markActivity } from './lib/activity.js';
 import { evaluateDecision } from './lib/decision.js';
 import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
@@ -50,6 +52,7 @@ import {
   buildRagIndex, embeddingIdentity, ragCandidates, ragModelStatus, ragStats, rerankCandidates,
 } from './lib/rag.js';
 import { writeExportArtifacts } from './lib/export.js';
+import { RRF_K, reciprocalRankFusion } from './lib/retrieval.js';
 import { boostScore, weightLabel } from './lib/usage.js';
 import {
   formatSqlResult, routeKnowledgeQuery, runSqlQuery,
@@ -79,6 +82,10 @@ const DEFAULTS = Object.freeze({
   // the local BM25 path never needs an external service.
   ragMount: false,
   maxContextChars: 30000,
+  // Restoring an archive injects text into the live window. Restoring the
+  // whole archive can immediately refill what clearing just removed, so the
+  // restore path gets its own smaller budget (the newest turns win).
+  restoreMaxChars: 12000,
   defaultTopK: 5,
   // Knowledge storage backend: 'json' (one file per document, default) or
   // 'sqlite' (a single queryable knowledge.sqlite, mirrored back to JSON).
@@ -86,8 +93,10 @@ const DEFAULTS = Object.freeze({
   reviewHighRiskOnly: true,
   maxContentChars: 20000,
   maxSnapshotBytes: 262144,
-  // New conversations start open; the panel can close each one individually.
-  defaultPublic: true,
+  // New conversations are private by default. Cross-conversation search,
+  // restore and the merged view can read full archived conversations, so
+  // opening a conversation must be an explicit, per-conversation decision.
+  defaultPublic: false,
   // External model endpoint: any OpenAI-compatible HTTP API (llama.cpp,
   // Ollama, LM Studio, vLLM, a hosted gateway). This is the transport the
   // future RAG index will use; nothing calls it unless asked.
@@ -116,7 +125,7 @@ const DEFAULTS = Object.freeze({
   similarityThreshold: SIMILARITY_DEFAULT,
   keepRecentTurns: 2,
   maxClearTurns: 8,
-  minClearChars: 600,
+  minClearChars: 200,
   maxClearChars: 120000,
   // Text knowledge is mined from the three layers during automatic tidying so
   // the knowledge base grows without an extra prompt from the user.
@@ -131,6 +140,7 @@ const NUMERIC_BOUNDS = Object.freeze({
   autoSnapshotMax: [1, 200],
   contextUsagePercent: [1, 100],
   maxContextChars: [1000, 200000],
+  restoreMaxChars: [1000, 100000],
   keepRecentTurns: [1, 20],
   maxClearTurns: [1, 50],
   minClearChars: [0, 20000],
@@ -319,6 +329,16 @@ export function createScopes(root, config) {
 export function memoryContext(config, exec, deps = {}, runtime = undefined) {
   const workspace = workspaceOf(exec, deps.workingDirectory);
   const root = rootFor(config, exec, deps.workingDirectory);
+  // Protect the common case: `<project>/.ai-for-memory/` sits inside the user's
+  // git worktree and holds full conversation text. If the project already has a
+  // `.gitignore`, add the directory before its first creation so `git add .`
+  // cannot sweep the archive into a public repository. Custom roots are left
+  // alone; the README tells users to ignore those themselves.
+  try {
+    ensureDefaultMemoryDirIgnored(root, workspace, config.directoryName);
+  } catch {
+    // Never let a read-only `.gitignore` block memory writes.
+  }
   const registryDir = deps.registryDir ?? defaultRegistryDir();
   try {
     // Record every root the agent touches so the panel can list it later.
@@ -377,7 +397,9 @@ export function memorySources(context, scope = 'session') {
     if (ownKey !== null && row.key === ownKey) continue;
     // A conversation that is not open is invisible to every other conversation:
     // no cross-conversation search, no restored contexts, no merged panel view.
-    if (row.public === false) continue;
+    // Only explicitly-opened conversations are visible across scopes; a missing
+    // `public` field is private, not open.
+    if (row.public !== true) continue;
     sources.push({
       store: scopes.sessionStore(row.key),
       scope: 'session',
@@ -400,14 +422,14 @@ export function memorySources(context, scope = 'session') {
 export function readableConversations(context) {
   const { scopes, sessionId } = context;
   const ownKey = sessionId === '' ? null : sessionKey(sessionId);
-  return scopes.listSessions().filter((row) => row.key === ownKey || row.public !== false);
+  return scopes.listSessions().filter((row) => row.key === ownKey || row.public === true);
 }
 
 /** Count of conversations hidden from this caller by their access setting. */
 export function closedConversationCount(context) {
   const { scopes, sessionId } = context;
   const ownKey = sessionId === '' ? null : sessionKey(sessionId);
-  return scopes.listSessions().filter((row) => row.key !== ownKey && row.public === false).length;
+  return scopes.listSessions().filter((row) => row.key !== ownKey && row.public !== true).length;
 }
 
 /** The one store a write targets. */
@@ -444,6 +466,9 @@ function formatLayers(status) {
     lines.push(`知识来源：${knowledgeSources.map(([from, count]) => `${from}=${count}`).join('，')}`);
   }
   lines.push(`待提炼：约 ${status.knowledge.pending ?? 0} 条（promote 预览/写入，learn 直接写知识）`);
+  if ((status.knowledge.pendingUpdates ?? 0) > 0) {
+    lines.push(`待确认知识更新：${status.knowledge.pendingUpdates} 条（提炼想改写已有事实，未写入；面板知识库页可查看）`);
+  }
   lines.push(`决策记录：${status.decisions.total} 条`
     + (status.decisions.total > 0
       ? `（${Object.entries(status.decisions.byOutcome).map(([outcome, count]) => `${outcome}=${count}`).join('，')}）`
@@ -493,19 +518,84 @@ function formatSnapshotList(rows) {
   return lines.join('\n');
 }
 
-function formatHits(query, hits, mode) {
+/**
+ * Fold the same fact found in several stores after cross-conversation search.
+ *
+ * Each conversation has its own dedupe gate, so the same sentence can legally
+ * exist in N stores. Merging hits without folding would spend N of the top_k
+ * slots on one fact; here the highest-scoring copy wins and the other origins
+ * are kept only as "see also" notes.
+ */
+function foldDuplicateHits(rows, topK) {
+  const ordered = [...rows].sort((left, right) => right.score - left.score);
+  const kept = [];
+  let folded = 0;
+  for (const row of ordered) {
+    const duplicate = findDuplicate(row.text, kept);
+    if (!duplicate) {
+      kept.push({ ...row, see_also: [] });
+      continue;
+    }
+    const target = kept.find((item) => item.doc_id === duplicate.doc_id);
+    // Folding is for the same fact repeated across conversations. Two distinct
+    // docs in the same store are not a cross-source duplicate: the RAG index may
+    // have deduplicated the older one, and the local channel must still surface
+    // it after RRF instead of hiding it behind its newer twin.
+    if (target && target.origin_key === row.origin_key) {
+      kept.push({ ...row, see_also: [] });
+      continue;
+    }
+    folded += 1;
+    if (!target) continue;
+    const note = {
+      label: row.origin_label ?? '',
+      key: row.origin_key ?? '',
+      doc_id: row.doc_id,
+      score: row.score,
+    };
+    if (!target.see_also.some((item) => item.key === note.key
+      && item.doc_id === note.doc_id && item.label === note.label)) {
+      target.see_also.push(note);
+    }
+  }
+  return { hits: kept.slice(0, topK), folded };
+}
+
+function formatHits(query, hits, mode, folded = 0) {
   if (hits.length === 0) return `没有命中「${query}」的知识文档（mode=${mode}）。`;
-  const lines = [`命中 ${hits.length} 条（mode=${mode}）：`];
+  const claimCount = hits.filter((hit) => hit.unverified === true).length;
+  const lines = [`命中 ${hits.length} 条（mode=${mode}`
+    + (folded > 0 ? `，已折叠跨来源重复 ${folded} 条` : '') + '）：'];
+  if (claimCount > 0) {
+    lines.push(`⚠ 其中 ${claimCount} 条是模型自述（未经用户确认），已降权；不要把它们当作项目事实。`);
+  }
   hits.forEach((hit, index) => {
     const metric = mode === 'rag'
       ? `（RAG 相似度=${hit.score.toFixed(4)}）`
-      : `（bm25=${hit.bm25_score.toFixed(4)}，vector=${hit.vector_score.toFixed(4)}）`;
+      : mode === 'rrf'
+        ? ''
+        : `（bm25=${hit.bm25_score.toFixed(4)}，vector=${hit.vector_score.toFixed(4)}）`;
+    const fusion = mode === 'rrf'
+      ? `｜RRF=${Number.isFinite(hit.rrf_score) ? hit.rrf_score.toFixed(4) : '?'}`
+        + `｜RAG#${hit.rrf_ranks?.rag ?? '—'}｜BM25#${hit.rrf_ranks?.local ?? '—'}`
+      : '';
     const usage = Number.isFinite(hit.usage_weight) ? `｜${weightLabel(hit.usage_weight)}` : '';
+    const confidence = Number.isFinite(hit.confidence) ? `｜置信度：${hit.confidence.toFixed(2)}` : '';
+    const updatedCount = Array.isArray(hit.changes) ? hit.changes.length : (hit.changes_count ?? 0);
+    const updated = updatedCount > 0 ? `｜已更新×${updatedCount}` : '';
+    const seeAlso = Array.isArray(hit.see_also) && hit.see_also.length > 0
+      ? `｜另见：${[...new Set(hit.see_also.map((item) => item.label || '同内容'))].join('、')}`
+      : '';
     lines.push(`${index + 1}. [${hit.category}] ${hit.doc_id}  score=${hit.score.toFixed(4)}`
       + metric
+      + fusion
       + usage
+      + confidence
+      + updated
+      + (hit.unverified === true ? '｜⚠ 模型自述（未确认）' : '')
       + (hit.source && hit.source !== 'unknown' ? `｜知识来源：${hit.source}` : '')
-      + (hit.origin_label ? `｜对话：${hit.origin_label}` : ''));
+      + (hit.origin_label ? `｜对话：${hit.origin_label}` : '')
+      + seeAlso);
     lines.push(`   ${clip(hit.text, 320)}`);
   });
   return lines.join('\n');
@@ -518,7 +608,35 @@ function formatHits(query, hits, mode) {
  * and only the merged candidates go through one optional rerank call. Any
  * failure returns a note so the caller can fall back to local retrieval.
  */
-async function searchWithRag(config, sources, query, options = {}) {
+/**
+ * Ranked local channel for RRF. BM25 is deliberately used instead of hybrid:
+ * the point of fusion is to complement the semantic RAG channel with a lexical
+ * channel, not to reproduce the same ranking twice.
+ */
+function localRrfRows(sources, query, options = {}) {
+  const rows = [];
+  for (const source of sources) {
+    const found = source.store.search(query, {
+      category: options.category ?? null,
+      mode: 'bm25',
+      topK: 40,
+    });
+    const sourceMax = Math.max(0, ...found.map((hit) => hit.score));
+    for (const hit of found) {
+      rows.push({
+        ...hit,
+        local_score: sourceMax > 0 ? hit.score / sourceMax : 0,
+        origin_label: source.label,
+        origin_key: source.key,
+        origin_scope: source.scope,
+      });
+    }
+  }
+  rows.sort((left, right) => right.local_score - left.local_score);
+  return rows;
+}
+
+export async function searchWithRag(config, sources, query, options = {}) {
   const models = ragModelStatus(config);
   if (!models.ready) {
     return {
@@ -601,46 +719,86 @@ async function searchWithRag(config, sources, query, options = {}) {
     };
   }
   const covers = `范围：${sources.map((source) => source.label).join(' + ')}`
-    + (unindexedStores > 0 ? `（${unindexedStores} 个存储还没有索引，未参与）` : '')
-    + (staleStores > 0 ? `（${staleStores} 个存储的索引与当前嵌入配置不一致，已跳过；请重建索引）` : '');
-  // Recency weight is conversation-scoped: every hit is scored with the *caller
-  // conversation's* usage log, even when the document lives in another store.
+    + (unindexedStores > 0 ? `（${unindexedStores} 个存储还没有 RAG 索引，只参与本地 BM25 通道）` : '')
+    + (staleStores > 0 ? `（${staleStores} 个存储的 RAG 索引与当前嵌入配置不一致，已跳过 RAG 通道；仍参与本地 BM25）` : '');
+  // RRF needs both channels on the same result page. RAG is the semantic
+  // channel; local BM25 is the lexical channel. The local channel sees every
+  // JSON knowledge document, including those the index-level semantic dedupe
+  // deliberately left out, so the two paths no longer disagree about existence.
   const callerStore = options.store ?? null;
   const weights = callerStore && typeof callerStore.knowledgeWeights === 'function'
     ? callerStore.knowledgeWeights()
     : {};
-  const weighted = reranked.hits.map((row) => {
-    const weight = Number.isFinite(weights[row.doc.doc_id]) ? weights[row.doc.doc_id] : 0;
-    return { ...row, usage_weight: weight, score: boostScore(row.score, weight) };
+  const ragRows = reranked.hits.map((row, index) => {
+    const provenance = typeof row.doc.provenance === 'string' ? row.doc.provenance : 'authored';
+    return {
+      doc_id: row.doc.doc_id,
+      text: row.doc.text,
+      category: row.doc.category,
+      source: row.doc.source,
+      url: row.doc.url,
+      provenance,
+      unverified: provenance === 'model' && row.doc.verified !== true,
+      confidence: Number.isFinite(row.doc.confidence)
+        ? Math.min(1, Math.max(0, row.doc.confidence))
+        : 0.8,
+      changes_count: Number.isInteger(row.doc.changes_count)
+        ? row.doc.changes_count
+        : (Array.isArray(row.doc.changes) ? row.doc.changes.length : 0),
+      score: row.score,
+      rag_rank: index + 1,
+      origin_label: row.source.label,
+      origin_key: row.source.key,
+      origin_scope: row.source.scope,
+    };
+  });
+  const localRows = localRrfRows(sources, query, { category: options.category ?? null });
+  const fused = reciprocalRankFusion([
+    { name: 'rag', rows: ragRows },
+    { name: 'local', rows: localRows },
+  ], { k: RRF_K });
+  const ranked = fused.map((row) => {
+    const weight = Number.isFinite(weights[row.doc_id]) ? weights[row.doc_id] : 0;
+    const provenance = typeof row.provenance === 'string' ? row.provenance : 'authored';
+    const unverified = row.unverified === true
+      || (provenance === 'model' && row.verified !== true);
+    const confidence = Number.isFinite(row.confidence)
+      ? Math.min(1, Math.max(0, row.confidence))
+      : 0.8;
+    return {
+      ...row,
+      provenance,
+      unverified,
+      confidence,
+      usage_weight: weight,
+      // RRF is the base order; the same calibrated modifiers as local retrieval
+      // keep unverified model claims from jumping ahead of confirmed facts.
+      score: row.rrf_score
+        * (1 + 0.25 * weight)
+        * (unverified ? 0.35 : 1)
+        * (0.85 + 0.15 * confidence),
+    };
   }).sort((left, right) => right.score - left.score);
-  if (weighted.length === 0) {
+  if (ranked.length === 0) {
     return {
       ok: true,
       empty: true,
-      text: `RAG 检索（${reranked.via === 'rerank' ? '嵌入 + 重排' : '嵌入'}）没有命中「${query}」。\n${covers}`,
+      text: `RRF 融合（RAG ${ragRows.length} 条 + 本地 BM25 ${localRows.length} 条）没有命中「${query}」。\n${covers}`,
     };
   }
-  const hits = weighted.map((row) => ({
-    doc_id: row.doc.doc_id,
-    text: row.doc.text,
-    category: row.doc.category,
-    source: row.doc.source,
-    url: row.doc.url,
-    score: row.score,
-    usage_weight: row.usage_weight,
-    origin_label: row.source.label,
-    origin_key: row.source.key,
-    origin_scope: row.source.scope,
-  }));
+  const topK = Number.isInteger(options.topK) && options.topK > 0 ? options.topK : config.defaultTopK;
+  const { hits, folded } = foldDuplicateHits(ranked, topK);
   if (callerStore && typeof callerStore.recordKnowledgeUsage === 'function') {
-    callerStore.recordKnowledgeUsage(weighted.map((row) => row.doc.doc_id));
+    callerStore.recordKnowledgeUsage(hits.map((hit) => hit.doc_id));
   }
+  const channelSummary = `RAG ${ragRows.length} 条 + 本地 BM25 ${localRows.length} 条 → RRF(k=${RRF_K})`;
   return {
     ok: true,
     empty: false,
-    text: `检索方式：RAG（${reranked.via === 'rerank' ? '嵌入 + 重排' : '嵌入'}）｜${covers}\n`
-      + formatHits(query, hits, 'rag')
-      + '\n（RAG 只覆盖已建索引的知识文档；权重按本对话最近使用时间排序，在面板关闭「RAG 挂载」即可回到本地 BM25 检索。）',
+    text: `检索方式：RRF 融合（${channelSummary}）｜${covers}\n`
+      + formatHits(query, hits, 'rrf', folded)
+      + '\n（RAG 索引会按语义去重；被索引去重掉的旧文档仍由本地 BM25 通道带回，不再出现“知识库里有、RAG 里没有”的两套结论。'
+      + '权重按本对话最近使用时间排序；关闭「RAG 挂载」则只走本地 BM25。）',
   };
 }
 
@@ -649,12 +807,16 @@ async function searchWithRag(config, sources, query, options = {}) {
 function gatherPromoteSource(store) {
   const chunks = [];
   for (const record of store.stagingRecords().slice(-40)) {
+    // Same gate as the deterministic promote: a model's unverified record is
+    // not raw material for facts, even when an external model does the reading.
+    if (record.verify !== 'pass') continue;
     if (typeof record.content === 'string' && record.content.trim() !== '') {
       chunks.push(record.content.trim());
     }
   }
   for (const category of CATEGORIES) {
     for (const entry of store.archiveEntries(category, 20)) {
+      if (entry?.verify !== 'pass') continue;
       const text = entry?.content ?? entry?.text ?? '';
       if (typeof text === 'string' && text.trim() !== '') chunks.push(text.trim());
     }
@@ -695,20 +857,35 @@ function externalOpEndpointFrom(config, capMs = 15000) {
 function formatConflict(result) {
   const pending = result?.pending ?? {};
   const conflicts = Array.isArray(result?.conflicts) ? result.conflicts : [];
+  const isUpdate = result?.kind === 'update' || conflicts.some((row) => row?.update === true);
   const lines = [
-    '未写入：这条知识可能与已有知识冲突，需要先问用户。',
+    isUpdate
+      ? '未写入：这条知识是对已有条目的更新（数值/端点/极性发生变化），需要先确认。'
+      : '未写入：这条知识可能与已有知识冲突，需要先问用户。',
     `待写入：${clip(pending.text ?? '', 300)}`,
   ];
   for (const row of conflicts.slice(0, 3)) {
-    lines.push(`- 已有 [${row.category || '未分类'}] ${row.doc_id}（相似度 ${row.similarity}）：${clip(row.text, 160)}`);
+    const change = row?.change && typeof row.change === 'object' ? row.change : null;
+    const delta = change
+      ? `，${change.kind}：${clip((change.before ?? []).join('，'), 80)} → ${clip((change.after ?? []).join('，'), 80)}`
+      : '';
+    lines.push(`- 已有 [${row.category || '未分类'}] ${row.doc_id}（相似度 ${row.similarity}${delta}）：${clip(row.text, 160)}`);
   }
   lines.push('请向用户确认三件事：以哪条为准、是否覆盖旧条目（给旧条目 doc_id）、是否只是补充；');
-  lines.push('用户同意后再用 confirm=true 重新调用（同意覆盖时同时传旧条目的 doc_id）。用户不同意就不要写入。');
+  if (isUpdate) {
+    lines.push('用户确认后用 confirm=true 重新调用；确认后会写入新正文，并在 changes 中保留上一版审计。');
+  } else {
+    lines.push('用户同意后再用 confirm=true 重新调用（同意覆盖时同时传旧条目的 doc_id）。用户不同意就不要写入。');
+  }
   return lines.join('\n');
 }
 
 function formatPromotion(result) {
   const scanned = result.scanned ?? {};
+  const rows = [...(result.added ?? []), ...(result.merged ?? [])];
+  const claims = rows.filter((row) => row.provenance === 'model' && row.verified !== true).length;
+  const skippedUnverified = (result.skippedUnverified?.staging ?? 0)
+    + (result.skippedUnverified?.archive ?? 0);
   const lines = [
     `${result.dryRun ? '提炼预览（未写入）' : '已从三层提炼知识'}：`
       + `过程记录 ${scanned.staging ?? 0}，归档 ${scanned.archive ?? 0}，`
@@ -716,8 +893,28 @@ function formatPromotion(result) {
     `${result.dryRun ? '将新增' : '新增'} ${result.added.length} 篇，合并 ${result.merged.length} 篇，`
       + `剩余 ${result.remaining} 条待下次`,
   ];
+  if (skippedUnverified > 0) {
+    lines.push(`另有 ${skippedUnverified} 条过程记录/归档未通过 verify=pass，未被提炼（保持待核实，不计入知识）。`);
+  }
+  if (claims > 0) {
+    lines.push(`⚠ 其中 ${claims} 篇是模型自述（来自过程记录或决策复盘，未经用户确认）；`
+      + '已标记并会在检索时降权，不能当作项目事实。');
+  }
+  const pending = Array.isArray(result.pending) ? result.pending : [];
+  if (pending.length > 0) {
+    lines.push(`⚠ ${pending.length} 条提炼结果想改写已有事实，本次没有写入；已放入待确认队列：`);
+    for (const row of pending.slice(0, 5)) {
+      lines.push(`- 目标 ${row.update_of ?? row.doc_id}：${clip(row.text ?? '', 140)}`);
+    }
+    lines.push('请逐条核对；确认后用 aim_memory remember + confirm=true 写入，或告诉我不采用哪条。');
+  }
+  const preserved = (result.merged ?? []).filter((row) => row.preserved === true).length;
+  if (preserved > 0) {
+    lines.push(`其中 ${preserved} 条只是补充证据，原正文保持不变。`);
+  }
   for (const row of result.added.slice(0, 20)) {
-    lines.push(`- [${row.category}] ${row.doc_id}（${row.source}）：${clip(row.text, 160)}`);
+    lines.push(`- [${row.category}] ${row.doc_id}（${row.source}）`
+      + `${row.provenance === 'model' ? '｜模型自述（未确认）' : ''}：${clip(row.text, 160)}`);
   }
   for (const row of result.merged.slice(0, 10)) {
     lines.push(`- 已合并进 ${row.doc_id}：${clip(row.text, 120)}`);
@@ -732,7 +929,9 @@ function formatDecision(result) {
   return [
     `决策审查结果：${result.outcome}（approved=${result.approved}）`,
     `风险等级：${result.risk_level}｜是否审查：${result.reviewed}`,
-    `权重：${weights}`,
+    `可逆性：irreversible=${result.irreversible === null || result.irreversible === undefined ? '未提供' : result.irreversible}`
+      + (result.recoverable_via ? `｜恢复路径：${result.recoverable_via}` : ''),
+    `权重（仅审计，不参与放行）：${weights}`,
     `理由：${result.reason}`,
     `decision_id：${result.decision_id}`,
   ].join('\n');
@@ -827,11 +1026,15 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         '分层项目管理记忆（AI for Memory）：把工作过程记进过程记录、归档成分类、保存/恢复精确状态快照、'
         + '写入与检索知识库、查看各层统计。数据保存在当前工作区的记忆目录，跨会话/清空上下文后可读。'
         + '知识库分两类来源：你从网页或推理得到的、用户给你的，用 remember/learn 写；'
-        + '过程记录、归档、上下文这三层里的用户规则、错误修复、决策理由，用 promote 提炼。'
+        + '过程记录、归档、上下文这三层里的用户规则、错误修复、决策理由，用 promote 提炼；'
+        + '但 promote 只自动提炼 verify=pass 的过程记录和用户原话，模型自己写的 state/error/decision 属于「模型自述」，'
+        + '即使入库也会标为未确认并在检索时降权，不能当作项目事实。'
         + '每条知识只写一句可复用的结论，必须带分类，并尽量给出处（url 或 source）。'
         + '默认写入当前对话自己的独立记忆；scope=shared 时写入所有对话共用的共享层。'
         + '冲突规则：新知识与已有知识、或与你自己的认知不一致时，先询问用户，得到同意后再带 confirm=true 写入；'
         + '不带 confirm 的写入若与已有知识相近但不同，会返回 needs_confirm 并列出冲突条目，此时必须先问用户，不要擅自覆盖。'
+        + '注意：只改数字（端口/阈值/版本）、URL 或开关（开启/关闭）的“更新”即使措辞高度相似也会返回 kind=update，必须先确认；'
+        + '确认后写入原 doc_id 并保留 changes 审计，不要把它当普通重复直接合并。'
         + '需要检索时用 aim_search（默认跨对话）。不要写入密钥、令牌或用户没有说过的事实。'
         + '面板可把「归档 / 知识库提炼 / 上下文清理」分别切到外部模型模式（任何 OpenAI 兼容服务）；'
         + '外部模式失败会自动回退本地规则，结果里会写明用了哪条路。'
@@ -847,7 +1050,9 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             'stage=追加一条过程记录（content 必填）；archive=按 kind 归档（可传 category 强制分类）；'
             + 'snapshot=保存 state 快照（name 必填）；restore=按 snapshot_id 恢复；list=列出快照；'
             + 'remember=写入一条知识（text 必填，doc_id 可省）；learn=批量写知识（items 必填）；'
-            + 'promote=从过程记录/归档/上下文提炼知识（dry_run 可预览）；forget=删除一条错误知识（doc_id 必填）；'
+            + 'promote=从过程记录/归档/上下文提炼知识（仅 verify=pass 的模型记录 + 用户原话；dry_run 可预览；'
+            + '不改写已有正文，数值/端点/开关变化进入待确认队列）；'
+            + 'forget=删除一条错误知识（doc_id 必填）；'
             + 'index=为当前范围的知识库建立/更新 RAG 索引（需要 Embedding + Rerank 两个模型都配置好）；'
             + 'export=把知识库全量导出（可选一种或多种：knowledge=JSON/Markdown、sql=SQLite 数据库、rag=向量索引）；'
             + 'incident=把一次事故写进知识库，单独归为 incidents 类型（title 必填）；'
@@ -857,7 +1062,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           type: 'string',
           enum: ['session', 'shared'],
           description:
-            '写入范围，默认 session=当前对话独立存储（其他对话看不到写入，但可被检索）；'
+            '写入范围，默认 session=当前对话独立存储（默认不对外开放，其他对话检索不到；需要时在面板逐个打开）；'
             + 'shared=所有对话共用的共享层（适合跨对话约定、全局事实）。',
         },
         content: {
@@ -904,7 +1109,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         },
         doc_id: {
           type: 'string',
-          description: 'remember 用：知识文档 id，可省略——省略时按正文生成稳定 id，同一条知识重复写入会合并。',
+          description: 'remember 用：知识文档 id，可省略——默认按正文生成稳定 id。自定义 id 只影响命名，'
+            + '去重仍按正文；同一 id 被不同正文占用时会退回正文 id，不覆盖旧事实。',
         },
         dest: {
           type: 'string',
@@ -1133,10 +1339,14 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             source.store.recordKnowledgeUsage([doc.doc_id]);
           }
           return [
-            `${doc.merged ? '知识已合并' : '知识已写入'}（${source.label}）：${doc.doc_id}`,
+            `${doc.merged
+              ? ((doc.changes?.length ?? 0) > 0 ? '知识已更新' : '知识已合并')
+              : '知识已写入'}（${source.label}）：${doc.doc_id}`,
             `分类：${doc.category}｜来源：${doc.source}`
               + (doc.tags.length > 0 ? `｜标签：${doc.tags.join('，')}` : '')
               + (doc.url !== '' ? `｜出处：${doc.url}` : ''),
+            `修订：${doc.revision ?? 1}`
+              + ((doc.changes?.length ?? 0) > 0 ? `｜最近变化：${doc.changes[doc.changes.length - 1].kind}` : ''),
             clip(doc.text, 400),
           ].join('\n');
         }
@@ -1236,12 +1446,33 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             }
             let written = 0;
             let merged = 0;
+            let pending = 0;
             const ids = [];
             for (const item of mined.items) {
               const doc = store.remember(
-                { text: item.text, category: item.category, source: 'external-model' },
-                { confirm: true },
+                {
+                  text: item.text,
+                  category: item.category,
+                  source: 'external-model',
+                  provenance: 'model',
+                  verified: false,
+                  confidence: 0.5,
+                },
+                { preserveText: true },
               );
+              if (doc?.needs_confirm) {
+                store.recordPendingPromotion({
+                  ...(doc.pending ?? {}),
+                  source: 'external-model',
+                  source_ref: `external-model:${doc.pending?.doc_id ?? ''}`,
+                  provenance: 'model',
+                  verified: false,
+                  reason: doc.kind ?? 'update',
+                  conflicts: Array.isArray(doc.conflicts) ? doc.conflicts : [],
+                });
+                pending += 1;
+                continue;
+              }
               if (doc?.doc_id) {
                 written += 1;
                 if (doc.merged) merged += 1;
@@ -1250,9 +1481,11 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             }
             return [
               `外部模型提炼完成（${source.label}）：候选 ${mined.items.length} 条，写入 ${written} 条`
-                + `${merged > 0 ? `（其中 ${merged} 条与已有知识合并）` : ''}。`,
+                + `${merged > 0 ? `（其中 ${merged} 条与已有知识合并）` : ''}`
+                + `${pending > 0 ? `，${pending} 条改写已有事实的提议未写入、待确认` : ''}。`,
               ...ids.slice(0, 8).map((id) => `  - ${id}`),
-              '说明：外部模型提炼与本地 promote 一样走 confirm 写入，不再逐条询问冲突。',
+              '⚠ 这些条目来自外部模型对过程记录的再表述，已标为「模型自述（未确认）」并在检索时降权；不要当作项目事实。',
+              '说明：外部模型提炼不会覆盖已有正文；数值/端点/开关变化会进入待确认队列，面板知识库页可见。',
             ].join('\n');
           }
           const result = store.promoteKnowledge({
@@ -1351,12 +1584,16 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
       description:
         '检索当前项目的 AI for Memory 知识库，并自动选择通道：'
         + '指标/聚合/精确 doc_id 类问题走 SQL（Text-to-SQL，基于 JSON 底座的内存只读表）；'
-        + '模糊、开放性的文档问题走向量检索（面板「RAG 挂载」开启且索引就绪时用嵌入 + 重排，否则本地 BM25）；'
+        + '模糊、开放性的文档问题走向量检索（面板「RAG 挂载」开启且索引就绪时，RAG 语义结果与本地 BM25 结果用 RRF 融合；否则只用本地 BM25）；'
         + '两者兼有的问题走混合（SQL 出统计 + 向量补相关文档）；'
         + 'SQL 翻译不了时回退向量，向量零命中时反向用 SQL 兜底。'
         + 'JSON 是基础底座，SQL 与 RAG 都是从 JSON 派生出来的视图。'
         + '排序会叠加本对话的最近使用权重（14 天半衰期，只影响本对话），结果里标出权重。'
-        + '默认跨对话检索：本对话、其他对话、共享层都会命中，结果逐条标注来源对话。'
+        + '被标为「模型自述（未确认）」的条目来自模型自己的过程记录或决策复盘，已降权，不是用户确认的事实；'
+        + '回答时不得把它当作项目已知事实，必要时向用户确认。'
+        + '默认跨对话检索本对话、已打开的其他对话与共享层，结果逐条标注来源对话；'
+        + '同一事实在多处各存一份时，合并后会折叠成一条（保留最高分，其他来源写成「另见」），不重复占 top_k。'
+        + '未打开的对话不可见（默认新建对话不开放，需在面板逐个打开）。'
         + '需要历史约定、先前决策、错误修复记录或界面事实时先检索，不要凭空猜测。',
       parameters: {
         query: {
@@ -1446,30 +1683,36 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             : {};
           const merged = [];
           for (const source of sources) {
-            const hits = source.store.search(query, {
+            const found = source.store.search(query, {
               category: args?.category ?? null,
               mode,
-              topK,
+              topK: Math.max(topK, 10),
             });
-            for (const hit of hits) {
+            // BM25 scores are not comparable across stores because each store's
+            // corpus and document frequency differ. Normalize within the store
+            // before merging, so a huge score in a tiny conversation cannot
+            // drown out a strong hit elsewhere.
+            const sourceMax = Math.max(0, ...found.map((hit) => hit.score));
+            for (const hit of found) {
               const weight = Number.isFinite(weights[hit.doc_id]) ? weights[hit.doc_id] : 0;
+              const baseScore = sourceMax > 0 ? hit.score / sourceMax : 0;
               merged.push({
                 ...hit,
                 usage_weight: weight,
-                score: boostScore(hit.score, weight),
+                score: boostScore(baseScore, weight),
                 origin_label: source.label,
                 origin_key: source.key,
                 origin_scope: source.scope,
               });
             }
           }
-          // Scores come from per-store indexes, so compare them as-is and keep
-          // the best `topK` overall; every conversation is its own namespace.
-          merged.sort((left, right) => right.score - left.score);
           if (merged.length === 0) {
             return { empty: true, text: `没有命中「${query}」的知识文档（mode=${mode}，范围=${scope}）。` };
           }
-          const hits = merged.slice(0, topK);
+          // Fold the same fact across conversations after scoring. Each store's
+          // own dedupe gate cannot see the others, so without this one sentence
+          // repeated in N conversations spends N top_k slots.
+          const { hits, folded } = foldDuplicateHits(merged, topK);
           // A returned hit counts as "used" for the caller's conversation, which
           // lifts it on later searches here (and only here).
           if (typeof callerStore.recordKnowledgeUsage === 'function') {
@@ -1478,7 +1721,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           return {
             empty: false,
             text: `检索范围：${sources.map((source) => source.label).join(' + ')}`
-              + '（排序含本对话最近使用权重）\n' + formatHits(query, hits, mode),
+              + '（排序含本对话最近使用权重）\n' + formatHits(query, hits, mode, folded),
           };
         };
 
@@ -1527,9 +1770,9 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
     {
       name: 'aim_decide',
       description:
-        '对不可逆或高风险操作做正反合审查：给出决策与正/反理由，返回 approved / rejected / needs_more_info '
-        + '以及可审计的权重。高风险要求 risk_adjusted_score ≤ 0.3，中风险要求 antithesis_weight ≤ 0.5；'
-        + '缺少任一侧理由时返回 needs_more_info，不会编造理由替你放行。',
+        '对不可逆或高风险操作做正反合审查：给出决策、正/反理由，以及结构化的 irreversible / recoverable_via。'
+        + '高风险不再按理由字数放行（字数只进审计），而是看操作是否可逆：irreversible=true 直接拒绝；'
+        + 'irreversible=false 必须同时给出 recoverable_via 才放行；缺字段返回 needs_more_info。',
       parameters: {
         decision: {
           type: 'string',
@@ -1554,6 +1797,14 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           type: 'string',
           description: '反对该决策的理由（反）。',
         },
+        irreversible: {
+          type: 'boolean',
+          description: '该操作是否不可逆。高风险必须明确填写；true 会被拒绝，false 需要可恢复路径。',
+        },
+        recoverable_via: {
+          type: 'string',
+          description: 'irreversible=false 时如何恢复/回滚，例如“已做数据库快照，可 restore”。',
+        },
       },
       output: TEXT_OUTPUT,
       // Writes one decision record; keep it serialized with other writes.
@@ -1571,6 +1822,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             risk: args?.risk ?? 'low',
             thesis: args?.thesis,
             antithesis: args?.antithesis,
+            irreversible: args?.irreversible,
+            recoverable_via: args?.recoverable_via,
           },
           { reviewHighRiskOnly: config.reviewHighRiskOnly },
         );
@@ -1584,11 +1837,13 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
       name: 'aim_context',
       description:
         '上下文管理：save=把当前已完成对话整理进存储；clear=按话题相似度清理会话上下文；'
-        + 'restore=把保存的上下文重新注入当前会话；list=列出存档；status=查看清理策略与存档状态；'
+        + 'restore=把保存的上下文重新注入当前会话（不整份注入：按 restoreMaxChars 预算只取最近轮次）；'
+        + 'list=列出存档；status=查看清理策略与存档状态；'
         + 'sessions=列出所有对话及其记忆规模。'
         + '清理不再一刀切：以当轮与上轮的话题为基准，相似度低的老轮次会被清出上下文，相似度高的原样保留；'
         + '被清出的轮次会先完整存档，随时可以用 restore 调回。'
-        + '存档默认按对话隔离（每个对话只列出自己的），restore 默认可以跨对话找到别的对话保存过的上下文。'
+        + '存档默认按对话隔离（每个对话只列出自己的），restore 默认可以跨对话找到别的对话保存过的上下文，'
+        + '但只有已打开的对话可见（新建对话默认不开放）。'
         + '自动整理开启时每 N 轮、或上下文占用达到设定百分比（默认 70%）时自动执行 save+clear；两个条件任一满足就触发，手动工具始终可用。',
       parameters: {
         action: {
@@ -1700,11 +1955,19 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           if (!exec.agent || typeof exec.agent.inject !== 'function') {
             throw new Error('当前调用没有可注入的 agent');
           }
+          // Restoring the whole archive can immediately undo the clear. Use a
+          // separate, smaller restore budget; the newest turns win and the
+          // archive remains complete for a later restore.
+          const restoreBudget = Math.min(
+            Number.isInteger(config.restoreMaxChars) ? config.restoreMaxChars : 12000,
+            Number.isInteger(config.maxContextChars) ? config.maxContextChars : 30000,
+          );
           await exec.agent.inject({
-            content: [{ type: 'text', text: formatRestoreContext(found.record) }],
+            content: [{ type: 'text', text: formatRestoreContext(found.record, { maxChars: restoreBudget }) }],
             source: { kind: 'ai-for-memory' },
           });
-          return `已恢复上下文 ${found.record.context_id}（${found.source.label}，第 ${found.record.turn_from}-${found.record.turn_to} 轮），将在下一步生效。`;
+          return `已恢复上下文 ${found.record.context_id}（${found.source.label}，第 ${found.record.turn_from}-${found.record.turn_to} 轮），`
+            + `按 ${restoreBudget} 字符预算注入，将在下一步生效。`;
         }
 
         if (action === 'list') {
@@ -1739,6 +2002,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
               : '话题相似度（低相似度清出，高相似度保留）'}`,
             `相似度设置：阈值 ${config.similarityThreshold}，保留最近 ${config.keepRecentTurns} 轮，`
               + `单次最多 ${config.maxClearTurns} 轮（${config.minClearChars}~${config.maxClearChars} 字符）`,
+            `恢复预算：单次 restore 最多注入 ${config.restoreMaxChars ?? 12000} 字符，只取最近轮次`,
             `自动整理：${config.autoEnabled ? `开启（每 ${config.autoEveryRounds} 轮，或上下文占用到 ${config.contextUsagePercent}%）` : '关闭'}`,
             (() => {
               const meter = deps.getService?.('tokenMeter');
@@ -1779,7 +2043,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             const counts = row.counts;
             lines.push(`- ${conversationLabel(row, source.scope === 'session' ? source.key : '')}｜${row.key}`
               + `｜过程记录 ${counts.staging}，归档 ${counts.archive}，快照 ${counts.snapshots}，知识库 ${counts.knowledge}，决策 ${counts.decisions}，上下文 ${counts.contexts}`
-              + `｜最近 ${row.updatedAt || '未知'}${row.public === false ? '｜未对外开放' : ''}`);
+              + `｜最近 ${row.updatedAt || '未知'}${row.public !== true ? '｜未对外开放' : ''}`);
           }
           const shared = context.scopes.sharedCounts();
           lines.push(`共享层：过程记录 ${shared.staging}，归档 ${shared.archive}，知识库 ${shared.knowledge}，上下文 ${shared.contexts}`);
@@ -2015,7 +2279,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
       const existing = context.scopes.readMeta(key);
       const patch = { ...context.meta };
       // Access is a per-conversation user setting: only seed it on creation.
-      if (existing === null) patch.public = config.defaultPublic !== false;
+      if (existing === null) patch.public = config.defaultPublic === true;
       context.scopes.ensureSession(String(session.id), patch);
       if (options.initLayers === true) context.scopes.sessionStore(key).init();
       const title = titleOfSession(session);
@@ -2496,9 +2760,10 @@ export function installContextManagement(ctx, config, deps, runtime) {
               console.warn(`[ai-for-memory] 自动提炼知识失败：${error?.message ?? error}`);
               promoted = null;
             }
-            if (promoted && promoted.added.length > 0) {
+            if (promoted && (promoted.added.length > 0 || (promoted.pending?.length ?? 0) > 0)) {
               // eslint-disable-next-line no-console
-              console.log(`[ai-for-memory] 自动提炼知识：新增 ${promoted.added.length} 篇，合并 ${promoted.merged.length} 篇`);
+              console.log(`[ai-for-memory] 自动提炼知识：新增 ${promoted.added.length} 篇，合并 ${promoted.merged.length} 篇`
+                + `${(promoted.pending?.length ?? 0) > 0 ? `，待确认更新 ${promoted.pending.length} 条（未写入）` : ''}`);
             }
           }
           if (config.topicalClear === false) {

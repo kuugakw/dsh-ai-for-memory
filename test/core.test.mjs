@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { MemoryStore } from '../lib/store.js';
+import { ensureDefaultMemoryDirIgnored, ensureGitignoreEntry } from '../lib/gitignore.js';
 import { MemoryScopes, sessionKey } from '../lib/scopes.js';
 import { decodeWorkspaceBucket, encodeWorkspace, resolveWorkspacePath, workspaceIndex } from '../lib/dsh-workspace.js';
 import {
@@ -31,11 +32,11 @@ import { knowledgeDatabasePath, sqliteAvailable } from '../lib/knowledge-sqlite.
 import {
   formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
 } from '../lib/knowledge-query.js';
-import { search, tokenize } from '../lib/retrieval.js';
+import { RRF_K, reciprocalRankFusion, search, tokenize } from '../lib/retrieval.js';
 import { CATEGORIES, hourKey } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { collectTurnDigest } from '../lib/auto.js';
-import { buildContextSnapshot } from '../lib/context.js';
+import { buildContextSnapshot, formatRestoreContext } from '../lib/context.js';
 import { contentTokens, selectTurnsByTopic, topicSimilarity } from '../lib/similarity.js';
 import {
   AUTO_SNAPSHOT_PREFIX, isAutoSnapshot, planSnapshotPrune, snapshotText,
@@ -47,7 +48,7 @@ import {
   KNOWLEDGE_CATEGORIES, knowledgeKey, normalizeCategory, normalizeSource, stripInjectedText, withTokens,
 } from '../lib/knowledge.js';
 import { listRootRows, readRoots, rememberRoot, resolveRegisteredRoot } from '../lib/registry.js';
-import { apply, compileParameterSchema, Config, createTools, installContextManagement, normalizeConfig, workspaceOf } from '../index.js';
+import { apply, compileParameterSchema, Config, createTools, installContextManagement, memoryContext, normalizeConfig, searchWithRag, workspaceOf } from '../index.js';
 
 function tempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agm-test-'));
@@ -192,6 +193,15 @@ test('knowledge search supports bm25, vector and hybrid', () => {
     assert.ok(hits.every((hit) => hit.score > 0));
     assert.ok(['err_timeout', 'behavior_retry'].includes(hits[0].doc_id), `${mode}: ${hits[0].doc_id}`);
   }
+
+  // Confidence is a bounded modifier, not dead metadata: equal relevance must
+  // rank the high-confidence fact first.
+  const ranked = search([
+    { doc_id: 'low', category: 'project_facts', text: '发布前必须跑测试', confidence: 0.3 },
+    { doc_id: 'high', category: 'project_facts', text: '发布前必须跑测试', confidence: 0.9 },
+  ], '发布前必须跑测试', { mode: 'bm25', topK: 2 });
+  assert.equal(ranked[0].doc_id, 'high');
+  assert.equal(ranked[0].confidence, 0.9);
   const filtered = search(docs, '设置', { category: 'ui_facts', mode: 'hybrid' });
   assert.ok(filtered.length >= 1);
   assert.ok(filtered.every((hit) => hit.category === 'ui_facts'));
@@ -210,7 +220,7 @@ test('knowledge search supports bm25, vector and hybrid', () => {
   }
 });
 
-test('decision review follows the documented thresholds', () => {
+test('decision review gates on reversibility, not on reason length', () => {
   const low = evaluateDecision({ decision: '关闭设置页', risk: 'low' });
   assert.equal(low.outcome, 'approved');
   assert.equal(low.reviewed, false);
@@ -218,23 +228,40 @@ test('decision review follows the documented thresholds', () => {
   const rejected = evaluateDecision({
     decision: '删除全部文件',
     risk: 'high',
-    thesis: '释放磁盘空间',
-    antithesis: '可能丢失未归档的过程记录，需要先确认备份',
+    thesis: '释放磁盘空间，而且这是一段刻意写得很长的支持理由，用来证明字数不能换放行',
+    antithesis: '会丢数据',
+    irreversible: true,
+    recoverable_via: '没有备份',
   });
   assert.equal(rejected.outcome, 'rejected');
   assert.equal(rejected.approved, false);
-  assert.ok(rejected.weights.risk_adjusted_score > 0.3);
+  assert.equal(rejected.weights.gate, 'reversibility');
 
+  // A short thesis + a long antithesis must NOT be rejected when recovery is
+  // stated: the old ratio gate punished exactly this honest case.
   const approved = evaluateDecision({
-    decision: '清理日志',
+    decision: '清理已归档日',
     risk: 'high',
-    thesis: '日志已归档，磁盘使用率 95%，不清理会导致服务不可用',
-    antithesis: '风险',
+    thesis: '可恢',
+    antithesis: '日志里有排障线索，删早了会拖慢定位；这是一个很长的反对理由'
+      + '在旧算法里足以让 risk_adjusted_score 超过 0.3，但现在只作为审计信息',
+    irreversible: false,
+    recoverable_via: '先归档到 cold storage，保留 30 天，可随时 restore',
   });
   assert.equal(approved.outcome, 'approved');
+  assert.equal(approved.weights.advisory_only, true);
+  assert.ok(approved.weights.risk_adjusted_score > 0.3);
 
-  const missing = evaluateDecision({ decision: '删除全部文件', risk: 'high', thesis: '释放空间' });
+  const missing = evaluateDecision({
+    decision: '删除全部文件', risk: 'high', thesis: '释放空间', antithesis: '可能丢数',
+  });
   assert.equal(missing.outcome, 'needs_more_info');
+
+  const noRecovery = evaluateDecision({
+    decision: '迁移数据', risk: 'high', thesis: '更快', antithesis: '有停机风',
+    irreversible: false,
+  });
+  assert.equal(noRecovery.outcome, 'needs_more_info');
 
   const mediumAuto = evaluateDecision({ decision: '调整重试', risk: 'medium' }, { reviewHighRiskOnly: true });
   assert.equal(mediumAuto.reviewed, false);
@@ -245,6 +272,7 @@ test('decision review follows the documented thresholds', () => {
     risk: 'medium',
     thesis: '快',
     antithesis: '可能导致请求风暴，压垮下游服务',
+    irreversible: true,
   }, { reviewHighRiskOnly: false });
   assert.equal(mediumReviewed.outcome, 'rejected');
 });
@@ -298,6 +326,7 @@ test('tools are registered and executable against the session workspace', async 
 
     const decision = await decideTool.execute({
       decision: '删除全部文件', risk: 'high', thesis: '空间不足', antithesis: '可能丢失数据',
+      irreversible: true,
     }, exec);
     assert.match(decision, /rejected/);
     assert.ok(fs.readdirSync(path.join(root, '.ai-for-memory', 'decisions')).length === 1);
@@ -324,6 +353,7 @@ test('ui state exposes every memory layer', () => {
     store.remember({ doc_id: 'err_1', text: '超时重试三次', category: 'errors_fixes' });
     store.recordDecision(evaluateDecision({
       decision: '删除全部文件', risk: 'high', thesis: '空间不足', antithesis: '可能丢失数据',
+      irreversible: true,
     }));
 
     const state = buildUiState(store);
@@ -450,6 +480,7 @@ test('auto mode triggers after the configured number of turns', async () => {
     const scopes = new MemoryScopes(memoryRoot);
     const conversation = scopes.sessionStoreFor('session-test', {});
     assert.equal(conversation.key, sessionKey('session-test'));
+    assert.equal(scopes.readMeta(conversation.key).schema_version, 1);
 
     onSessionEvent(session, { type: 'turn/end', data: { turn: 1 } });
     assert.equal(conversation.store.stagingRecords().length, 0);
@@ -517,6 +548,7 @@ test('context tool saves, lists and restores a context', async () => {
 
     const restored = await contextTool.execute({ action: 'restore', context_id: contextId }, exec);
     assert.match(restored, /将在下一步生效/);
+    assert.match(restored, /字符预算注入/);
     assert.ok(injected);
     assert.match(injected.content[0].text, /需要记住的上下文/);
     assert.equal(injected.source.kind, 'ai-for-memory');
@@ -577,6 +609,41 @@ test('context snapshot captures completed turns and restores text', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('restore keeps the newest turns within the restore budget', () => {
+  const record = {
+    context_id: 'context_budget',
+    turn_from: 1,
+    turn_to: 4,
+    created_at: '2026-11-18T00:00:00.000Z',
+    text: '整份存档不应当被直接注入',
+    turns: [
+      { turn: 1, user: `第一轮旧内容${'甲'.repeat(80)}`, assistant: '旧回答' },
+      { turn: 2, user: `第二轮旧内容${'乙'.repeat(80)}`, assistant: '旧回答' },
+      { turn: 3, user: `第三轮内容${'丙'.repeat(80)}`, assistant: '第三轮回答' },
+      { turn: 4, user: `第四轮内容${'丁'.repeat(80)}`, assistant: '第四轮回答' },
+    ],
+  };
+  const restored = formatRestoreContext(record, { maxChars: 220 });
+  assert.match(restored, /预算恢复最近/);
+  assert.match(restored, /第四轮内容/);
+  assert.doesNotMatch(restored, /第一轮旧内容/);
+  const body = restored.split('\n\n')[1] ?? '';
+  assert.ok(body.length <= 220, `restore body ${body.length} > 220`);
+  assert.ok(restored.length < record.text.length + 500);
+
+  // Records from older versions/imports may have no turns[]; fall back to a
+  // clipped text instead of injecting the whole archive.
+  const fallback = formatRestoreContext({
+    context_id: 'context_no_turns',
+    turn_from: 1,
+    turn_to: 1,
+    created_at: '2026-11-18T00:00:00.000Z',
+    text: '很长的旧正文'.repeat(100),
+  }, { maxChars: 80 });
+  assert.match(fallback, /预算截断/);
+  assert.ok(fallback.length < 400);
 });
 
 test('conversation scopes isolate records and resolve by id or prefix', () => {
@@ -655,6 +722,11 @@ test('cross conversation search labels every hit', async () => {
       action: 'remember', doc_id: 'deploy_cmd', text: '部署命令是 npm run deploy', category: 'action_logs',
     }, execB);
 
+    // Cross-conversation reads require an explicit open under the new default.
+    const scopes = new MemoryScopes(memoryRoot);
+    scopes.setPublic(sessionKey('conv-alpha'), true);
+    scopes.setPublic(sessionKey('conv-beta'), true);
+
     // A's own scope still only contains A's document.
     const own = await searchTool.execute({ query: '部署', scope: 'session' }, execA);
     assert.match(own, /deploy_note/);
@@ -688,7 +760,6 @@ test('cross conversation search labels every hit', async () => {
       decision: '把跨对话约定写进共享层', risk: 'low', scope: 'shared',
     }, execA);
     assert.match(reviewed, /范围：共享/);
-    const scopes = new MemoryScopes(memoryRoot);
     assert.equal(scopes.sharedStore().decisionStats().total, 1);
     assert.equal(scopes.counts(sessionKey('conv-alpha')).decisions, 0);
   } finally {
@@ -737,6 +808,10 @@ test('context archives stay per conversation and restore can cross', async () =>
     assert.ok(match, saved);
     assert.match(saved, /本对话/);
 
+    // Restoring another conversation's archive now requires opening it first.
+    const scopes = new MemoryScopes(memoryRoot);
+    scopes.setPublic(sessionKey('conv-alpha'), true);
+
     assert.match(await contextTool.execute({ action: 'list' }, execB), /本对话暂无上下文存档/);
     const all = await contextTool.execute({ action: 'list', scope: 'all' }, execB);
     assert.match(all, new RegExp(match[0]));
@@ -752,7 +827,6 @@ test('context archives stay per conversation and restore can cross', async () =>
     assert.match(status, /上下文存档：0 个（本对话）/);
 
     // Both conversations keep their own compaction diagnostics.
-    const scopes = new MemoryScopes(memoryRoot);
     assert.equal(scopes.counts(sessionKey('conv-beta')).contexts, 0);
     assert.equal(scopes.counts(sessionKey('conv-alpha')).contexts, 1);
   } finally {
@@ -815,22 +889,45 @@ test('knowledge normalizes categories, ids and duplicates', () => {
   assert.equal(findDuplicate('晚餐吃火锅还是烧烤', docs), null);
 });
 
-test('knowledge candidates come from records, decisions and user rules only', () => {
-  const error = candidatesFromRecord({ dedup_id: 'd1', content: '压缩失败：原因是 retention 配置为 0', kind: 'error' }, 'staging');
+test('knowledge candidates come from verified records, decisions and user rules only', () => {
+  const error = candidatesFromRecord({
+    dedup_id: 'd1', content: '压缩失败：原因是 retention 配置为 0', kind: 'error', verify: 'pass',
+  }, 'staging');
   assert.equal(error.length, 1);
   assert.equal(error[0].category, 'errors_fixes');
   assert.equal(error[0].source, 'staging');
   assert.equal(error[0].source_ref, 'staging:d1');
+  assert.equal(error[0].provenance, 'model');
+  assert.equal(error[0].verified, false);
+
+  // A model-written state/error is not a fact until it was verified; otherwise
+  // stage(kind=state) -> promote -> search would launder a guess into knowledge.
+  assert.equal(candidatesFromRecord({
+    dedup_id: 'd0', content: '当前发布分支是 release', kind: 'state',
+  }, 'staging').length, 0);
+  assert.equal(candidatesFromRecord({
+    dedup_id: 'd0', content: '压缩失败：原因是 retention 配置为 0', kind: 'error',
+  }, 'staging').length, 0);
 
   // Plain actions are the process log, not knowledge.
   assert.equal(candidatesFromRecord({ dedup_id: 'd2', content: '点击了设置菜单并刷新面板', kind: 'action' }, 'staging').length, 0);
-  // …unless they state a durable rule.
-  const rule = candidatesFromRecord({ dedup_id: 'd3', content: '以后统一用 pwsh 跑测试，不要用 bash', kind: 'action' }, 'archive');
+  // …unless they state a durable rule and the record was verified.
+  const rule = candidatesFromRecord({
+    dedup_id: 'd3', content: '以后统一用 pwsh 跑测试，不要用 bash', kind: 'action', verify: 'pass',
+  }, 'archive');
   assert.equal(rule.length, 1);
   assert.equal(rule[0].category, 'workflow_rules');
+  assert.equal(rule[0].provenance, 'model');
+  assert.equal(rule[0].verified, false);
   // A rolling digest is a summary, and a status blob is not a fact.
   assert.equal(candidatesFromRecord({ dedup_id: 'd4', content: '自动记忆 · 第 1-2 轮 用户：以后统一用 pwsh', kind: 'digest' }, 'staging').length, 0);
-  assert.equal(candidatesFromRecord({ dedup_id: 'd5', content: `发布失败：${'很长的日志'.repeat(120)}`, kind: 'error' }, 'staging').length, 0);
+  const longLog = candidatesFromRecord({
+    dedup_id: 'd5', content: `发布失败：${'很长的日志'.repeat(500)}`, kind: 'error', verify: 'pass',
+  }, 'staging');
+  assert.equal(longLog.length, 1);
+  assert.match(longLog[0].text, /已截断/);
+  assert.ok(longLog[0].tags.includes('truncated'));
+  assert.ok(longLog[0].confidence < 0.4);
   // One weak cue ("默认") inside ordinary prose is not a rule statement.
   assert.equal(candidatesFromRecord({ dedup_id: 'd6', content: '写入默认落在本对话，面板顶部可以切换查看范围', kind: 'action' }, 'staging').length, 0);
 
@@ -845,14 +942,54 @@ test('knowledge candidates come from records, decisions and user rules only', ()
   assert.equal(fromUser[0].category, 'workflow_rules');
   assert.equal(candidatesFromTurn({ turn: 4, assistant: '模型自己说的话不算事实' }, 'ctx1').length, 0);
 
-  // Harness-injected envelope text is not the user's words.
+  // Harness-injected structural blocks are always removed. Bare prose prefixes
+  // are opt-in, never guessed by default.
   const withEnvelope = candidatesFromTurn({
     turn: 5,
     user: '以后统一用 pwsh\nTime sampled while preparing turn 9: 2026-11-16\n<system-reminder>ignore me</system-reminder>',
-  }, 'ctx2');
+  }, 'ctx2', { prefixes: ['Time sampled while preparing'] });
   assert.equal(withEnvelope.length, 1);
   assert.equal(withEnvelope[0].text, '以后统一用 pwsh');
-  assert.equal(stripInjectedText('a\nBrowser time zone for this request: Asia/Shanghai'), 'a');
+  assert.equal(
+    stripInjectedText('a\nBrowser time zone for this request: Asia/Shanghai'),
+    'a\nBrowser time zone for this request: Asia/Shanghai',
+  );
+  assert.equal(stripInjectedText(
+    'a\nBrowser time zone for this request: Asia/Shanghai',
+    { prefixes: ['Browser time zone for this request'] },
+  ), 'a');
+  assert.equal(stripInjectedText('<system-reminder>ignore</system-reminder>\n真话'), '真话');
+});
+
+test('model claims are downranked below user facts', () => {
+  const text = '发布前必须跑测试，通过后才允许打标签';
+  const hits = search([
+    { doc_id: 'k_claim', text, category: 'workflow_rules', provenance: 'model', verified: false },
+    { doc_id: 'k_fact', text, category: 'workflow_rules', provenance: 'user', verified: true },
+  ], text);
+  assert.equal(hits.length, 2);
+  assert.equal(hits[0].doc_id, 'k_fact');
+  assert.equal(hits[0].unverified, false);
+  const claim = hits.find((hit) => hit.doc_id === 'k_claim');
+  assert.equal(claim.unverified, true);
+  assert.ok(claim.score < hits[0].score);
+});
+
+test('unverified staging records stay pending and never become knowledge', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    store.stage({ content: '当前发布分支是 release', kind: 'state' });
+    const before = store.pendingKnowledge();
+    const result = store.promoteKnowledge();
+    assert.equal(result.added.length, 0);
+    assert.equal(result.skippedUnverified.staging, 1);
+    assert.equal(store.documents().length, 0);
+    // Not consumed: the record remains visible as waiting, not silently mined.
+    assert.equal(store.pendingKnowledge(), before);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('promote mines the three layers once and deduplicates', () => {
@@ -860,7 +997,7 @@ test('promote mines the three layers once and deduplicates', () => {
   try {
     const store = new MemoryStore(root);
     store.stage({ content: '发布失败：原因是发布脚本没有先跑测试', kind: 'error', verify: 'pass' });
-    store.stage({ content: '点击了部署按钮', kind: 'action' });
+    store.stage({ content: '点击了部署按钮', kind: 'action', verify: 'pass' });
     store.archive();
     store.saveContext({
       label: 'manual',
@@ -897,12 +1034,25 @@ test('promote mines the three layers once and deduplicates', () => {
     const first = store.promoteKnowledge({ limit: 20 });
     assert.ok(first.added.length >= 3);
     const docs = store.documents();
-    assert.ok(docs.some((doc) => doc.category === 'errors_fixes' && doc.source === 'staging'));
-    assert.ok(docs.some((doc) => doc.category === 'workflow_rules' && doc.source === 'context'));
-    assert.ok(docs.some((doc) => doc.category === 'decisions_reasoning' && doc.source === 'decision'));
+    const stagedDoc = docs.find((doc) => doc.category === 'errors_fixes' && doc.source === 'staging');
+    assert.ok(stagedDoc);
+    assert.equal(stagedDoc.provenance, 'model');
+    assert.equal(stagedDoc.verified, false);
+    const userDoc = docs.find((doc) => doc.category === 'workflow_rules' && doc.source === 'context');
+    assert.ok(userDoc);
+    assert.equal(userDoc.provenance, 'user');
+    assert.equal(userDoc.verified, true);
+    const decisionDoc = docs.find((doc) => doc.category === 'decisions_reasoning' && doc.source === 'decision');
+    assert.ok(decisionDoc);
+    assert.equal(decisionDoc.provenance, 'model');
+    assert.equal(decisionDoc.verified, false);
     // Every mined document carries provenance back to its layer item.
     assert.ok(docs.every((doc) => doc.evidence.length >= 1));
     assert.ok(docs.every((doc) => /^(staging|archive|context|decision):/.test(doc.evidence[0].ref)));
+    assert.ok(docs.every((doc) => doc.schema_version === 1));
+    const ledger = JSON.parse(fs.readFileSync(path.join(root, 'knowledge', '_promoted.json'), 'utf8'));
+    assert.equal(ledger.version, 2);
+    assert.equal(ledger.schema_version, 1);
 
     // A second pass is a no-op: the ledger remembers what was mined.
     const second = store.promoteKnowledge();
@@ -915,6 +1065,7 @@ test('promote mines the three layers once and deduplicates', () => {
     const hits = store.search('发布 测试');
     assert.ok(hits.length >= 1);
     assert.ok(hits[0].source);
+    assert.ok(hits.some((hit) => hit.unverified === true));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -945,13 +1096,295 @@ test('remember merges the same fact and keeps provenance', () => {
     assert.equal(second.url, 'https://example.com/compaction');
     assert.deepEqual(second.tags.sort(), ['compaction', 'dsh']);
     assert.equal(second.evidence.length, 2);
+    assert.equal(second.provenance, 'authored');
+    assert.equal(second.verified, true);
+
+    // A model claim with the same text must not downgrade the existing fact.
+    const downgraded = store.remember({
+      text: 'DSH 的压缩阈值默认是 0.8',
+      category: 'tools_apis',
+      source: 'staging',
+      provenance: 'model',
+      verified: false,
+    }, { confirm: true });
+    assert.equal(downgraded.provenance, 'authored');
+    assert.equal(downgraded.verified, true);
     assert.equal(store.documents().length, 1);
+
+    // A different custom id for the same text still merges into the first doc.
+    const aliased = store.remember({
+      doc_id: 'another_custom_id',
+      text: 'DSH 的压缩阈值默认是 0.8',
+      category: 'tools_apis',
+    }, { confirm: true });
+    assert.equal(aliased.merged, true);
+    assert.equal(aliased.doc_id, first.doc_id);
+    assert.equal(store.documents().length, 1);
+
+    // The same custom id with different text must not overwrite the old fact.
+    const collided = store.remember({
+      doc_id: first.doc_id,
+      text: '另一条完全不同的知识，不能覆盖旧事实',
+      category: 'project_facts',
+    }, { confirm: true });
+    assert.notEqual(collided.doc_id, first.doc_id);
+    assert.equal(store.documents().length, 2);
+    assert.equal(store.documents().find((doc) => doc.doc_id === first.doc_id).text, 'DSH 的压缩阈值默认是 0.8');
+    assert.equal(collided.schema_version, 1);
 
     // A web fact is classified as external sourcing even without a category.
     const web = store.remember({ text: 'DSH 插件文档在线上可查', source: 'web', url: 'https://example.com/docs' });
     assert.equal(web.category, 'external_sources');
     assert.equal(web.url, 'https://example.com/docs');
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a changed value is an update, not a silent merge', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    const first = store.remember({
+      text: 'DSH 的本地服务端口默认是 8080，改端口后需要重启插',
+      category: 'tools_apis',
+    }, { confirm: true });
+    const oldId = first.doc_id;
+
+    const blocked = store.remember({
+      text: 'DSH 的本地服务端口默认是 8081，改端口后需要重启插',
+      category: 'tools_apis',
+    });
+    assert.equal(blocked.needs_confirm, true);
+    assert.equal(blocked.kind, 'update');
+    assert.equal(blocked.conflicts[0].doc_id, oldId);
+    assert.equal(blocked.conflicts[0].update, true);
+    assert.equal(blocked.conflicts[0].change.kind, 'number');
+    assert.deepEqual(blocked.conflicts[0].change.before, ['8080']);
+    assert.deepEqual(blocked.conflicts[0].change.after, ['8081']);
+    assert.equal(store.documents().length, 1);
+    assert.equal(store.documents()[0].text, 'DSH 的本地服务端口默认是 8080，改端口后需要重启插');
+
+    const updated = store.remember({
+      text: 'DSH 的本地服务端口默认是 8081，改端口后需要重启插',
+      category: 'tools_apis',
+    }, { confirm: true });
+    assert.equal(updated.doc_id, oldId);
+    assert.equal(updated.text, 'DSH 的本地服务端口默认是 8081，改端口后需要重启插');
+    assert.equal(updated.changes.length, 1);
+    assert.equal(updated.changes[0].kind, 'number');
+    assert.equal(updated.changes[0].previous_text, 'DSH 的本地服务端口默认是 8080，改端口后需要重启插');
+    assert.equal(store.documents().length, 1);
+    const hit = store.search('本地服务端口', { mode: 'bm25' })[0];
+    assert.equal(hit.changes_count, 1);
+
+    // Decimals are not content tokens, so the base Jaccard is 1 here; the
+    // number comparison must still catch 0.8 0.9 as an update.
+    const threshold = store.remember({
+      text: '压缩阈值默认是 0.8，超过就压缩上下',
+      category: 'tools_apis',
+    }, { confirm: true });
+    const decimalUpdate = store.remember({
+      text: '压缩阈值默认是 0.9，超过就压缩上下',
+      category: 'tools_apis',
+    });
+    assert.equal(decimalUpdate.kind, 'update');
+    assert.deepEqual(decimalUpdate.conflicts[0].change.before, ['0.8']);
+    assert.deepEqual(decimalUpdate.conflicts[0].change.after, ['0.9']);
+    assert.equal(store.documents().find((doc) => doc.doc_id === threshold.doc_id).text,
+      '压缩阈值默认是 0.8，超过就压缩上下');
+
+    // Even a non-value rewrite is visible: it merges, but records a text change
+    // instead of replacing the old sentence with no trace.
+    const paraphrase = store.remember({
+      text: '压缩阈值默认是 0.8，超过就压缩上下文',
+      category: 'tools_apis',
+    });
+    assert.equal(paraphrase.merged, true);
+    assert.equal(paraphrase.changes.length, 1);
+    assert.equal(paraphrase.changes[0].kind, 'text');
+
+    // An exact restatement still merges silently and records no new change.
+    const same = store.remember({
+      text: 'DSH 的本地服务端口默认是 8081，改端口后需要重启插',
+      category: 'tools_apis',
+    });
+    assert.equal(same.merged, true);
+    assert.equal(same.changes.length, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('promote never rewrites a confirmed fact and queues material updates', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    const originalText = 'DSH 的本地服务端口默认是 8080，改端口后需要重启插件并重新连接面板';
+    const changedText = 'DSH 的本地服务端口默认是 8081，改端口后需要重启插件并重新连接面板';
+    const first = store.remember({
+      text: originalText,
+      category: 'project_facts',
+      source: 'user',
+      provenance: 'user',
+      verified: true,
+    }, { confirm: true });
+    const originalRevision = first.revision;
+
+    // A non-material restatement from mining may add evidence, but the sentence
+    // the user confirmed must survive untouched.
+    const supported = store.remember({
+      text: 'DSH 的本地服务端口默认是 8080,改端口后需要重启插件并重新连接面板',
+      category: 'project_facts',
+      source: 'staging',
+      evidence: [{ kind: 'staging', ref: 'staging:support' }],
+    }, { preserveText: true });
+    assert.equal(supported.merged, true);
+    assert.equal(supported.preserved_text, true);
+    assert.equal(supported.text, originalText);
+    assert.equal(supported.revision, originalRevision);
+    assert.equal(supported.changes, undefined);
+
+    // A material value change is not written by mining at all.
+    store.stage({ content: changedText, kind: 'state', verify: 'pass' });
+    const preview = store.promoteKnowledge({ dryRun: true });
+    assert.equal(preview.pending.length, 1);
+    assert.equal(store.documents()[0].text, originalText);
+
+    const mined = store.promoteKnowledge();
+    assert.equal(mined.pending.length, 1);
+    assert.equal(mined.added.length, 0);
+    assert.equal(store.documents()[0].text, originalText);
+    assert.equal(store.pendingPromotions().length, 1);
+    assert.equal(store.pendingPromotions()[0].update_of, first.doc_id);
+    assert.equal(store.pendingPromotions()[0].text, changedText);
+    const ui = buildUiState(store);
+    assert.equal(ui.knowledgePendingUpdates.length, 1);
+    assert.equal(ui.knowledgePendingUpdates[0].update_of, first.doc_id);
+    assert.equal(ui.knowledgePendingUpdates[0].text, changedText);
+
+    // Re-running dedupes the same proposal and keeps it pending for review.
+    const again = store.promoteKnowledge();
+    assert.equal(again.pending.length, 1);
+    assert.equal(store.pendingPromotions().length, 1);
+
+    // Only an explicit confirmation applies it, and resolves the review item.
+    const confirmed = store.remember({
+      text: changedText,
+      category: 'project_facts',
+      source: 'user',
+      provenance: 'user',
+      verified: true,
+    }, { confirm: true });
+    assert.equal(confirmed.doc_id, first.doc_id);
+    assert.equal(confirmed.text, changedText);
+    assert.ok(confirmed.revision > originalRevision);
+    assert.equal(store.pendingPromotions().length, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('RRF fuses RAG and local ranks without dropping channel-unique documents', () => {
+  assert.equal(RRF_K, 60);
+  const fused = reciprocalRankFusion([
+    {
+      name: 'rag',
+      rows: [
+        { doc_id: 'rag_only', text: 'RAG 独有', score: 0.92, origin_key: 's1' },
+        { doc_id: 'both', text: '两个通道都有', score: 0.81, origin_key: 's1' },
+      ],
+    },
+    {
+      name: 'local',
+      rows: [
+        { doc_id: 'both', text: '两个通道都有', score: 4.2, origin_key: 's1' },
+        { doc_id: 'local_only', text: '旧文档，只被 BM25 索引', score: 1.5, origin_key: 's1' },
+      ],
+    },
+  ]);
+  assert.equal(fused[0].doc_id, 'both');
+  assert.equal(fused[0].rrf_ranks.rag, 2);
+  assert.equal(fused[0].rrf_ranks.local, 1);
+  assert.ok(Math.abs(fused[0].rrf_score - (1 / 62 + 1 / 61)) < 1e-12);
+  const localOnly = fused.find((row) => row.doc_id === 'local_only');
+  assert.ok(localOnly);
+  assert.equal(localOnly.rrf_ranks.local, 2);
+  assert.equal(localOnly.rrf_ranks.rag, undefined);
+  const ragOnly = fused.find((row) => row.doc_id === 'rag_only');
+  assert.ok(ragOnly);
+  assert.equal(ragOnly.rrf_ranks.rag, 1);
+  assert.equal(ragOnly.rrf_ranks.local, undefined);
+  // Same doc_id in different conversations must not collapse into one row.
+  const isolated = reciprocalRankFusion([
+    { name: 'local', rows: [{ doc_id: 'same', text: 'A', origin_key: 'a' }] },
+    { name: 'local', rows: [{ doc_id: 'same', text: 'B', origin_key: 'b' }] },
+  ]);
+  assert.equal(isolated.length, 2);
+});
+
+test('RAG + local BM25 are fused with RRF and the deduped old doc remains visible', async () => {
+  const root = tempRoot();
+  const previousFetch = globalThis.fetch;
+  try {
+    const store = new MemoryStore(root);
+    const oldDoc = store.remember({
+      text: '旧版部署脚本放在 scripts/legacy-deploy.ps1，步骤沿用 2019 年的流程。',
+      category: 'project_facts',
+    }, { confirm: true });
+    await new Promise((resolve) => { setTimeout(resolve, 5); });
+    const newDoc = store.remember({
+      text: '新版发布流程改用 GitHub Actions，部署入口是 .github/workflows/release.yml。',
+      category: 'project_facts',
+    }, { confirm: true });
+    const endpoint = normalizeExternal({ baseUrl: 'http://mock.local', model: 'mock-embed' });
+    const fake = async (url, init) => {
+      if (url.endsWith('/embeddings')) {
+        const body = JSON.parse(init.body);
+        const inputs = Array.isArray(body.input) ? body.input : [body.input];
+        return new Response(JSON.stringify({
+          data: inputs.map(() => ({ embedding: [1, 0, 0] })),
+        }), { status: 200 });
+      }
+      if (url.endsWith('/rerank')) {
+        const body = JSON.parse(init.body);
+        return new Response(JSON.stringify({
+          results: body.documents.map((_, index) => ({
+            index,
+            relevance_score: 1 - index * 0.01,
+          })),
+        }), { status: 200 });
+      }
+      return new Response('not found', { status: 404 });
+    };
+    await buildRagIndex(store, endpoint, { fetchImpl: fake });
+    const index = readRagIndex(root);
+    assert.equal(Object.keys(index.docs).length, 1);
+    // The semantic index keeps the newer representative only.
+    assert.equal(index.docs[oldDoc.doc_id], undefined);
+    assert.ok(index.docs[newDoc.doc_id]);
+
+    const config = normalizeConfig({
+      root,
+      ragMount: true,
+      externalBaseUrl: 'http://mock.local',
+      externalEmbedModel: 'mock-embed',
+      externalRerankModel: 'mock-rerank',
+    });
+    globalThis.fetch = fake;
+    const result = await searchWithRag(
+      config,
+      [{ store, label: '本对话', key: 's1', scope: 'session' }],
+      'legacy-deploy',
+      { topK: 5, store },
+    );
+    assert.equal(result.ok, true);
+    assert.match(result.text, /RRF 融合/);
+    assert.match(result.text, /legacy-deploy/);
+    assert.match(result.text, /BM25#/);
+    assert.match(result.text, /RAG#/);
+  } finally {
+    globalThis.fetch = previousFetch;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1052,7 +1485,7 @@ test('new conversations get their own folder, title and access default', () => {
         ? { get: () => ({ title: '大肥鱼', source: { kind: 'fallback' } }) }
         : undefined),
     };
-    const config = normalizeConfig({ root: memoryRoot, defaultPublic: false });
+    const config = normalizeConfig({ root: memoryRoot });
     const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
     installContextManagement(ctx, config, { registryDir, getService: ctx.get }, runtime);
     const onCreated = handlers.get('session/created');
@@ -1082,6 +1515,64 @@ test('new conversations get their own folder, title and access default', () => {
     // An explicit label wins over the generated title.
     scopes.touch(key, { label: '修复 GitHub 发布文件夹问题' });
     assert.equal(scopes.listSessions()[0].name, '修复 GitHub 发布文件夹问题');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('default memory directory is appended to an existing project .gitignore once', () => {
+  const root = tempRoot();
+  try {
+    const workspace = path.join(root, 'project');
+    fs.mkdirSync(workspace, { recursive: true });
+    const file = path.join(workspace, '.gitignore');
+    fs.writeFileSync(file, 'node_modules\n');
+
+    const first = ensureGitignoreEntry(workspace, '.ai-for-memory/');
+    assert.equal(first.changed, true);
+    assert.equal(fs.readFileSync(file, 'utf8'), 'node_modules\n.ai-for-memory/\n');
+
+    const second = ensureGitignoreEntry(workspace, '.ai-for-memory/');
+    assert.equal(second.changed, false);
+    assert.equal(second.reason, 'already-ignored');
+
+    // A user who wrote it with a leading or trailing variant is still covered.
+    fs.writeFileSync(file, '/.ai-for-memory/\n');
+    assert.equal(ensureGitignoreEntry(workspace, '.ai-for-memory/').reason, 'already-ignored');
+
+    // No .gitignore means no file is invented, and custom roots are left alone.
+    fs.rmSync(file);
+    const missing = ensureDefaultMemoryDirIgnored(
+      path.join(workspace, '.ai-for-memory'), workspace, '.ai-for-memory',
+    );
+    assert.equal(missing.reason, 'no-gitignore');
+    assert.equal(fs.existsSync(file), false);
+
+    fs.writeFileSync(file, 'dist/\n');
+    const custom = ensureDefaultMemoryDirIgnored(
+      path.join(root, 'outside-memory'), workspace, '.ai-for-memory',
+    );
+    assert.equal(custom.reason, 'custom-root');
+    assert.equal(fs.readFileSync(file, 'utf8'), 'dist/\n');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('first default memory context adds the ignore entry before creating the directory', () => {
+  const root = tempRoot();
+  try {
+    const workspace = path.join(root, 'workspace');
+    fs.mkdirSync(workspace, { recursive: true });
+    const file = path.join(workspace, '.gitignore');
+    fs.writeFileSync(file, 'build/\n');
+    const exec = { agent: { session: { id: 'session-ignore', header: { cwd: workspace } } } };
+
+    memoryContext(normalizeConfig({}), exec, { registryDir: path.join(root, 'registry') });
+
+    assert.match(fs.readFileSync(file, 'utf8'), /(^|\n)\.ai-for-memory\/\n$/);
+    // The context only prepares the root; it must not create the archive yet.
+    assert.equal(fs.existsSync(path.join(workspace, '.ai-for-memory')), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1143,16 +1634,60 @@ test('closed conversations are invisible to other conversations', async () => {
   }
 });
 
+test('cross-conversation search folds the same fact into one hit', async () => {
+  const root = tempRoot();
+  const previousHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = path.join(root, 'dsh-home');
+  try {
+    const memoryRoot = path.join(root, 'memory');
+    const registered = [];
+    apply({
+      tools: { register: (tool) => { registered.push(tool); return () => {}; } },
+      effect: (fn) => fn(),
+      on: () => () => {},
+      get: () => undefined,
+    }, { root: memoryRoot });
+    const memory = registered.find((tool) => tool.name === 'aim_memory');
+    const searchTool = registered.find((tool) => tool.name === 'aim_search');
+    const execA = { agent: { session: { id: 'conv-dup-a', header: { cwd: root }, ownEvents: () => [] } } };
+    const execB = { agent: { session: { id: 'conv-dup-b', header: { cwd: root }, ownEvents: () => [] } } };
+
+    // Both writes are legitimate under their own store's dedupe gate.
+    await memory.execute({
+      action: 'remember', text: '发布前必须跑测试', category: 'workflow_rules',
+    }, execA);
+    await memory.execute({
+      action: 'remember', text: '发布前必须跑测试', category: 'workflow_rules',
+    }, execB);
+
+    const scopes = new MemoryScopes(memoryRoot);
+    scopes.setPublic(sessionKey('conv-dup-a'), true);
+    scopes.setPublic(sessionKey('conv-dup-b'), true);
+
+    const result = await searchTool.execute({
+      query: '发布前必须跑测试', scope: 'all', top_k: 5,
+    }, execA);
+    // One top_k slot, not two; the other conversation is only a "see also" note.
+    assert.equal((result.match(/发布前必须跑测试/g) ?? []).length, 1);
+    assert.match(result, /已折叠跨来源重复 1 /);
+    assert.match(result, /另见/);
+  } finally {
+    process.env.DSH_HOME = previousHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('config validator bounds auto settings', () => {
   const defaults = normalizeConfig({});
   assert.equal(defaults.autoEnabled, false);
   assert.equal(defaults.autoEveryRounds, 5);
   assert.equal(defaults.contextUsagePercent, 70);
   assert.equal(defaults.maxContextChars, 30000);
-  assert.equal(defaults.defaultPublic, true);
+  assert.equal(defaults.defaultPublic, false);
   assert.equal(defaults.topicalClear, true);
   assert.equal(defaults.keepRecentTurns, 2);
-  assert.equal(defaults.similarityThreshold, 0.06);
+  assert.equal(defaults.similarityThreshold, 0.05);
+  assert.equal(defaults.minClearChars, 200);
   const validator = Config['~standard'].validate;
   assert.equal(validator({ autoEnabled: true, autoEveryRounds: 3 }).value.autoEnabled, true);
   assert.equal(validator({ defaultPublic: false }).value.defaultPublic, false);
@@ -1207,7 +1742,7 @@ test('topic similarity separates related turns from unrelated ones', () => {
   );
   const unrelated = topicSimilarity('数据库索引的 B+ 树结构', '晚餐吃火锅还是烧烤');
   assert.ok(related > 0.15, `related=${related}`);
-  assert.ok(unrelated < 0.06, `unrelated=${unrelated}`);
+  assert.ok(unrelated < 0.05, `unrelated=${unrelated}`);
   assert.equal(topicSimilarity('', '任何内容'), 0);
   assert.equal(topicSimilarity('只有空白的判断', '   '), 0);
 
@@ -1223,15 +1758,15 @@ test('similarity selection keeps on-topic turns and their recent neighbours', ()
     { turn: 3, text: '今天天气不错适合出门散步' },
     { turn: 4, text: '继续任务吧，上下文清理要按相似度来，删掉的能恢复' },
   ];
-  const selection = selectTurnsByTopic(turns, { threshold: 0.06, keepRecent: 2 });
-  assert.equal(selection.threshold, 0.06);
+  const selection = selectTurnsByTopic(turns, { threshold: 0.05, keepRecent: 2 });
+  assert.equal(selection.threshold, 0.05);
   assert.deepEqual(selection.anchors, [3, 4]);
   assert.deepEqual(selection.keep.map((turn) => turn.turn), [1, 3, 4]);
   assert.deepEqual(selection.clear.map((turn) => turn.turn), [2]);
   // Kept-by-recent turns are labelled so a log can explain the decision.
   assert.equal(selection.keep[1].keptBy, 'recent');
   assert.equal(selection.keep[0].keptBy, 'topic');
-  assert.ok(selection.clear[0].similarity < 0.06);
+  assert.ok(selection.clear[0].similarity < 0.05);
 
   // A higher threshold clears more, and keepRecent still protects the tail.
   const strict = selectTurnsByTopic(turns, { threshold: 0.8, keepRecent: 2 });
@@ -1242,12 +1777,12 @@ test('similarity selection keeps on-topic turns and their recent neighbours', ()
 function offTopicEvents() {
   return [
     { type: 'turn/start', data: { turn: 1 } },
-    { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '数据库索引的 B+ 树结构怎么设计' }] } },
-    { type: 'assistant/message', data: { message: { role: 'assistant', content: [{ type: 'text', text: '按页大小和填充因子决定' }] } } },
+    { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '数据库索引的 B+ 树结构怎么设计：订单表已经三千万行，按 created_at 做范围查询要十几秒。先看执行计划，确认有没有走索引，再决定联合索引的列顺序和填充因子' }] } },
+    { type: 'assistant/message', data: { message: { role: 'assistant', content: [{ type: 'text', text: '按页大小和填充因子决定；如果查询总是按 status，就把 status 放在第二列，并注意统计信息过期后 ANALYZE 一下。' }] } } },
     { type: 'turn/end', data: { turn: 1 } },
     { type: 'turn/start', data: { turn: 2 } },
-    { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '晚餐吃火锅还是烧烤' }] } },
-    { type: 'assistant/message', data: { message: { role: 'assistant', content: [{ type: 'text', text: '都可以，你定' }] } } },
+    { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '晚餐吃火锅还是烧烤：冰箱里还有番茄和牛腩，但今天不想做饭，想出去吃点热乎的，最好别太辣' }] } },
+    { type: 'assistant/message', data: { message: { role: 'assistant', content: [{ type: 'text', text: '都可以，你定；如果想吃清淡一点就选火锅，想快一点就烧烤，记得先看看排队情况' }] } } },
     { type: 'turn/end', data: { turn: 2 } },
     { type: 'turn/start', data: { turn: 3 } },
     { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '上下文清理要按相似度来，高的留下' }] } },
@@ -1278,7 +1813,6 @@ test('similarity clear removes unrelated turns and their archive stays restorabl
     };
     const config = normalizeConfig({
       root: memoryRoot,
-      minClearChars: 0,
       keepRecentTurns: 2,
     });
     const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
@@ -2328,18 +2862,18 @@ test('知识权重按最近使用衰减，且只作用于本对话', () => {
   }, { confirm: true });
   assert.equal(doc.needs_confirm, undefined);
 
-  // 刚用过：A 权重约 1；B 从未使用：0。
+  // 刚用过：A 权重=1；B 从未使用
   a.recordKnowledgeUsage([doc.doc_id], { at: new Date(now).toISOString() });
   assert.ok(a.knowledgeWeight(doc.doc_id, now) > 0.999);
   assert.equal(b.knowledgeWeight(doc.doc_id, now), 0);
   assert.equal(a.knowledgeUsage()[doc.doc_id].count, 1);
 
-  // 同一份文档在 B 里的权重来自 B 自己的使用时间（28 天前 -> 0.25）。
+  // 同一份文档在 B 里的权重来自 B 自己的使用时间（28 天前 -> 0.25）
   b.recordKnowledgeUsage([doc.doc_id], { at: new Date(now - 28 * day).toISOString() });
   assert.ok(Math.abs(b.knowledgeWeight(doc.doc_id, now) - 0.25) < 1e-9);
   assert.ok(a.knowledgeWeight(doc.doc_id, now) > 0.999);
 
-  // 使用记录不进入文档列表；forget 后记录一并清掉。
+  // 使用记录不进入文档列表；forget 后记录一并清掉
   assert.equal(a.documents().some((row) => row.doc_id === doc.doc_id), true);
   a.forgetKnowledge(doc.doc_id);
   assert.equal(a.knowledgeUsage()[doc.doc_id], undefined);
@@ -2380,18 +2914,19 @@ test('aim_search 记录本对话使用并标注权重', async () => {
     assert.match(first, /权重 1\.00（最近使用）/);
     assert.match(first, /weight_marker_doc/);
 
-    // A 的搜索只写 A 自己的使用记录。
+    // A 的搜索只记录 A 自己的使用记录
     const aStore = new MemoryScopes(memoryRoot).sessionStore(sessionKey('conv-weight-a'));
     const aUsage = aStore.knowledgeUsage();
     assert.ok(Object.keys(aUsage).length >= 1);
     assert.ok(aUsage.weight_marker_doc.count >= 1);
 
-    // B 从未用过这条知识：即使跨对话命中，也按 B 自己的 0 权重展示。
+    // B never used this knowledge, and can read it only because A is opened.
+    new MemoryScopes(memoryRoot).setPublic(sessionKey('conv-weight-a'), true);
     const second = await searchTool.execute({ query: '权重标记测试' }, execB);
     assert.match(second, /weight_marker_doc/);
     assert.match(second, /权重 0\.00（未使用）/);
 
-    // B 这次检索之后才记录了自己的使用，A 的记录没有被改动。
+    // B 这次检索之后才记录了自己的使用，A 的记录没有被改动
     assert.equal(aStore.knowledgeUsage().weight_marker_doc.count, aUsage.weight_marker_doc.count);
   } finally {
     process.env.DSH_HOME = previousHome;
@@ -2430,7 +2965,7 @@ test('事故记录是独立类型，写入知识库且不吃冲突闸门', () =>
   assert.equal(normalizeCategory('事故'), 'incidents');
   assert.ok(KNOWLEDGE_CATEGORIES.includes('incidents'));
 
-  // 普通知识仍然经过冲突闸门，事故类型没有削弱它。
+  // 普通知识仍然经过冲突闸门，事故类型没有削弱它
   const conflict = store.remember({
     text: '部署脚本在 scripts/deploy.sh，上线前先跑测试',
     category: 'errors_fixes',
@@ -2509,17 +3044,17 @@ test('云端服务可分别配置嵌入/重排的地址、模型与 API Key', as
   assert.equal(rerankEp.apiKey, 'sk-rerank');
   assert.equal(rerankEp.model, 'jina-reranker-v2-base-multilingual');
 
-  // 没单独配置 key 的端点沿用主 key（本地服务一般留空）。
+  // 没单独配 key 的端点沿用主 key（本地服务一般留空）
   const inherited = normalizeExternal({ apiKey: 'sk-main' });
   assert.equal(embedEndpoint(inherited).apiKey, 'sk-main');
   assert.equal(rerankEndpoint(inherited).apiKey, 'sk-main');
 
-  // 云端 HTTPS 地址 + Bearer 鉴权头。
+  // 云端 HTTPS 地址 + Bearer 鉴权头
   const request = buildRequest(embedEp, '/embeddings', { body: { input: 'hi' } });
   assert.equal(request.url, 'https://api.siliconflow.cn/v1/embeddings');
   assert.equal(request.init.headers.authorization, 'Bearer sk-embed');
 
-  // 真发一次，确认 request 与响应解析都走云端的形状。
+  // 真发一次，确认 request 与响应解析都走云端的形状
   const seen = [];
   const fake = async (url, init) => {
     seen.push({ url, auth: init.headers.authorization });
@@ -2641,20 +3176,17 @@ test('aim_ask chat returns a call trace and a source citation map', async () => 
         { id: 'k_b', text: '未被引用的来源' },
       ],
     });
-    // 调用记录：模型、地址、时间、输入指纹、输出长度、请求 id、tokens。
-    assert.match(out, /调用记录：model=mock-chat-v2/);
+    // 调用记录：模型、地址、时间、输入指纹、输出长度、请id、tokens    assert.match(out, /调用记录：model=mock-chat-v2/);
     assert.match(out, /地址=http:\/\/127\.0\.0\.1:18099\/v1/);
     assert.match(out, /时间=\d{4}-\d{2}-\d{2}T/);
     assert.match(out, /输入 sha256:[0-9a-f]{12}/);
     assert.match(out, /输出 \d+ 字/);
     assert.match(out, /请求 id=chatcmpl-trace-1/);
     assert.match(out, /tokens=12/);
-    // 来源对照：编号 → id/url，并标明模型是否真的引用。
-    assert.match(out, /来源对照：传入 2 条，模型引用 1 条/);
+    // 来源对照：编id/url，并标明模型是否真的引用    assert.match(out, /来源对照：传2 条，模型引用 1 );
     assert.match(out, /\[1\] ✓ 已引用｜k_a｜https:\/\/example\.com\/a/);
     assert.match(out, /\[2\] · 未引用｜k_b/);
-    // 编号材料确实发给了模型，system 里带引用规则。
-    assert.equal(seen.url, 'http://127.0.0.1:18099/v1/chat/completions');
+    // 编号材料确实发给了模型，system 里带引用规则    assert.equal(seen.url, 'http://127.0.0.1:18099/v1/chat/completions');
     const system = seen.body.messages.find((message) => message.role === 'system');
     assert.match(system.content, /\[1\] id=k_a url=https:\/\/example\.com\/a/);
     assert.match(system.content, /每个结论后必须用 \[1\]/);

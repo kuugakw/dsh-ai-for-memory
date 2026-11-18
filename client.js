@@ -57,6 +57,9 @@ window.__ModuleLoader__.load({
         emptySnapshots: '还没有快照。',
         emptyKnowledge: '知识库还是空的。',
         knowledgePending: '待提炼',
+        pendingUpdates: '待确认知识更新',
+        pendingUpdatesHint: '后台提炼想改写已有事实，但没有写入；核对后再决定是否覆盖。',
+        pendingUpdateTarget: '目标',
         knowledgeHint: '知识库只存结论：三层里提炼出的用户规则/错误修复/决策理由，加上我或你直接写入的事实；每条都带分类与出处。新内容与库中已有知识或我的认知冲突时，会先问你，确认后才写入。',
         exportButton: '导出',
         exportClose: '收起导出',
@@ -100,6 +103,11 @@ window.__ModuleLoader__.load({
         modeNeedsServer: '已启用外部模型模式：请确认配置的 OpenAI 兼容服务可访问，否则对应操作会自动回退本地规则（结果里会注明）。',
         modeLocalHint: '当前三层都用本地规则，不依赖任何外部服务。',
         evidence: '证据',
+        modelClaim: '模型自述（未确认）',
+        modelClaimHint: '这条来自模型自己的过程记录或决策复盘，不是用户确认的事实；检索已降权，请勿当作项目已知事实。',
+        updated: '已更新',
+        updatedHint: '这条知识的正文被修改过；展开可见上一版。',
+        previousText: '上一版',
         sourceUrl: '出处',
         emptyDecisions: '还没有决策审查记录。',
         emptyContexts: '还没有上下文存档。',
@@ -139,12 +147,13 @@ window.__ModuleLoader__.load({
         conversationSaved: '对话设置已保存',
         conversationSaveFailed: '保存对话设置失败',
         privateBadge: '私有',
-        defaultPublic: '新对话默认对外开放',
-        defaultPublicHint: '新建对话时自动创建记忆文件夹，并按这个默认值设置开放状态。',
+        defaultPublic: '新对话默认对外开放（建议关）',
+        defaultPublicHint: '默认关闭：只有你明确打开某个对话，其他对话才能跨对话检索、恢复它的全文存档。对话存档包含完整 user / assistant 内容，可能含密钥、客户数据；打开前请确认范围。',
         clearingTopic: '按话题相似度清理',
         clearingThreshold: '相似度阈值（越大清得越狠）',
         clearingKeep: '始终保留最近几轮',
         clearingHint: '按话题相似度清理：以当轮与上轮为基准，相似度低的老轮次被清出，相似度高的原样保留；清出前先完整存档，随时可以 restore 调回。',
+        restoreBudget: '恢复时最多注入字符数',
         ragTitle: 'RAG 挂载（知识库检索）',
         ragNeedModels: '启用 RAG 需要同时填写 Embedding 模型和 Rerank 模型（在下方「外部模型」区设置）；缺一个都不能挂载。',
         ragHintOn: '已挂载：aim_search 优先用外部嵌入 + 重排检索知识库，结果会标注「检索方式：RAG」；关掉即回到本地 BM25。',
@@ -242,6 +251,9 @@ window.__ModuleLoader__.load({
         emptySnapshots: 'No snapshots yet.',
         emptyKnowledge: 'The knowledge base is still empty.',
         knowledgePending: 'To distill',
+        pendingUpdates: 'Knowledge updates awaiting confirmation',
+        pendingUpdatesHint: 'Background mining wanted to rewrite an existing fact; nothing was written. Review before overwriting.',
+        pendingUpdateTarget: 'Target',
         knowledgeHint: 'Knowledge stores conclusions only: user rules, error→fix pairs and decision reasons mined from the three layers, plus facts written by the model or the user. Each document carries a category and a source. When a new fact conflicts with stored knowledge or with the model’s own understanding, you are asked first and it is stored only after you agree.',
         exportButton: 'Export',
         exportClose: 'Close export',
@@ -285,6 +297,11 @@ window.__ModuleLoader__.load({
         modeNeedsServer: 'External mode is on: make sure the configured OpenAI-compatible service is reachable, otherwise those operations fall back to the local rules (the result says so).',
         modeLocalHint: 'All three layers currently use local rules and need no external service.',
         evidence: 'Evidence',
+        modelClaim: 'Model claim (unverified)',
+        modelClaimHint: 'This came from the model’s own process log or decision review, not from a user-confirmed fact. Retrieval downranks it; do not treat it as established project knowledge.',
+        updated: 'Updated',
+        updatedHint: 'The stored text was changed; expand to see the previous version.',
+        previousText: 'Previous version',
         sourceUrl: 'Source',
         emptyDecisions: 'No decision reviews yet.',
         emptyContexts: 'No archived contexts yet.',
@@ -324,12 +341,13 @@ window.__ModuleLoader__.load({
         conversationSaved: 'Conversation settings saved',
         conversationSaveFailed: 'Failed to save conversation settings',
         privateBadge: 'private',
-        defaultPublic: 'New conversations open by default',
-        defaultPublicHint: 'A new conversation gets its memory folder automatically, seeded with this access setting.',
+        defaultPublic: 'New conversations open by default (recommended off)',
+        defaultPublicHint: 'Off by default: another conversation can search or restore this one only after you explicitly open it. Archives contain full user / assistant text and may hold secrets or customer data; check the scope before opening.',
         clearingTopic: 'Topic similarity',
         clearingThreshold: 'Similarity threshold (higher clears more)',
         clearingKeep: 'Always keep the last N turns',
         clearingHint: 'Topic-aware clearing: each older turn is compared with the current and previous turn. Turns that still share the topic stay verbatim; only the ones the conversation has left behind are cleared, and their full text is archived first so restore can always bring them back.',
+        restoreBudget: 'Max characters injected by restore',
         contextRestoreHint: 'To restore one, ask me in the chat to run aim_context restore.',
         ragTitle: 'RAG mount (knowledge search)',
         ragNeedModels: 'RAG needs both an embedding model and a rerank model (set them in External model below). It cannot be mounted with only one.',
@@ -836,10 +854,11 @@ window.__ModuleLoader__.load({
       const [exportOpen, setExportOpen] = React.useState(false);
       const [exportTypes, setExportTypes] = React.useState(['knowledge']);
       const [exportFormat, setExportFormat] = React.useState('json');
-      const [formDefaultPublic, setFormDefaultPublic] = React.useState(true);
+      const [formDefaultPublic, setFormDefaultPublic] = React.useState(false);
       const [formTopical, setFormTopical] = React.useState(true);
-      const [formThreshold, setFormThreshold] = React.useState(0.06);
+      const [formThreshold, setFormThreshold] = React.useState(0.05);
       const [formKeepRecent, setFormKeepRecent] = React.useState(2);
+      const [formRestoreMax, setFormRestoreMax] = React.useState(12000);
       // RAG is mounted on the knowledge layer: the switch decides whether
       // aim_search uses the vector index; building the index is a separate click.
       const [formRagMount, setFormRagMount] = React.useState(false);
@@ -940,6 +959,7 @@ window.__ModuleLoader__.load({
           }
           if (typeof payload.similarityThreshold === 'number') setFormThreshold(payload.similarityThreshold);
           if (Number.isInteger(payload.keepRecentTurns)) setFormKeepRecent(payload.keepRecentTurns);
+          if (Number.isInteger(payload.restoreMaxChars)) setFormRestoreMax(payload.restoreMaxChars);
           if (typeof payload.externalBaseUrl === 'string') setFormExternalBase(payload.externalBaseUrl);
           if (typeof payload.externalModel === 'string') setFormExternalModel(payload.externalModel);
           if (Number.isInteger(payload.externalTimeoutMs)) setFormExternalTimeout(payload.externalTimeoutMs);
@@ -958,7 +978,7 @@ window.__ModuleLoader__.load({
           if (typeof payload.contextExternal === 'boolean') setFormContextExternal(payload.contextExternal);
           const selected = payload?.selectedSession ?? null;
           setFormName(selected?.label ?? '');
-          setFormPublic(selected?.public !== false);
+          setFormPublic(selected?.public === true);
           applyScope({
             kind: typeof payload.scope === 'string' ? payload.scope : kind,
             key: payload?.selectedSession?.key ?? (kind === 'session' ? (active?.key ?? null) : null),
@@ -1117,8 +1137,9 @@ window.__ModuleLoader__.load({
               topicalClear: formTopical,
               ragMount: formRagMount,
               knowledgeBackend: formStorage,
-              similarityThreshold: Number(formThreshold) || 0.06,
+              similarityThreshold: Number(formThreshold) || 0.05,
               keepRecentTurns: Number(formKeepRecent) || 2,
+              restoreMaxChars: Number(formRestoreMax) || 12000,
               externalBaseUrl: formExternalBase.trim(),
               externalModel: formExternalModel.trim(),
               externalTimeoutMs: Number(formExternalTimeout) || 60000,
@@ -1471,11 +1492,31 @@ window.__ModuleLoader__.load({
           h('p', { style: styles.hint }, t.exportHint),
           h('p', { style: styles.hint },
             pending > 0 ? `${t.knowledgePending}: ${pending}` : t.knowledgeHint),
+          (data?.knowledgePendingUpdates ?? []).length > 0
+            ? h('div', {
+              style: {
+                padding: '8px 10px', border: '1px solid #f59e0b', borderRadius: '8px',
+                background: '#fffbeb', color: '#92400e', fontSize: '12.5px',
+              },
+            },
+            h('div', { style: { fontWeight: 600 } },
+              `⚠ ${t.pendingUpdates}：${data.knowledgePendingUpdates.length}`),
+            h('div', { style: { margin: '4px 0' } }, t.pendingUpdatesHint),
+            ...data.knowledgePendingUpdates.slice(0, 5).map((row) => h('div', {
+              key: row.pending_id,
+              style: { margin: '6px 0', paddingTop: '6px', borderTop: '1px dashed rgba(146,64,14,0.35)' },
+            },
+            h('div', { style: { fontWeight: 600 } },
+              `${t.pendingUpdateTarget}: ${row.update_of}`),
+            h('div', { style: { whiteSpace: 'pre-wrap' } }, clipPreview(row.text, 220)),
+            row.origin_label ? h('div', { style: { opacity: 0.8 } }, `对话：${row.origin_label}`) : null)))
+            : null,
           knowledge.length === 0
             ? h(Empty, { text: t.emptyKnowledge })
             : h('div', { style: styles.list },
               ...knowledge.slice(0, listLimit).map((doc) => {
                 const key = keyOf(doc.session_key, doc.doc_id);
+                const modelClaim = doc.provenance === 'model' && doc.verified !== true;
                 return h(LogRow, {
                   key,
                   rowKey: key,
@@ -1484,6 +1525,18 @@ window.__ModuleLoader__.load({
                   head: [
                     h('span', { key: 'id', style: { fontWeight: 600 } }, doc.doc_id),
                     h('span', { key: 'cat', style: badgeStyle('pending') }, doc.category),
+                    (doc.changes_count ?? 0) > 0
+                      ? h('span', {
+                        key: 'updated',
+                        style: { ...badgeStyle('pending'), background: '#eff6ff', color: '#1d4ed8', borderColor: '#93c5fd' },
+                      }, `⤴ ${t.updated} ×${doc.changes_count}`)
+                      : null,
+                    modelClaim
+                      ? h('span', {
+                        key: 'claim',
+                        style: { ...badgeStyle('pending'), background: '#fef3c7', color: '#92400e', borderColor: '#f59e0b' },
+                      }, `⚠ ${t.modelClaim}`)
+                      : null,
                     doc.source ? h('span', { key: 'src', style: badgeStyle('pending') }, doc.source) : null,
                     (doc.tags ?? []).map((tag) => h('span', { key: `tag-${tag}`, style: styles.meta }, `#${tag}`)),
                     showSession && doc.session_label
@@ -1494,7 +1547,19 @@ window.__ModuleLoader__.load({
                   ],
                   preview: doc.text,
                   children: [
+                    modelClaim
+                      ? h('p', { key: 'claim-hint', style: { ...styles.hint, color: '#92400e' } },
+                        `⚠ ${t.modelClaimHint}`)
+                      : null,
                     h('p', { key: 'text', style: styles.content }, doc.text),
+                    (doc.changes_count ?? 0) > 0
+                      ? h('p', { key: 'updated-hint', style: styles.hint },
+                        `⤴ ${t.updatedHint}`)
+                      : null,
+                    (doc.changes_count ?? 0) > 0 && doc.previous_text
+                      ? h('p', { key: 'previous-text', style: styles.hint },
+                        `${t.previousText}: ${doc.previous_text}`)
+                      : null,
                     doc.url ? h('p', { key: 'url', style: styles.hint }, `${t.sourceUrl}: ${doc.url}`) : null,
                   ],
                 });
@@ -1638,7 +1703,7 @@ window.__ModuleLoader__.load({
                 conversationRows.map((row) => h('option', {
                   key: row.key,
                   value: row.key,
-                }, `${conversationName(row)}${row.current ? `（${t.scopeCurrent}）` : ''}${row.public === false ? `（${t.privateBadge}）` : ''}`))))
+                }, `${conversationName(row)}${row.current ? `（${t.scopeCurrent}）` : ''}${row.public !== true ? `（${t.privateBadge}）` : ''}`))))
               : null,
             h('label', { style: { ...styles.label, minWidth: '200px' } },
               t.root,
@@ -2179,6 +2244,17 @@ window.__ModuleLoader__.load({
                   onChange: (event) => setFormKeepRecent(event.target.value),
                 })))
             : null,
+          h('label', { style: styles.label },
+            t.restoreBudget,
+            h('input', {
+              style: styles.input,
+              type: 'number',
+              min: 1000,
+              max: 100000,
+              step: 1000,
+              value: formRestoreMax,
+              onChange: (event) => setFormRestoreMax(event.target.value),
+            })),
           h('p', { style: styles.hint }, t.storageHint),
           h('div', { style: styles.grid2 },
             h('label', { style: styles.label },
