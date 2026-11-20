@@ -24,6 +24,43 @@ window.__ModuleLoader__.load({
         nav: 'AI 记忆',
         title: 'AI 记忆',
         subtitle: '分层项目记忆：对话隔离 · 过程记录 · 归档 · 快照 · 知识库 · 决策',
+        navOverview: '总览',
+        navLayers: '记忆数据',
+        navSystem: '系统',
+        navSettings: '设置',
+        overviewTitle: '记忆总览',
+        overviewSubtitle: '当前工作区的记忆规模、运行状态和最近活动。',
+        overviewHealth: '运行状态',
+        overviewRecent: '最近活动',
+        overviewQuick: '快捷操作',
+        overviewNoRecent: '还没有可展示的记录。',
+        overviewGenerated: '更新时间',
+        overviewRoot: '当前记忆目录',
+        overviewBackend: '知识存储',
+        overviewRag: 'RAG 索引',
+        overviewNetwork: '网络同步',
+        overviewConfigured: '已配置',
+        overviewNotConfigured: '未配置',
+        overviewOn: '已开启',
+        overviewOff: '未开启',
+        overviewClear: '上下文清理',
+        overviewClearValue: '阈值 {n}%',
+        settingsTitle: '设置',
+        settingsSubtitle: '插件内部设置；保存后自动重载，不需要打开 DSH 设置页。',
+        settingsGeneral: '常规与上下文',
+        settingsModels: '模型与检索',
+        settingsNetwork: '网络同步',
+        settingsConversation: '当前对话',
+        settingsBack: '返回总览',
+        openSettings: '打开设置',
+        viewAll: '查看全部',
+        overviewCards: '记忆分层',
+        overviewSession: '当前对话',
+        overviewSessionEmpty: '还没有登记对话。',
+        overviewPrivate: '私有',
+        overviewPublic: '已开放',
+        sidebarFooter: '本地优先 · 对话隔离',
+        navLayersHint: '六层记忆数据',
         refresh: '刷新',
         loading: '加载中…',
         loadFailed: '读取记忆失败',
@@ -81,8 +118,14 @@ window.__ModuleLoader__.load({
         localModelsEmpty: '还没有发现已登记模型。在插件的 models/ 下新建模型文件夹和 model.json。',
         localModelsRoot: '目录',
         localModelReady: '已配置 API',
+        localModelGguf: '已发现 GGUF（本地引擎）',
+        localModelEngineRunning: '本地引擎运行中',
         localModelUnconfigured: '未配置 API',
         localModelUse: '填入地址',
+        localModelStart: '启动引擎并填入',
+        localModelStarting: '启动本地引擎中…',
+        localModelStarted: '本地引擎已启动并填入地址；确认后点「保存设置」。',
+        localModelStartFailed: '本地引擎启动失败',
         localModelApplied: '已填入模型地址；确认后点「保存设置」。',
         localModelReserved: '预留分类，尚未接入调用。',
         localModelFuture: '其他目录会按名字显示，插件不限制未来的能力类型。',
@@ -240,7 +283,7 @@ window.__ModuleLoader__.load({
         snapshotEvery: '快照间隔（轮）',
         snapshotMax: '快照上限（个）',
         modeHintManual: '自动整理已关闭；手动工具始终可用：aim_memory / aim_search / aim_decide / aim_context。',
-        modeHintAuto: '自动整理已开启：每 N 轮，或上下文占用达到设定百分比时，自动执行 摘要→归档→按话题相似度清理；两个条件任一满足就触发，手动工具仍然可用。',
+        modeHintAuto: '自动整理已开启：每 N 轮按话题相似度整理；上下文占用达到设定百分比时，已完成轮次全部存档并清出，只回载当前请求和最近进展。手动工具仍然可用。',
         fixedPath: '记忆地址（绝对路径，留空=跟随项目）',
         dirName: '目录名（跟随项目时使用）',
         save: '保存设置',
@@ -264,6 +307,43 @@ window.__ModuleLoader__.load({
         nav: 'AI for Memory',
         title: 'AI for Memory',
         subtitle: 'Layered project memory: per-conversation isolation · process log · archive · snapshots · knowledge base · decisions',
+        navOverview: 'Overview',
+        navLayers: 'Memory data',
+        navSystem: 'System',
+        navSettings: 'Settings',
+        overviewTitle: 'Memory overview',
+        overviewSubtitle: 'Size, runtime health and recent activity for the selected workspace.',
+        overviewHealth: 'Runtime status',
+        overviewRecent: 'Recent activity',
+        overviewQuick: 'Quick actions',
+        overviewNoRecent: 'Nothing to show yet.',
+        overviewGenerated: 'Updated',
+        overviewRoot: 'Memory root',
+        overviewBackend: 'Knowledge storage',
+        overviewRag: 'RAG index',
+        overviewNetwork: 'Network sync',
+        overviewConfigured: 'Configured',
+        overviewNotConfigured: 'Not configured',
+        overviewOn: 'On',
+        overviewOff: 'Off',
+        overviewClear: 'Context cleanup',
+        overviewClearValue: 'Threshold {n}%',
+        settingsTitle: 'Settings',
+        settingsSubtitle: 'Plugin-local settings. Saving reloads the plugin automatically; no DSH settings page needed.',
+        settingsGeneral: 'General & context',
+        settingsModels: 'Models & retrieval',
+        settingsNetwork: 'Network sync',
+        settingsConversation: 'Current conversation',
+        settingsBack: 'Back to overview',
+        openSettings: 'Open settings',
+        viewAll: 'View all',
+        overviewCards: 'Memory layers',
+        overviewSession: 'Current conversation',
+        overviewSessionEmpty: 'No conversation registered yet.',
+        overviewPrivate: 'Private',
+        overviewPublic: 'Open',
+        sidebarFooter: 'Local first · conversation isolated',
+        navLayersHint: 'Six memory layers',
         refresh: 'Refresh',
         loading: 'Loading…',
         loadFailed: 'Failed to load memory',
@@ -321,8 +401,14 @@ window.__ModuleLoader__.load({
         localModelsEmpty: 'No registered model found. Create a model folder and model.json under the plugin models/ directory.',
         localModelsRoot: 'Directory',
         localModelReady: 'API configured',
+        localModelGguf: 'GGUF found (local engine)',
+        localModelEngineRunning: 'Local engine running',
         localModelUnconfigured: 'API not configured',
         localModelUse: 'Use this address',
+        localModelStart: 'Start engine & use',
+        localModelStarting: 'Starting local engine…',
+        localModelStarted: 'Local engine started and address filled; click "Save settings" to apply.',
+        localModelStartFailed: 'Local engine failed to start',
         localModelApplied: 'Model address filled; click "Save settings" to apply.',
         localModelReserved: 'Reserved category; not wired into calls yet.',
         localModelFuture: 'Other folders are shown by name; future capabilities are not restricted.',
@@ -480,7 +566,7 @@ window.__ModuleLoader__.load({
         snapshotEvery: 'Snapshot every N turns',
         snapshotMax: 'Snapshot cap',
         modeHintManual: 'Auto tidy is off; manual tools are always available: aim_memory / aim_search / aim_decide / aim_context.',
-        modeHintAuto: 'Auto tidy is on: it digests, archives and runs a topic-aware clear every N turns, or as soon as context usage reaches the set percentage. Either trigger suffices; manual tools remain available.',
+        modeHintAuto: 'Auto tidy is on: every N turns it uses topic-aware cleanup; when context usage reaches the set percentage, all completed turns are archived and cleared, then only the current request and latest progress are reloaded. Manual tools remain available.',
         fixedPath: 'Memory path (absolute, empty = follow project)',
         dirName: 'Directory name (used when following the project)',
         save: 'Save settings',
@@ -518,6 +604,23 @@ window.__ModuleLoader__.load({
 @keyframes aim-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 
 .aim-page { animation: aim-fade-up .26s cubic-bezier(.2,.7,.3,1) both; }
+.aim-nav-item { transition: background-color .14s ease, color .14s ease, border-color .14s ease; }
+.aim-nav-item:focus { outline: none !important; box-shadow: none !important; }
+.aim-nav-item:focus-visible { outline: 2px solid #4d6bfe !important; outline-offset: 1px; }
+.aim-nav-item:hover:not(.aim-nav-item-on) { background: rgba(127,127,127,.08); }
+.aim-stat-card { transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+.aim-stat-card:hover { transform: translateY(-1px); box-shadow: 0 8px 22px rgba(0,0,0,.08); border-color: rgba(77,107,254,.35) !important; }
+.aim-shell { min-height: 0; }
+@media (max-width: 980px) {
+  .aim-shell { flex-direction: column !important; overflow: auto !important; height: auto !important; }
+  .aim-sidebar { width: auto !important; flex: none !important; border-right: 0 !important; border-bottom: 1px solid rgba(127,127,127,.22); }
+  .aim-sidebar .aim-nav-group { flex-direction: row !important; flex-wrap: wrap; }
+  .aim-sidebar .aim-nav-group-title { display: none; }
+  .aim-app-main { min-height: 0; }
+  .aim-settings-shell { flex-direction: column !important; }
+  .aim-settings-nav { width: auto !important; flex: none !important; flex-direction: row !important; flex-wrap: wrap; position: static !important; }
+  .aim-overview-grid { grid-template-columns: 1fr !important; }
+}
 .aim-fade-up { animation: aim-fade-up .22s cubic-bezier(.2,.7,.3,1) both; }
 .aim-content { animation: aim-fade .24s ease-out both; }
 .aim-notice { animation: aim-slide-down .2s cubic-bezier(.2,.7,.3,1) both; }
@@ -638,19 +741,91 @@ window.__ModuleLoader__.load({
       bg: 'var(--dsw-alias-bg-layer-1, #ffffff)',
       bg2: 'var(--dsw-alias-bg-layer-2, #f5f6f7)',
       brand: 'var(--dsw-alias-brand-primary, #4d6bfe)',
+      accent: '#4d6bfe',
       error: 'var(--dsw-alias-state-error-primary, #d83931)',
       success: 'var(--dsw-alias-state-success-primary, #2ea121)',
       warn: 'var(--dsw-alias-state-warn-primary, #f59e0b)',
     };
 
     const styles = {
-      page: {
-        display: 'flex', flexDirection: 'column', gap: '14px', color: colors.label,
-        fontSize: '13px', lineHeight: '1.6', padding: '20px 24px 32px',
-        maxWidth: '1040px', margin: '0 auto', width: '100%', boxSizing: 'border-box',
-        height: '100%', overflowY: 'auto',
+      shell: {
+        display: 'flex', height: '100%', minHeight: 0, width: '100%',
+        background: colors.bg2, color: colors.label, overflow: 'hidden',
       },
-      header: { display: 'flex', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' },
+      sidebar: {
+        width: '220px', flex: '0 0 220px', minHeight: 0, overflowY: 'auto',
+        display: 'flex', flexDirection: 'column', gap: '18px',
+        padding: '18px 12px 14px', borderRight: `1px solid ${colors.border}`,
+        background: colors.bg, boxSizing: 'border-box',
+      },
+      brand: { display: 'flex', alignItems: 'center', gap: '9px', padding: '0 6px 14px' },
+      brandTitle: { fontSize: '14px', fontWeight: 700, margin: 0, lineHeight: 1.25 },
+      brandSub: { fontSize: '10.5px', color: colors.secondary, margin: '2px 0 0' },
+      navGroup: { display: 'flex', flexDirection: 'column', gap: '3px' },
+      navGroupTitle: {
+        fontSize: '10.5px', color: colors.secondary, fontWeight: 600,
+        letterSpacing: '.04em', padding: '0 10px 4px',
+      },
+      navItem: {
+        display: 'flex', alignItems: 'center', gap: '9px', width: '100%', boxSizing: 'border-box',
+        padding: '7px 10px', border: '1px solid transparent', borderRadius: '8px',
+        background: 'transparent', color: colors.label, font: 'inherit', fontSize: '12.5px',
+        textAlign: 'left', cursor: 'pointer',
+      },
+      navItemOn: {
+        background: 'rgba(77,107,254,.13)', borderColor: 'rgba(77,107,254,.55)',
+        color: '#4d6bfe', fontWeight: 650,
+      },
+      navBadge: {
+        marginLeft: 'auto', fontSize: '10.5px', color: colors.secondary,
+        fontVariantNumeric: 'tabular-nums',
+      },
+      sidebarFooter: { marginTop: 'auto', padding: '10px 10px 0', borderTop: `1px solid ${colors.border}` },
+      appMain: { flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' },
+      topbar: {
+        display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap',
+        padding: '12px 22px', borderBottom: `1px solid ${colors.border}`,
+        background: colors.bg, boxSizing: 'border-box',
+      },
+      topbarTitle: { display: 'flex', flexDirection: 'column', gap: '1px', marginRight: '4px' },
+      topbarTitleText: { fontSize: '15px', fontWeight: 700, margin: 0, lineHeight: 1.3 },
+      topbarSubText: { fontSize: '11.5px', color: colors.secondary, margin: 0 },
+      topbarActions: { marginLeft: 'auto', display: 'flex', alignItems: 'flex-end', gap: '8px', flexWrap: 'wrap' },
+      main: { flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 24px 36px', boxSizing: 'border-box' },
+      page: {
+        display: 'flex', flexDirection: 'column', gap: '16px', color: colors.label,
+        fontSize: '13px', lineHeight: '1.6', padding: 0,
+        maxWidth: '1180px', margin: '0 auto', width: '100%', boxSizing: 'border-box',
+        height: 'auto', overflow: 'visible',
+      },
+      hero: {
+        display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap',
+        border: `1px solid ${colors.border}`, borderRadius: '12px', background: colors.bg,
+        padding: '16px 18px',
+      },
+      heroTitle: { fontSize: '20px', fontWeight: 700, margin: 0, lineHeight: 1.25 },
+      heroSub: { margin: '3px 0 0', color: colors.secondary, fontSize: '12.5px' },
+      overviewGrid: { display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(260px, .8fr)', gap: '14px' },
+      settingsShell: { display: 'flex', gap: '18px', alignItems: 'flex-start' },
+      settingsNav: {
+        width: '184px', flex: '0 0 184px', display: 'flex', flexDirection: 'column', gap: '3px',
+        position: 'sticky', top: 0,
+      },
+      settingsNavItem: {
+        display: 'block', width: '100%', boxSizing: 'border-box', padding: '7px 10px',
+        border: '1px solid transparent', borderRadius: '8px', background: 'transparent',
+        color: colors.label, font: 'inherit', fontSize: '12.5px', textAlign: 'left', cursor: 'pointer',
+      },
+      settingsNavItemOn: {
+        background: 'rgba(77,107,254,.13)', borderColor: 'rgba(77,107,254,.55)',
+        color: '#4d6bfe', fontWeight: 650,
+      },
+      settingsBody: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '14px' },
+      header: {
+        display: 'flex', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap',
+        padding: '2px 0 14px', borderBottom: `1px solid ${colors.border}`,
+        position: 'sticky', top: 0, zIndex: 2, background: colors.bg2,
+      },
       title: { fontSize: '18px', fontWeight: 650, margin: 0 },
       subtitle: { margin: '2px 0 0', color: colors.secondary, fontSize: '12.5px' },
       actions: { marginLeft: 'auto', display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' },
@@ -673,7 +848,7 @@ window.__ModuleLoader__.load({
       },
       primary: {
         font: 'inherit', fontSize: '12.5px', fontWeight: 600, color: colors.label,
-        background: colors.bg2, border: `1px solid ${colors.brand}`, borderRadius: '7px',
+        background: colors.bg2, border: `1px solid ${colors.accent}`, borderRadius: '7px',
         padding: '5px 14px', cursor: 'pointer', whiteSpace: 'nowrap',
       },
       pathRow: {
@@ -695,15 +870,15 @@ window.__ModuleLoader__.load({
       tileValue: { fontSize: '20px', fontWeight: 650, fontVariantNumeric: 'tabular-nums' },
       tabs: { display: 'flex', gap: '4px', flexWrap: 'wrap', borderBottom: `1px solid ${colors.border}` },
       modeRow: {
-        display: 'flex', gap: '4px', flexWrap: 'wrap',
-        borderBottom: `1px solid ${colors.border}`, paddingBottom: '4px',
+        display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center',
+        padding: '2px 0',
       },
       tab: {
         font: 'inherit', fontSize: '12.5px', color: colors.secondary, background: 'transparent',
         border: 'none', borderBottom: '2px solid transparent', padding: '7px 10px',
         cursor: 'pointer', display: 'flex', gap: '6px', alignItems: 'center',
       },
-      tabOn: { color: colors.label, borderBottomColor: colors.brand, fontWeight: 600 },
+      tabOn: { color: colors.label, borderBottomColor: colors.accent, fontWeight: 600 },
       // The six layer tabs draw their own active indicator element instead of
       // relying on a bottom border: a border can be inherited from a host
       // stylesheet and then two tabs look underlined at once.
@@ -719,15 +894,18 @@ window.__ModuleLoader__.load({
       // CSS from aria-checked, so the label can never sit unreadable on top of
       // a background colour (light and dark themes both keep it readable).
       switchOption: {
-        fontSize: '12.5px', lineHeight: '1.5', minHeight: '24px',
-        color: colors.secondary, background: 'transparent',
-        border: 'none', borderRadius: '6px', padding: '2px 8px', cursor: 'pointer',
+        fontSize: '12px', lineHeight: '1.4', minHeight: '26px',
+        color: colors.secondary, background: colors.bg2,
+        border: `1px solid ${colors.border}`, borderRadius: '999px', padding: '3px 11px', cursor: 'pointer',
         textDecoration: 'none', boxShadow: 'none', whiteSpace: 'nowrap',
       },
-      switchOptionOn: { color: colors.brand, fontWeight: 700, background: 'transparent' },
+      switchOptionOn: {
+        color: colors.accent, fontWeight: 650, background: colors.bg,
+        borderColor: colors.accent, boxShadow: 'inset 0 0 0 1px rgba(77,107,254,.18)',
+      },
       tabBarIndicator: {
         position: 'absolute', left: '8px', right: '8px', bottom: '-1px', height: '2px',
-        borderRadius: '2px', background: colors.brand,
+        borderRadius: '2px', background: colors.accent,
       },
       tabCount: {
         fontSize: '11px', color: colors.secondary, background: colors.bg2,
@@ -924,6 +1102,9 @@ window.__ModuleLoader__.load({
       const [error, setError] = React.useState(null);
       const [busy, setBusy] = React.useState(false);
       const [tab, setTab] = React.useState('staging');
+      // Top-level page: overview / one memory layer / the plugin's own settings.
+      const [view, setView] = React.useState('overview');
+      const [settingsSection, setSettingsSection] = React.useState('general');
       const [query, setQuery] = React.useState('');
       // Log lists collapse: `openRows` holds the row keys the user opened and
       // `listLimit` how many rows each list shows before "show more".
@@ -982,6 +1163,7 @@ window.__ModuleLoader__.load({
       const [hasRerankKey, setHasRerankKey] = React.useState(false);
       const [formPreset, setFormPreset] = React.useState('custom');
       const [externalProbing, setExternalProbing] = React.useState(false);
+      const [localModelBusy, setLocalModelBusy] = React.useState('');
       const [externalStatus, setExternalStatus] = React.useState('');
       const [formArchiveExternal, setFormArchiveExternal] = React.useState(false);
       const [formKnowledgeExternal, setFormKnowledgeExternal] = React.useState(false);
@@ -1165,7 +1347,12 @@ window.__ModuleLoader__.load({
         // An explicit panel name wins, then the live DSH title, then the title
         // snapshotted by the Host, then a short id.
         const name = row.label || titleOf(row) || row.title || '';
-        return name !== '' ? name : String(row.sessionId ?? row.key ?? '').slice(0, 8);
+        if (name !== '') return name;
+        const id = String(row.sessionId || row.key || '');
+        if (id === '') return '';
+        // Keys and ids share a long prefix; the tail is what distinguishes
+        // conversations in the picker.
+        return id.length > 12 ? id.slice(-8) : id.slice(0, 8);
       };
       const selectedSession = data?.selectedSession ?? null;
       const namePlaceholder = selectedSession
@@ -1352,23 +1539,52 @@ window.__ModuleLoader__.load({
           setExternalProbing(false);
         }
       };
-      /** Fill endpoint fields from a discovered models/<category>/<name>/model.json. */
-      const applyLocalModel = (category, model) => {
-        if (!model || model.configured !== true) return;
+      /** Fill endpoint fields from a discovered model folder, starting the local engine when it has a GGUF. */
+      const applyLocalModel = async (category, model) => {
+        if (!model) return;
         const capability = String(category ?? '').toLowerCase();
-        if (capability.includes('embed')) {
-          setFormEmbedBase(model.baseUrl);
-          setFormEmbedModel(model.model);
-        } else if (capability.includes('rerank')) {
-          setFormRerankBase(model.baseUrl);
-          setFormRerankModel(model.model);
-        } else {
+        if (!capability.includes('embed') && !capability.includes('rerank')) {
           // Routing and future categories are discovery-only until the plugin
           // has a consumer for them. Do not silently stuff them into the chat
           // endpoint.
           setNotice({ kind: 'ok', text: t.localModelReserved });
           return;
         }
+        const fill = (baseUrl, modelName) => {
+          if (capability.includes('embed')) {
+            setFormEmbedBase(baseUrl);
+            setFormEmbedModel(modelName);
+          } else {
+            setFormRerankBase(baseUrl);
+            setFormRerankModel(modelName);
+          }
+        };
+        if (model.runnable === true) {
+          setLocalModelBusy(model.id);
+          setNotice({ kind: 'ok', text: t.localModelStarting });
+          try {
+            const payload = await callApi('/local-engine/start', {
+              method: 'POST',
+              body: { model: model.id },
+            });
+            if (payload?.ok !== true || !payload?.endpoint) {
+              setNotice({ kind: 'err', text: `${t.localModelStartFailed}: ${payload?.error ?? ''}` });
+              return;
+            }
+            fill(payload.endpoint.baseUrl, payload.endpoint.model || model.model);
+            setNotice({ kind: 'ok', text: t.localModelStarted });
+          } catch (error) {
+            setNotice({ kind: 'err', text: `${t.localModelStartFailed}: ${String(error?.message ?? error)}` });
+          } finally {
+            setLocalModelBusy('');
+          }
+          return;
+        }
+        if (model.configured !== true) {
+          setNotice({ kind: 'err', text: model.error || t.localModelUnconfigured });
+          return;
+        }
+        fill(model.baseUrl, model.model);
         setNotice({ kind: 'ok', text: t.localModelApplied });
       };
       /** Persist device-local Git sync settings; network stays idle until enabled. */
@@ -1551,6 +1767,55 @@ window.__ModuleLoader__.load({
         { id: 'decisions', label: t.tabDecisions, count: counts.decisions },
         { id: 'contexts', label: t.tabContexts, count: counts.contexts },
       ];
+
+      const settingsSections = [
+        { id: 'general', label: t.settingsGeneral },
+        { id: 'models', label: t.settingsModels },
+        { id: 'network', label: t.settingsNetwork },
+        { id: 'conversation', label: t.settingsConversation },
+      ];
+      const activeLayer = tabs.find((item) => item.id === tab) ?? tabs[0];
+      const isOverview = view === 'overview';
+      const isSettings = view === 'settings';
+      const goOverview = () => setView('overview');
+      const goLayer = (id) => {
+        setTab(id);
+        setView('layer');
+        setOpenRows(new Set());
+        setListLimit(8);
+      };
+      const goSettings = (section) => {
+        setSettingsSection(section || settingsSection);
+        setView('settings');
+      };
+      const navIcon = (id) => {
+        const glyphs = {
+          overview: '▦', staging: '≡', archive: '▤', snapshots: '◫',
+          knowledge: '◇', decisions: '⌘', contexts: '▧', settings: '⚙',
+        };
+        return h('span', {
+          key: 'icon',
+          'aria-hidden': true,
+          style: { width: '16px', textAlign: 'center', color: 'inherit', opacity: 0.9, fontSize: '13px' },
+        }, glyphs[id] ?? '•');
+      };
+      const navItem = (item, active, onClick) => h('button', {
+        key: item.id,
+        type: 'button',
+        className: active ? 'aim-nav-item aim-nav-item-on' : 'aim-nav-item',
+        style: {
+          ...styles.navItem,
+          borderColor: active ? 'rgba(77,107,254,.55)' : 'transparent',
+          ...(active ? styles.navItemOn : {}),
+        },
+        onClick: (event) => {
+          event.currentTarget.blur();
+          onClick();
+        },
+      },
+      navIcon(item.id),
+      h('span', null, item.label),
+      item.count === undefined ? null : h('span', { style: styles.navBadge }, String(item.count ?? 0)));
 
       const knowledge = (data?.knowledge ?? []).filter((doc) => {
         if (query.trim() === '') return true;
@@ -1893,12 +2158,112 @@ window.__ModuleLoader__.load({
             rows.length > listLimit ? moreRow('more-contexts', rows.length) : null);
       }
 
-      return h('div', { className: 'aim-page', style: styles.page },
+      const healthRows = [
+        [t.overviewRoot, selectedRoot || '—'],
+        [t.overviewBackend, data?.knowledgeBackend === 'sqlite' ? 'SQLite' : 'JSON'],
+        [t.overviewRag, formRagMount
+          ? (ragIndex?.built ? `${t.overviewOn} · ${ragIndex.docs} 篇` : t.overviewOn)
+          : t.overviewOff],
+        [t.overviewNetwork, formNetworkEnabled ? t.overviewOn : t.overviewOff],
+        [t.overviewClear, t.overviewClearValue.replace('{n}', String(data?.contextUsagePercent ?? 70))],
+      ];
+      const recentStaging = (data?.staging ?? []).slice(0, 5);
+      const overview = h('div', { className: 'aim-fade-up', style: { display: 'flex', flexDirection: 'column', gap: '14px' } },
+        h('div', { style: styles.hero },
+          h(PanelIcon, { size: 30 }),
+          h('div', { style: { minWidth: 0, flex: '1 1 360px' } },
+            h('h3', { style: styles.heroTitle }, activeRow ? (conversationName(activeRow) || t.overviewSession) : t.overviewSessionEmpty),
+            h('p', { style: styles.heroSub }, `${t.overviewRoot}：${selectedRoot || '—'}`)),
+          h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+            h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: copyPath }, t.copy),
+            h('button', { type: 'button', className: 'aim-btn', style: styles.button, disabled: busy, onClick: reveal }, t.reveal),
+            h('button', { type: 'button', className: 'aim-btn', style: styles.primary, onClick: () => goSettings() }, t.openSettings))),
+        h('div', { className: 'aim-overview-grid', style: styles.overviewGrid },
+          h('section', { style: styles.card },
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+              h('h3', { style: styles.cardTitle }, t.overviewCards),
+              h('span', { style: styles.hint }, t.navLayersHint)),
+            h('div', { style: styles.tiles }, tabs.map((item) => h('button', {
+              key: item.id,
+              type: 'button',
+              className: 'aim-stat-card',
+              style: { ...styles.tile, textAlign: 'left', cursor: 'pointer', font: 'inherit', color: 'inherit' },
+              onClick: () => goLayer(item.id),
+            },
+            h('span', { style: styles.tileLabel }, item.label),
+            h('span', { style: styles.tileValue }, String(item.count ?? 0)))))),
+          h('section', { style: styles.card },
+            h('h3', { style: styles.cardTitle }, t.overviewHealth),
+            h('div', { style: { display: 'flex', flexDirection: 'column', gap: '7px' } },
+              healthRows.map(([label, value]) => h('div', {
+                key: label,
+                style: { display: 'flex', gap: '10px', alignItems: 'flex-start', fontSize: '12px' },
+              },
+              h('span', { style: { color: colors.secondary, flex: '0 0 92px' } }, label),
+              h('span', { style: { ...styles.mono, overflowWrap: 'anywhere', flex: 1 } }, String(value))))))),
+        h('div', { className: 'aim-overview-grid', style: styles.overviewGrid },
+          h('section', { style: styles.card },
+            h('div', { style: { display: 'flex', alignItems: 'center' } },
+              h('h3', { style: styles.cardTitle }, t.overviewRecent),
+              h('button', { type: 'button', className: 'aim-btn', style: { ...styles.button, marginLeft: 'auto', padding: '2px 9px', fontSize: '11.5px' }, onClick: () => goLayer('staging') }, t.viewAll)),
+            recentStaging.length === 0
+              ? h(Empty, { text: t.overviewNoRecent })
+              : h('div', { style: styles.list }, recentStaging.map((row) => h('div', {
+                key: row.dedup_id,
+                style: { ...styles.row, padding: '7px 9px' },
+              },
+              h('div', { style: styles.rowHead },
+                row.kind ? h('span', { style: badgeStyle('pending') }, row.kind) : null,
+                row.category ? h('span', { style: badgeStyle('pending') }, row.category) : null,
+                h('span', { style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.timestamp))),
+              h('p', { style: styles.logPreview }, clipPreview(row.content, 150)))))),
+          h('section', { style: styles.card },
+            h('h3', { style: styles.cardTitle }, t.overviewQuick),
+            h('div', { style: { display: 'flex', flexDirection: 'column', gap: '7px' } },
+              h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => goLayer('knowledge') }, `${t.tabKnowledge} · ${counts.knowledge ?? 0}`),
+              h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => goLayer('contexts') }, `${t.tabContexts} · ${counts.contexts ?? 0}`),
+              h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => goSettings('models') }, t.settingsModels),
+              h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => goSettings('network') }, t.settingsNetwork)),
+            h('p', { style: { ...styles.hint, marginTop: '3px' } },
+              `${t.overviewGenerated}：${formatTime(data?.generatedAt)}`))));
+
+
+      return h('div', { className: 'aim-shell', style: styles.shell },
+        h('aside', { className: 'aim-sidebar', style: styles.sidebar },
+          h('div', { style: styles.brand },
+            h(PanelIcon, { size: 24 }),
+            h('div', null,
+              h('h1', { style: styles.brandTitle }, t.title),
+              h('p', { style: styles.brandSub }, t.navLayersHint))),
+          h('div', { className: 'aim-nav-group', style: styles.navGroup },
+            h('div', { className: 'aim-nav-group-title', style: styles.navGroupTitle }, t.navOverview),
+            navItem({ id: 'overview', label: t.navOverview }, isOverview, goOverview)),
+          h('div', { className: 'aim-nav-group', style: styles.navGroup },
+            h('div', { className: 'aim-nav-group-title', style: styles.navGroupTitle }, t.navLayers),
+            ...tabs.map((item) => navItem(item, view === 'layer' && tab === item.id, () => goLayer(item.id)))),
+          h('div', { className: 'aim-nav-group', style: styles.navGroup },
+            h('div', { className: 'aim-nav-group-title', style: styles.navGroupTitle }, t.navSystem),
+            navItem({ id: 'settings', label: t.navSettings }, isSettings, () => goSettings())),
+          h('div', { style: styles.sidebarFooter },
+            h('p', { style: { ...styles.hint, fontSize: '10.5px' } }, t.sidebarFooter))),
+        h('div', { className: 'aim-app-main', style: styles.appMain },
+          h('main', { className: 'aim-main', style: styles.main },
+            h('div', { className: 'aim-page', style: styles.page },
         h('div', { style: styles.header },
           h('div', null,
-            h('h2', { style: styles.title }, t.title),
-            h('p', { style: styles.subtitle }, t.subtitle)),
+            h('h2', { style: styles.title }, isSettings
+              ? t.settingsTitle
+              : (isOverview ? t.overviewTitle : (activeLayer?.label ?? t.title))),
+            h('p', { style: styles.subtitle }, isSettings
+              ? t.settingsSubtitle
+              : (isOverview ? t.overviewSubtitle : t.subtitle))),
           h('div', { style: styles.actions },
+            isSettings ? h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              onClick: goOverview,
+            }, t.settingsBack) : null,
             h('label', { style: { ...styles.label, minWidth: '190px' } },
               t.scopeLabel,
               h('select', {
@@ -2001,17 +2366,55 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => load(selectedRoot) }, t.retry))
           : null,
 
-        selectedRoot === ''
-          ? h('div', { style: styles.card }, h('p', { style: styles.hint }, t.noRoot))
-          : h('div', { style: styles.pathRow },
-            h('code', { style: styles.path }, selectedRoot),
-            h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: copyPath }, t.copy),
-            h('button', { type: 'button', className: 'aim-btn', style: styles.button, disabled: busy, onClick: reveal }, t.reveal)),
+        !isSettings && !isOverview
+          ? (selectedRoot === ''
+            ? h('div', { style: styles.card }, h('p', { style: styles.hint }, t.noRoot))
+            : h('div', { style: styles.pathRow },
+              h('code', { style: styles.path }, selectedRoot),
+              h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: copyPath }, t.copy),
+              h('button', { type: 'button', className: 'aim-btn', style: styles.button, disabled: busy, onClick: reveal }, t.reveal)))
+          : null,
 
-        h('p', { style: styles.hint }, scopeHint),
-        sharedNote !== '' ? h('p', { style: styles.hint }, sharedNote) : null,
+        !isSettings && !isOverview ? h('p', { style: styles.hint }, scopeHint) : null,
+        !isSettings && !isOverview && sharedNote !== '' ? h('p', { style: styles.hint }, sharedNote) : null,
 
-        selectedSession !== null
+        isSettings ? h('div', {
+          style: {
+            display: 'flex', gap: '4px', flexWrap: 'wrap',
+            borderBottom: `1px solid ${colors.border}`, paddingBottom: '6px',
+          },
+        }, settingsSections.map((item) => h('button', {
+          key: item.id,
+          type: 'button',
+          className: 'aim-btn',
+          style: {
+            ...styles.settingsNavItem,
+            width: 'auto',
+            borderColor: settingsSection === item.id ? 'rgba(77,107,254,.55)' : 'transparent',
+            ...(settingsSection === item.id ? styles.settingsNavItemOn : {}),
+          },
+          onClick: (event) => {
+            event.currentTarget.blur();
+            setSettingsSection(item.id);
+          },
+        }, item.label))) : null,
+
+        isSettings && (settingsSection === 'general' || settingsSection === 'models')
+          ? h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center' } },
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.primary,
+              disabled: saving,
+              onClick: saveConfig,
+            }, saving ? t.saving : t.save)) : null,
+
+        isSettings && settingsSection === 'conversation' && selectedSession === null
+          ? h('section', { style: styles.card },
+            h('h3', { style: styles.cardTitle }, t.conversationSettings),
+            h('p', { style: styles.hint }, t.overviewSessionEmpty))
+          : null,
+        isSettings && settingsSection === 'conversation' && selectedSession !== null
           ? h('section', { style: styles.card },
             h('h3', { style: styles.cardTitle }, t.conversationSettings),
             h('p', { style: styles.hint }, t.conversationHint),
@@ -2060,50 +2463,53 @@ window.__ModuleLoader__.load({
               }, sessionSaving ? t.saving : t.saveConversation)))
           : null,
 
-        h('div', { style: styles.tiles },
-          h(Tile, { label: t.counts.staging, value: counts.staging }),
-          h(Tile, { label: t.counts.archive, value: counts.archive }),
-          h(Tile, { label: t.counts.snapshots, value: counts.snapshots }),
-          h(Tile, { label: t.counts.knowledge, value: counts.knowledge }),
-          h(Tile, { label: t.counts.decisions, value: counts.decisions }),
-          h(Tile, { label: t.counts.contexts, value: counts.contexts })),
+        view === 'layer'
+          ? h('div', { style: styles.tiles },
+            h(Tile, { label: t.counts.staging, value: counts.staging }),
+            h(Tile, { label: t.counts.archive, value: counts.archive }),
+            h(Tile, { label: t.counts.snapshots, value: counts.snapshots }),
+            h(Tile, { label: t.counts.knowledge, value: counts.knowledge }),
+            h(Tile, { label: t.counts.decisions, value: counts.decisions }),
+            h(Tile, { label: t.counts.contexts, value: counts.contexts }))
+          : null,
 
-        h('div', { className: 'aim-tabs', style: styles.tabs, role: 'tablist' }, tabs.map((item) => {
-          const active = tab === item.id;
-          return h('button', {
-            key: item.id,
-            type: 'button',
-            role: 'tab',
-            'aria-selected': active,
-            title: (t.tabHints && t.tabHints[item.id]) || '',
-            style: { ...styles.tabBar, ...(active ? styles.tabBarOn : {}) },
-            onClick: () => setTab(item.id),
-          },
-          item.label,
-          h('span', { style: styles.tabCount }, String(item.count ?? 0)),
-          // The indicator exists only for the selected tab, so switching can
-          // never leave the previous tab's underline behind.
-          active ? h('span', { 'aria-hidden': 'true', className: 'aim-indicator', style: styles.tabBarIndicator }) : null);
-        })),
+        isOverview ? overview : null,
 
-        h('p', { style: styles.hint }, (t.tabHints && t.tabHints[tab]) || ''),
+        view === 'layer'
+          ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+            h('div', { className: 'aim-tabs', style: styles.tabs, role: 'tablist' }, tabs.map((item) => {
+              const active = tab === item.id;
+              return h('button', {
+                key: item.id,
+                type: 'button',
+                role: 'tab',
+                'aria-selected': active,
+                title: (t.tabHints && t.tabHints[item.id]) || '',
+                style: { ...styles.tabBar, ...(active ? styles.tabBarOn : {}) },
+                onClick: () => setTab(item.id),
+              },
+              item.label,
+              h('span', { style: styles.tabCount }, String(item.count ?? 0)),
+              active ? h('span', { 'aria-hidden': 'true', className: 'aim-indicator', style: styles.tabBarIndicator }) : null);
+            })),
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
+              h('p', { style: { ...styles.hint, flex: 1 } }, (t.tabHints && t.tabHints[tab]) || ''),
+              h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => openAll(tabKeys) }, t.expandAll),
+              h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: collapseAll }, t.collapseAll),
+              h('span', { style: styles.hint }, `${t.listShown}：${Math.min(listLimit, tabKeys.length)}/${tabKeys.length}`),
+              tabKeys.length > listLimit
+                ? h('button', {
+                  type: 'button',
+                  className: 'aim-btn',
+                  style: styles.button,
+                  onClick: () => setListLimit((value) => value + 8),
+                }, t.showMore)
+                : null),
+            h('div', { key: tab, className: 'aim-content', style: styles.card }, content))
+          : null,
 
-        h('div', { style: styles.logBar },
-          h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => openAll(tabKeys) }, t.expandAll),
-          h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: collapseAll }, t.collapseAll),
-          h('span', { style: styles.hint }, `${t.listShown}：${Math.min(listLimit, tabKeys.length)}/${tabKeys.length}`),
-          tabKeys.length > listLimit
-            ? h('button', {
-              type: 'button',
-              className: 'aim-btn',
-              style: styles.button,
-              onClick: () => setListLimit((value) => value + 8),
-            }, t.showMore)
-            : null),
-
-        h('div', { key: tab, className: 'aim-content', style: styles.card }, content),
-
-        h('section', { style: styles.card },
+        isSettings && settingsSection === 'models'
+          ? h('section', { style: styles.card },
           h('h3', { style: styles.cardTitle }, t.externalTitle),
           h('p', { style: styles.hint }, t.externalHint),
           h('div', {
@@ -2132,14 +2538,21 @@ window.__ModuleLoader__.load({
               },
               h('span', { style: { fontSize: '12.5px' } }, model.label),
               h('span', { style: styles.hint },
-                model.configured ? t.localModelReady : (model.error || t.localModelUnconfigured)),
-              model.configured && ['Embedding', 'Rerank'].includes(category.name)
+                model.runnable
+                  ? ((data?.localEngines ?? []).find((engine) => engine.id === model.id)?.ready
+                    ? `${t.localModelEngineRunning}：${(data?.localEngines ?? []).find((engine) => engine.id === model.id)?.baseUrl ?? ''}`
+                    : t.localModelGguf)
+                  : (model.configured ? t.localModelReady : (model.error || t.localModelUnconfigured))),
+              (model.runnable || model.configured) && ['Embedding', 'Rerank'].includes(category.name)
                 ? h('button', {
                   type: 'button',
                   className: 'aim-btn',
                   style: { ...styles.button, padding: '2px 8px', fontSize: '11.5px' },
+                  disabled: localModelBusy === model.id,
                   onClick: () => applyLocalModel(category.name, model),
-                }, t.localModelUse)
+                }, localModelBusy === model.id
+                  ? t.localModelStarting
+                  : (model.runnable ? t.localModelStart : t.localModelUse))
                 : null)))),
           h('p', { style: styles.hint }, t.localModelFuture))),
           h('div', { style: styles.grid2 },
@@ -2321,9 +2734,10 @@ window.__ModuleLoader__.load({
           h('p', { style: styles.hint }, t.modeHint),
           h('p', { style: styles.hint }, (formArchiveExternal || formKnowledgeExternal || formContextExternal)
             ? t.modeNeedsServer
-            : t.modeLocalHint)),
+            : t.modeLocalHint)) : null,
 
-        h('section', { style: styles.card },
+        isSettings && settingsSection === 'network'
+          ? h('section', { style: styles.card },
           h('h3', { style: styles.cardTitle }, t.networkTitle),
           h('p', { style: styles.hint }, t.networkHint),
           h('div', { style: styles.modeRow },
@@ -2440,9 +2854,10 @@ window.__ModuleLoader__.load({
                 : `${t.networkStatus}: ${networkStatus.initialized ? (networkStatus.branch || 'git') : t.networkNoRepo}`
                   + (networkStatus.dirty > 0 ? `｜${t.networkDirty.replace('{n}', String(networkStatus.dirty))}` : `｜${t.networkClean}`)
                   + (networkStatus.lastCommit ? `｜${networkStatus.lastCommit.hash} ${networkStatus.lastCommit.subject}` : ''))
-            : null),
+            : null) : null,
 
-        h('section', { style: styles.card },
+        isSettings && settingsSection === 'general'
+          ? h('section', { style: styles.card },
           h('h3', { style: styles.cardTitle }, t.storageSettings),
           h('div', { style: styles.modeRow },
             h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.autoMode),
@@ -2691,7 +3106,10 @@ window.__ModuleLoader__.load({
               style: styles.primary,
               disabled: saving,
               onClick: saveConfig,
-            }, saving ? t.saving : t.save))));
+            }, saving ? t.saving : t.save))) : null)
+          )
+        )
+      );
     }
 
     return {

@@ -1,13 +1,24 @@
 # Rerank 模型
 
-把一个本地 rerank 模型文件夹放在这里，并在文件夹内放 `model.json`：
+放一个本地 rerank 模型文件夹在这里。推荐 BGE Reranker v2 m3 的 GGUF：
+
+```text
+Rerank/bge-reranker-v2-m3/
+├── model.json
+└── bge-reranker-v2-m3-Q8_0.gguf
+```
+
+`model.json`：
 
 ```json
 {
-  "name": "bge-reranker（本地）",
-  "baseUrl": "http://127.0.0.1:8080",
-  "model": "bge-reranker"
+  "name": "BGE Reranker v2 m3（GGUF）",
+  "engine": "llama.cpp",
+  "model": "bge-reranker-v2-m3",
+  "modelPath": "bge-reranker-v2-m3-Q8_0.gguf"
 }
 ```
 
-插件不会在这里运行推理；`baseUrl` 应指向已经启动并支持 rerank 接口的 OpenAI 兼容服务。
+插件启动时使用 `llama-server --reranking`。没有 GGUF 时，也可以填写已经支持 `/v1/rerank` 的本地服务地址。
+
+插件不下载权重。

@@ -1,0 +1,81 @@
+# 模型与本地推理引擎
+
+> 返回 [主 README](../README.md)。
+
+## 外部模型设置
+
+- 常用服务预设；
+- 主服务、Embedding、Rerank 三组地址和 Key；
+- 超时时间；
+- 归档 / 知识库提炼 / 上下文清理三个“本地规则 | 外部模型”开关；
+- 「测试连接」会先保存当前表单，再请求服务探测能力。
+
+## 本地模型文件夹
+
+插件目录下有一个 `models/` 文件夹，供你手动放置本地模型和 GGUF 权重（插件不下载权重）：
+
+```text
+models/
+├── Embedding/
+│   └── bge-m3/
+│       ├── model.json
+│       └── bge-m3-Q8_0.gguf
+├── Rerank/
+│   └── bge-reranker-v2-m3/
+│       ├── model.json
+│       └── bge-reranker-v2-m3-Q8_0.gguf
+├── Routing/
+│   └── my-router/
+│       └── model.json
+└── 未来能力/
+    └── 某个模型/
+        └── model.json
+```
+
+直接连接已经启动的本地服务：
+
+```json
+{
+  "name": "bge-m3（本地服务）",
+  "baseUrl": "http://127.0.0.1:8080",
+  "model": "bge-m3"
+}
+```
+
+交给插件启动本地 llama.cpp 引擎：
+
+```json
+{
+  "name": "BGE-M3（GGUF）",
+  "engine": "llama.cpp",
+  "model": "bge-m3",
+  "pooling": "cls",
+  "modelPath": "bge-m3-Q8_0.gguf"
+}
+```
+
+Rerank 示例：
+
+```json
+{
+  "name": "BGE Reranker v2 m3（GGUF）",
+  "engine": "llama.cpp",
+  "model": "bge-reranker-v2-m3",
+  "modelPath": "bge-reranker-v2-m3-Q8_0.gguf"
+}
+```
+
+- `Embedding` 和 `Rerank` 是插件当前使用的两类；
+- `engine` 目前支持 `llama.cpp`；有 `.gguf` 时默认即为它；
+- `binary` 可指定 `llama-server`，省略时用 `DSH_LLAMA_SERVER` / `LLAMA_SERVER` 环境变量，再退回 PATH；
+- `modelPath` 相对于模型文件夹；省略时自动找文件夹里的 `.gguf`；
+- `pooling` 用于 Embedding，BGE-M3 建议 `cls`；`ctxSize` 默认 8192；`port` 省略时自动选空闲端口；
+- 面板里点「启动引擎并填入」会启动 `llama-server`，再填入地址和模型名，仍需点「保存设置」；
+- `Routing` 是给后续模型路由预留的分类，目前只显示、不参与调用；
+- 没有 `model.json` 的文件夹也会显示，但标记为“未配置 API”。
+
+**重要：插件不在 Node 进程里做张量推理，也不下载权重。** 本地引擎管理的是 `llama-server` 子进程：Embedding 用 `--embeddings --pooling cls`，Rerank 用 `--reranking`；插件再通过已有的 OpenAI 兼容客户端调用它。请把 GGUF 放在模型文件夹里，不要把大型权重提交到仓库。
+
+## 关于 llama.cpp
+
+本地推理引擎建立在 [llama.cpp](https://github.com/ggml-org/llama.cpp) 的 `llama-server` 之上。感谢 ggml-org 以及所有 llama.cpp 贡献者：他们让普通机器上的本地 Embedding 和 Rerank 成为可能，也让这个插件可以坚持“不下载模型、不依赖云服务”的选择。

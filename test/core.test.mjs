@@ -37,6 +37,7 @@ import { RRF_K, reciprocalRankFusion, search, tokenize } from '../lib/retrieval.
 import { CATEGORIES, hourKey, listJsonlFiles } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels } from '../lib/model-catalog.js';
+import { buildServerArgs, findModelFile, resolveModel } from '../lib/local-engine.js';
 import {
   commitSync, initSync, pullSync, pushSync, readSyncConfig, syncStatus, writeSyncConfig,
 } from '../lib/git-sync.js';
@@ -53,6 +54,7 @@ import {
   KNOWLEDGE_CATEGORIES, knowledgeKey, normalizeCategory, normalizeSource, stripInjectedText, withTokens,
 } from '../lib/knowledge.js';
 import { listRootRows, readRoots, rememberRoot, resolveRegisteredRoot } from '../lib/registry.js';
+import { isTrustedRequest } from '../lib/api.js';
 import { apply, compileParameterSchema, Config, createTools, installContextManagement, memoryContext, normalizeConfig, searchWithRag, workspaceOf } from '../index.js';
 
 function tempRoot() {
@@ -2337,6 +2339,45 @@ test('promote ledger never evicts old refs just to stay under a cap', () => {
   }
 });
 
+test('local engine resolves GGUF files and builds llama.cpp arguments', () => {
+  const root = tempRoot();
+  try {
+    const models = path.join(root, 'models');
+    const embedDir = path.join(models, 'Embedding', 'bge-m3');
+    const rerankDir = path.join(models, 'Rerank', 'bge-reranker-v2-m3');
+    fs.mkdirSync(embedDir, { recursive: true });
+    fs.mkdirSync(rerankDir, { recursive: true });
+    fs.writeFileSync(path.join(embedDir, 'bge-m3-Q8_0.gguf'), '');
+    fs.writeFileSync(path.join(rerankDir, 'bge-reranker.gguf'), '');
+    fs.writeFileSync(path.join(embedDir, 'model.json'), JSON.stringify({
+      name: 'BGE-M3', model: 'bge-m3', pooling: 'cls',
+    }));
+    fs.writeFileSync(path.join(rerankDir, 'model.json'), JSON.stringify({
+      name: 'BGE Reranker v2 m3', model: 'bge-reranker-v2-m3',
+    }));
+
+    assert.equal(path.basename(findModelFile(embedDir)), 'bge-m3-Q8_0.gguf');
+    const embedding = resolveModel({ modelsRoot: models, modelId: 'Embedding/bge-m3' });
+    assert.equal(embedding.ok, true);
+    assert.equal(embedding.model.kind, 'embedding');
+    assert.equal(embedding.model.model, 'bge-m3');
+    const embedArgs = buildServerArgs(embedding.model, 19001);
+    assert.ok(embedArgs.includes('--embeddings'));
+    assert.deepEqual(embedArgs.slice(embedArgs.indexOf('--pooling'), embedArgs.indexOf('--pooling') + 2), ['--pooling', 'cls']);
+    assert.ok(embedArgs.includes('--port'));
+
+    const rerank = resolveModel({ modelsRoot: models, modelId: 'Rerank/bge-reranker-v2-m3' });
+    assert.equal(rerank.ok, true);
+    assert.equal(rerank.model.kind, 'rerank');
+    assert.ok(buildServerArgs(rerank.model, 19002).includes('--reranking'));
+
+    const missing = resolveModel({ modelsRoot: models, modelId: 'Embedding/missing' });
+    assert.equal(missing.ok, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a fact that disagrees with stored knowledge waits for the user', () => {
   const root = tempRoot();
   try {
@@ -4001,4 +4042,43 @@ test('RAG build dedupes near-identical documents by embedding', async () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('panel API rejects DNS-rebinding hosts and cross-site origins', () => {
+  const socket = { remoteAddress: '127.0.0.1', localPort: 56296 };
+  const request = (headers, extra = {}) => ({
+    socket: { ...socket, ...(extra.socket ?? {}) },
+    headers,
+  });
+
+  // Same loopback origin in its usual spellings.
+  assert.equal(isTrustedRequest(request({ host: '127.0.0.1:56296' })), true);
+  assert.equal(isTrustedRequest(request({ host: 'localhost:56296' })), true);
+  assert.equal(isTrustedRequest(request({ host: '[::1]:56296' })), true);
+  assert.equal(isTrustedRequest(request({
+    host: '127.0.0.1:56296', origin: 'http://127.0.0.1:56296',
+  })), true);
+
+  // A rebound domain still carries its own Host; the old host===origin check
+  // accepted it, the Host allowlist must not.
+  assert.equal(isTrustedRequest(request({
+    host: 'evil.example:56296', origin: 'http://evil.example:56296',
+  })), false);
+  assert.equal(isTrustedRequest(request({
+    host: '127.0.0.1:56296', origin: 'http://evil.example',
+  })), false);
+  assert.equal(isTrustedRequest(request({
+    host: '127.0.0.1:56296', origin: 'null',
+  })), false);
+  assert.equal(isTrustedRequest(request({
+    host: '127.0.0.1:56296', 'sec-fetch-site': 'cross-site',
+  })), false);
+  assert.equal(isTrustedRequest(request({ host: '127.0.0.1:9999' })), false);
+  assert.equal(isTrustedRequest({
+    socket: { remoteAddress: '10.0.0.5', localPort: 56296 },
+    headers: { host: '127.0.0.1:56296' },
+  }), false);
+
+  // The desktop custom scheme is not reachable from a web page.
+  assert.equal(isTrustedRequest(request({ host: 'dsh-app', origin: 'dsh-app://dsh' })), true);
 });
