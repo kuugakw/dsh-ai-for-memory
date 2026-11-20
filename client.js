@@ -45,6 +45,12 @@ window.__ModuleLoader__.load({
         overviewOff: '未开启',
         overviewClear: '上下文清理',
         overviewClearValue: '阈值 {n}%',
+        overviewLocalPill: '本地记忆 · 默认不联网',
+        overviewSearchPlaceholder: '检索知识库：输入一句话，自动选择 BM25 / SQL / RAG…',
+        overviewSearch: '检索',
+        overviewContextBehavior: '上下文与自动行为',
+        overviewContextBehaviorText: '上下文达到 {n}% 时全量清出已完成轮次；下一次请求前回载当前任务，轮末没有下一次请求则直接清空。最近 {k} 轮始终保留。',
+        overviewContextUsage: '上下文占用',
         settingsTitle: '设置',
         settingsSubtitle: '插件内部设置；保存后自动重载，不需要打开 DSH 设置页。',
         settingsGeneral: '常规与上下文',
@@ -160,6 +166,7 @@ window.__ModuleLoader__.load({
         networkDirty: '有 {n} 个未提交变化',
         networkNoRepo: '尚未初始化 Git 仓库',
         networkSaved: '同步设置已保存',
+        networkBusy: '同步中…',
         networkDone: '操作完成',
         networkFailed: '同步操作失败',
         networkConflict: '拉取/上传被拒绝：主机已有新提交或本地已分叉。不会自动合并，请手动处理后再试。',
@@ -335,6 +342,12 @@ window.__ModuleLoader__.load({
         overviewOff: 'Off',
         overviewClear: 'Context cleanup',
         overviewClearValue: 'Threshold {n}%',
+        overviewLocalPill: 'Local memory · offline by default',
+        overviewSearchPlaceholder: 'Search knowledge: ask a question; BM25 / SQL / RAG is chosen automatically…',
+        overviewSearch: 'Search',
+        overviewContextBehavior: 'Context and automatic behavior',
+        overviewContextBehaviorText: 'At {n}% usage, completed turns are fully cleared and the active task is reloaded before the next request; if the turn ends with no next request, the window is cleared. The latest {k} turns stay protected.',
+        overviewContextUsage: 'Context usage',
         settingsTitle: 'Settings',
         settingsSubtitle: 'Plugin-local settings. Saving reloads the plugin automatically; no DSH settings page needed.',
         settingsGeneral: 'General & context',
@@ -450,6 +463,7 @@ window.__ModuleLoader__.load({
         networkDirty: '{n} uncommitted change(s)',
         networkNoRepo: 'Git repository not initialized',
         networkSaved: 'Sync settings saved',
+        networkBusy: 'Syncing…',
         networkDone: 'Done',
         networkFailed: 'Sync failed',
         networkConflict: 'Push/pull rejected: the host has newer commits or histories diverged. Nothing was auto-merged; resolve manually and retry.',
@@ -765,11 +779,12 @@ window.__ModuleLoader__.load({
       shell: {
         display: 'flex', height: '100%', minHeight: 0, width: '100%',
         background: colors.bg2, color: colors.label, overflow: 'hidden',
+        border: `1px solid ${colors.border}`, borderRadius: '16px',
       },
       sidebar: {
-        width: '220px', flex: '0 0 220px', minHeight: 0, overflowY: 'auto',
-        display: 'flex', flexDirection: 'column', gap: '18px',
-        padding: '18px 12px 14px', borderRight: `1px solid ${colors.border}`,
+        width: '210px', flex: '0 0 210px', minHeight: 0, overflowY: 'auto',
+        display: 'flex', flexDirection: 'column', gap: '16px',
+        padding: '18px 10px 14px', borderRight: `1px solid ${colors.border}`,
         background: colors.bg, boxSizing: 'border-box',
       },
       brand: { display: 'flex', alignItems: 'center', gap: '9px', padding: '0 6px 14px' },
@@ -819,6 +834,17 @@ window.__ModuleLoader__.load({
       },
       heroTitle: { fontSize: '20px', fontWeight: 700, margin: 0, lineHeight: 1.25 },
       heroSub: { margin: '3px 0 0', color: colors.secondary, fontSize: '12.5px' },
+      overviewToolbar: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' },
+      overviewPill: {
+        display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '3px 9px',
+        border: `1px solid ${colors.border}`, borderRadius: '999px',
+        color: colors.secondary, background: colors.bg, fontSize: '11.5px', whiteSpace: 'nowrap',
+      },
+      overviewSearch: { flex: '1 1 300px', minWidth: '220px' },
+      overviewNote: {
+        border: `1px solid ${colors.border}`, borderRadius: '10px', background: colors.bg,
+        padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '4px',
+      },
       overviewGrid: { display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(260px, .8fr)', gap: '14px' },
       settingsShell: { display: 'flex', gap: '18px', alignItems: 'flex-start' },
       settingsNav: {
@@ -875,13 +901,13 @@ window.__ModuleLoader__.load({
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
         fontSize: '12px', color: colors.secondary,
       },
-      tiles: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '8px' },
+      tiles: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: '10px' },
       tile: {
-        border: `1px solid ${colors.border}`, borderRadius: '10px', background: colors.bg,
-        padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '2px',
+        border: `1px solid ${colors.border}`, borderRadius: '12px', background: colors.bg,
+        padding: '14px 15px', display: 'flex', flexDirection: 'column', gap: '4px',
       },
-      tileLabel: { fontSize: '11.5px', color: colors.secondary },
-      tileValue: { fontSize: '20px', fontWeight: 650, fontVariantNumeric: 'tabular-nums' },
+      tileLabel: { fontSize: '12px', color: colors.secondary },
+      tileValue: { fontSize: '26px', fontWeight: 700, fontVariantNumeric: 'tabular-nums' },
       tabs: { display: 'flex', gap: '4px', flexWrap: 'wrap', borderBottom: `1px solid ${colors.border}` },
       modeRow: {
         display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center',
@@ -1120,6 +1146,9 @@ window.__ModuleLoader__.load({
       const [view, setView] = React.useState('overview');
       const [settingsSection, setSettingsSection] = React.useState('general');
       const [query, setQuery] = React.useState('');
+      // Overview search is a shortcut into the knowledge layer, not a second
+      // independent filter: pressing Enter opens the same filtered list.
+      const [overviewQuery, setOverviewQuery] = React.useState('');
       // Log lists collapse: `openRows` holds the row keys the user opened and
       // `listLimit` how many rows each list shows before "show more".
       const [openRows, setOpenRows] = React.useState(() => new Set());
@@ -1828,6 +1857,11 @@ window.__ModuleLoader__.load({
         setSettingsSection(section || settingsSection);
         setView('settings');
       };
+      const searchFromOverview = () => {
+        const next = overviewQuery.trim();
+        if (next !== '') setQuery(next);
+        goLayer('knowledge');
+      };
       const navIcon = (id) => {
         const glyphs = {
           overview: '▦', staging: '≡', archive: '▤', snapshots: '◫',
@@ -2202,13 +2236,34 @@ window.__ModuleLoader__.load({
         [t.overviewRoot, selectedRoot || '—'],
         [t.overviewBackend, data?.knowledgeBackend === 'sqlite' ? 'SQLite' : 'JSON'],
         [t.overviewRag, formRagMount
-          ? (ragIndex?.built ? `${t.overviewOn} · ${ragIndex.docs} 篇` : t.overviewOn)
+          ? (ragIndex?.built
+            ? `${ragIndex.docs} 篇 · ${t.ragConsidered} ${ragIndex.considered ?? ragIndex.docs}`
+              + ` · ${t.ragDeduped} ${ragIndex.deduped ?? 0}`
+              + (Number(ragIndex.truncated) > 0 ? ` · ${t.ragTruncated} ${ragIndex.truncated}` : '')
+            : t.overviewOn)
           : t.overviewOff],
         [t.overviewNetwork, formNetworkEnabled ? t.overviewOn : t.overviewOff],
         [t.overviewClear, t.overviewClearValue.replace('{n}', String(data?.contextUsagePercent ?? 70))],
       ];
       const recentStaging = (data?.staging ?? []).slice(0, 5);
       const overview = h('div', { className: 'aim-fade-up', style: { display: 'flex', flexDirection: 'column', gap: '14px' } },
+        h('div', { style: styles.overviewToolbar },
+          h('span', { style: styles.overviewPill }, `● ${t.overviewLocalPill}`),
+          h('input', {
+            style: { ...styles.input, ...styles.overviewSearch },
+            placeholder: t.overviewSearchPlaceholder,
+            value: overviewQuery,
+            onChange: (event) => setOverviewQuery(event.target.value),
+            onKeyDown: (event) => {
+              if (event.key === 'Enter') searchFromOverview();
+            },
+          }),
+          h('button', {
+            type: 'button',
+            className: 'aim-btn',
+            style: styles.button,
+            onClick: searchFromOverview,
+          }, t.overviewSearch)),
         h('div', { style: styles.hero },
           h(PanelIcon, { size: 30 }),
           h('div', { style: { minWidth: 0, flex: '1 1 360px' } },
@@ -2223,7 +2278,15 @@ window.__ModuleLoader__.load({
             h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
               h('h3', { style: styles.cardTitle }, t.overviewCards),
               h('span', { style: styles.hint }, t.navLayersHint)),
-            h('div', { style: styles.tiles }, tabs.map((item) => h('button', {
+            h('div', { style: styles.tiles }, [
+              { id: 'staging', label: t.tabStaging, value: String(counts.staging ?? 0) },
+              { id: 'knowledge', label: t.tabKnowledge, value: String(counts.knowledge ?? 0) },
+              {
+                id: 'contexts',
+                label: t.overviewContextUsage,
+                value: `${Number(data?.contextUsagePercent ?? 70)}%`,
+              },
+            ].map((item) => h('button', {
               key: item.id,
               type: 'button',
               className: 'aim-stat-card',
@@ -2231,7 +2294,7 @@ window.__ModuleLoader__.load({
               onClick: () => goLayer(item.id),
             },
             h('span', { style: styles.tileLabel }, item.label),
-            h('span', { style: styles.tileValue }, String(item.count ?? 0)))))),
+            h('span', { style: styles.tileValue }, item.value))))),
           h('section', { style: styles.card },
             h('h3', { style: styles.cardTitle }, t.overviewHealth),
             h('div', { style: { display: 'flex', flexDirection: 'column', gap: '7px' } },
@@ -2263,9 +2326,33 @@ window.__ModuleLoader__.load({
               h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => goLayer('knowledge') }, `${t.tabKnowledge} · ${counts.knowledge ?? 0}`),
               h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => goLayer('contexts') }, `${t.tabContexts} · ${counts.contexts ?? 0}`),
               h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => goSettings('models') }, t.settingsModels),
-              h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => goSettings('network') }, t.settingsNetwork)),
+              h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => goSettings('network') }, t.settingsNetwork),
+              formRagMount && ragFormReady
+                ? h('button', {
+                  type: 'button',
+                  className: 'aim-btn',
+                  style: styles.button,
+                  disabled: ragBusy,
+                  onClick: buildRag,
+                }, ragBusy ? t.ragBuilding : t.ragBuild)
+                : null,
+              formNetworkEnabled
+                ? h('button', {
+                  type: 'button',
+                  className: 'aim-btn',
+                  style: styles.button,
+                  disabled: networkBusy,
+                  onClick: () => runNetwork('push'),
+                }, networkBusy ? t.networkBusy : t.networkUpload)
+                : null),
             h('p', { style: { ...styles.hint, marginTop: '3px' } },
-              `${t.overviewGenerated}：${formatTime(data?.generatedAt)}`))));
+              `${t.overviewGenerated}：${formatTime(data?.generatedAt)}`))),
+        h('section', { style: styles.overviewNote },
+          h('h3', { style: styles.cardTitle }, t.overviewContextBehavior),
+          h('p', { style: styles.hint },
+            t.overviewContextBehaviorText
+              .replace('{n}', String(data?.contextUsagePercent ?? 70))
+              .replace('{k}', String(data?.keepRecentTurns ?? 2)))));
 
 
       return h('div', { className: 'aim-shell', style: styles.shell },
