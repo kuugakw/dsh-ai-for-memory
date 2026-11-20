@@ -85,7 +85,7 @@ JSON 导出保留 `provenance`、`verified`、`changes`、`confidence`、`eviden
 - 最近 `keepRecentTurns` 轮始终保留；
 - 旧轮次按话题相似度选择，低相似度才清出；
 - 清理前先完整存档，`restore` 可以调回；
-- 恢复不会整份塞回去，按 `restoreMaxChars` 只取最近轮次；
+- 恢复不会整份塞回去，按 `restoreMaxChars` 从尾部取最近的轮次/事件段；
 - `clear` 登记后在下一次模型请求前执行，不会等到轮末；
 - 当轮正在进行时，本轮的上下文不会被清掉。
 

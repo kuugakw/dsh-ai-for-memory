@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "AI for Memory",
-    "description": "Layered project memory: process log, archive, snapshots, local search, risk-reviewed decisions, context compaction and restore."
+    "description": "Layered project memory for DeepSeek Harness: process log, archive, snapshots, restorable context cleanup, BM25/SQL/RAG search, risk-reviewed decisions and a Web panel.",
+    "detail": "docs/plugin.en.md"
   }
 }

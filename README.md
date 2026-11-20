@@ -1,8 +1,15 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
+[![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
 [![Status](https://img.shields.io/badge/status-stable%200.1.1-brightgreen.svg)]()
 [![Version](https://img.shields.io/badge/version-0.1.1-lightgrey.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+<p align="center">
+  <img src="docs/panel-preview.png" alt="AI for Memory 面板预览：记忆层计数、检索入口、最近过程记录和上下文自动行为" width="900">
+  <br>
+  <sub>面板界面预览（静态示意；实际布局以本机 DSH Web 面板为准）</sub>
+</p>
 
 > **0.1.1 是 0.1.0 的修复版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、五个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。
 >
@@ -159,10 +166,10 @@ aim_memory action=status
 - **每 N 轮**：自动生成轮次摘要、归档，并按相似度清理；
 - **上下文占用超过阈值**：在下一次模型请求前做硬重置，已完成轮次全部存档并清出，只回载当前请求和最近进展；如果这一轮已经结束，则在轮末直接全部清出；
 - **自动快照**：每 N 轮保存最近上下文窗口，超限时优先删除相似的旧自动快照；
-- **请求锚点**：系统检查点到达时，提醒模型继续上一轮真实请求，不重复历史回答。
+- **请求锚点**：系统检查点到达、且本步没有新的真实用户请求时，提醒模型上一轮真实请求；一旦有新请求，锚点不注入。
 - **便条与真实输入分开**：插件写入的便条仍是模型可见的 `user/message`，但 `source.kind = ai-for-memory`、`source.form = notice`，并用 `source.summary` 标注；真实用户输入的 `source.kind = user`。
 
-完整规则、保留策略和恢复预算见 [上下文与自动行为](docs/context.md)。
+完整规则、保留策略和恢复预算见 [上下文与自动行为](docs/context.md)。恢复按 `restoreMaxChars` 从尾部取最近的轮次/事件段；单个工具结果恢复时最多渲染 8 KiB，超出会标记截断，原始事件仍保留在存档里。
 
 ---
 
@@ -192,7 +199,7 @@ aim_memory action=status
 近期更新：
 
 - 上下文占用达到阈值时的**全量硬重置**与任务续接；
-- 本地 **llama.cpp 推理引擎**：自动发现 GGUF、启动 `llama-server`、支持 BGE-M3 与 BGE Reranker v2 m3；启动失败时面板显示 stderr 尾部、实际命令和针对性修复提示；启动前会把 PID/端口写入用户模型目录的 `.engine.lock`，插件重启后自动探测并接管还活着的引擎，不再重复拉起第二份；
+- 本地 **llama.cpp 推理引擎**：自动发现 GGUF、启动 `llama-server`、支持 BGE-M3 与 BGE Reranker v2 m3；启动失败时面板显示 stderr 尾部、实际命令和针对性修复提示；启动前会把 PID/端口写入用户模型目录的 `.engine.lock/<模型>.json`（一个模型一个文件，并发启动不会覆盖彼此的锁记录），插件重启后自动探测并接管还活着的引擎，不再重复拉起第二份；
 - 设置保存后**自动重载并刷新**，不需要手动重载；
 - 工作区分桶在 Windows / POSIX 上的跨平台解码修复；
 - 外部模型地址默认留空、探活超时 5 秒，未配置时不再连接本地 8080；

@@ -254,6 +254,9 @@ window.__ModuleLoader__.load({
         ragBuilt: '索引已更新，共',
         ragBuildFail: '建索引失败',
         ragIndexed: '索引：',
+        ragConsidered: '知识库',
+        ragDeduped: '语义去重',
+        ragTruncated: '超出上限未索引',
         ragStale: '嵌入模型或地址已变化，旧索引维度可能不兼容；请点「建立/更新索引」重建后再检索。',
         ragNoIndex: '尚未建立索引（先建一次）',
         storageBase: 'JSON 文件：始终启用（唯一底座，先写 JSON 供审查与修正；SQL / RAG 都从它派生）',
@@ -542,6 +545,9 @@ window.__ModuleLoader__.load({
         ragBuilt: 'Index updated:',
         ragBuildFail: 'Index build failed',
         ragIndexed: 'Index:',
+        ragConsidered: 'knowledge',
+        ragDeduped: 'semantic dedupe',
+        ragTruncated: 'over cap, not indexed',
         ragStale: 'The embedding model or endpoint changed, so the old index may use an incompatible dimension. Rebuild with "Build / update index" before searching.',
         ragNoIndex: 'No index yet (build once)',
         storageBase: 'JSON files: always on (the single base; everything is written to JSON first for review and correction, and SQL / RAG are derived from it)',
@@ -1143,7 +1149,9 @@ window.__ModuleLoader__.load({
       // RAG is mounted on the knowledge layer: the switch decides whether
       // aim_search uses the vector index; building the index is a separate click.
       const [formRagMount, setFormRagMount] = React.useState(false);
-      const [ragIndex, setRagIndex] = React.useState({ built: false, docs: 0, dim: 0, model: '', built_at: '' });
+      const [ragIndex, setRagIndex] = React.useState({
+        built: false, docs: 0, considered: 0, truncated: 0, deduped: 0, dim: 0, model: '', built_at: '',
+      });
       const [ragBusy, setRagBusy] = React.useState(false);
       // Knowledge storage backend: 'json' (files) or 'sqlite' (queryable db).
       const [formStorage, setFormStorage] = React.useState('json');
@@ -1638,7 +1646,13 @@ window.__ModuleLoader__.load({
           });
           setNetworkStatus(payload.status ?? null);
           if (payload.ok === true) {
-            setNotice({ kind: 'ok', text: `${t.networkDone}: ${action}` });
+            const stopped = payload.result?.stopped === true;
+            setNotice({
+              kind: 'ok',
+              text: stopped
+                ? String(payload.result?.message ?? '已停止同步：没有勾选任何同步层')
+                : `${t.networkDone}: ${action}`,
+            });
           } else {
             const detail = payload.result?.error ?? payload.error ?? '';
             const conflict = /fast-forward|rejected|分叉|non-fast-forward/i.test(detail);
@@ -1675,11 +1689,20 @@ window.__ModuleLoader__.load({
             setRagIndex({
               built: true,
               docs: payload.docs ?? payload.indexed ?? 0,
+              considered: payload.considered ?? payload.docs ?? payload.indexed ?? 0,
+              truncated: payload.truncated ?? 0,
+              deduped: payload.deduped ?? 0,
               dim: payload.dim ?? 0,
               model: payload.model ?? '',
               built_at: payload.built_at ?? '',
             });
-            setNotice({ kind: 'ok', text: `${t.ragBuilt}: ${payload.indexed ?? payload.docs ?? 0}` });
+            const capped = Number(payload.truncated) > 0
+              ? `；${t.ragConsidered} ${payload.considered ?? 0} 篇，${t.ragTruncated} ${payload.truncated} 篇`
+              : '';
+            setNotice({
+              kind: 'ok',
+              text: `${t.ragBuilt} ${payload.indexed ?? payload.docs ?? 0} 篇${capped}`,
+            });
             load(selectedRoot, scope);
           } else {
             setNotice({ kind: 'err', text: `${t.ragBuildFail}: ${payload?.error ?? ''}` });
@@ -3036,7 +3059,10 @@ window.__ModuleLoader__.load({
               onClick: buildRag,
             }, ragBusy ? t.ragBuilding : t.ragBuild),
             h('span', { style: styles.hint }, ragIndex?.built
-              ? `${t.ragIndexed} ${ragIndex.docs} 篇 · ${ragIndex.dim}d · ${ragIndex.model || 'local'}`
+              ? `${t.ragIndexed} ${ragIndex.docs} 篇 · ${t.ragConsidered} ${ragIndex.considered ?? ragIndex.docs} 篇 · `
+                + `${t.ragDeduped} ${ragIndex.deduped ?? 0} 篇`
+                + (Number(ragIndex.truncated) > 0 ? ` · ${t.ragTruncated} ${ragIndex.truncated} 篇` : '')
+                + ` · ${ragIndex.dim}d · ${ragIndex.model || 'local'}`
               : t.ragNoIndex)),
           ragIndex?.stale
             ? h('p', { style: { ...styles.hint, color: '#c2410c', margin: '6px 0 0' } },

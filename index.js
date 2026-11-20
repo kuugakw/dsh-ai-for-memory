@@ -50,7 +50,7 @@ import {
   summarizeTurns as summarizeTurnsExternally,
 } from './lib/external-ops.js';
 import {
-  buildRagIndex, embeddingIdentity, ragCandidates, ragModelStatus, ragStats, rerankCandidates,
+  buildRagIndex, embeddingIdentity, RAG_DEFAULTS, ragCandidates, ragModelStatus, ragStats, rerankCandidates,
 } from './lib/rag.js';
 import { writeExportArtifacts } from './lib/export.js';
 import { RRF_K, reciprocalRankFusion } from './lib/retrieval.js';
@@ -142,8 +142,9 @@ const DEFAULTS = Object.freeze({
   contextRetentionDays: 0,
   decisionRetentionDays: 0,
   // When a harness checkpoint (time/schema/reload notice) arrives without a
-  // new user request, append a short anchor so the model does not answer an
-  // older topic. Off only for token-strict setups.
+  // new user request in this same step, append a short anchor so the model does
+  // not answer an older topic. A real incoming request always wins. Off only
+  // for token-strict setups.
   requestAnchor: true,
 });
 
@@ -1621,6 +1622,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             ? '已按当前嵌入配置全量重建（旧索引可能来自其他地址/模型，与当前维度不兼容）。\n'
             : '';
           return `${switchNote}RAG 索引已更新（${source.label}）：${built.indexed} 篇知识文档，本次嵌入 ${built.embedded} 篇`
+            + `；知识库共 ${built.considered} 篇`
+            + (built.truncated > 0 ? `，其中 ${built.truncated} 篇超过 maxDocs=${built.maxDocs ?? RAG_DEFAULTS.maxDocs} 上限未参与索引` : '')
             + `，语义去冗余 ${built.deduped} 篇（同分类且相似度 ≥0.95 的旧重复），清理 ${built.removed} 条失效向量，`
             + `维度 ${built.dim}（模型 ${built.model}），分片 ${built.shards} 个（只在内容变化时重写对应分片）。\n${mount}。`;
         }
@@ -1652,7 +1655,9 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
               || (rag.endpoint !== '' && rag.endpoint !== currentEmbedding.endpoint));
           const ragLine = `RAG：${config.ragMount ? '已挂载到知识库检索' : '未挂载（面板可切换）'}｜`
             + (rag.built
-              ? `索引 ${rag.docs} 篇，维度 ${rag.dim}，${rag.built_at}`
+              ? `索引 ${rag.docs} 篇（知识库 ${rag.considered} 篇`
+                + `${rag.truncated > 0 ? `，超出上限 ${rag.truncated} 篇未索引` : ''}`
+                + `；语义去重 ${rag.deduped} 篇），维度 ${rag.dim}，${rag.built_at}`
               : '索引未建立（aim_memory action=index）')
             + (ragStale ? '｜索引来自其他嵌入模型/地址，检索会回退本地，请重建' : '');
           const storage = store.knowledgeBackendInfo();
@@ -1952,7 +1957,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
       name: 'aim_context',
       description:
         '上下文管理：save=把当前已完成对话整理进存储；clear=按话题相似度清理会话上下文（默认在下一次模型请求前执行，不等到轮末）；'
-        + 'restore=把保存的上下文重新注入当前会话（不整份注入：按 restoreMaxChars 预算只取最近轮次）；'
+        + 'restore=把保存的上下文重新注入当前会话（不整份注入：按 restoreMaxChars 预算从尾部取最近的轮次或事件段）；'
         + 'list=列出存档；status=查看清理策略与存档状态；'
         + 'sessions=列出所有对话及其记忆规模。'
         + '手动 clear 按话题相似度：相似度低的老轮次先完整存档再清出，相似度高的保留，随时可用 restore 调回。'
@@ -2124,7 +2129,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
               : '话题相似度（手动/每 N 轮）；上下文占用达到阈值时全量清出并回载任务续接'}`,
             `相似度设置：阈值 ${config.similarityThreshold}，保留最近 ${config.keepRecentTurns} 轮，`
               + `单次最多 ${config.maxClearTurns} 轮（${config.minClearChars}~${config.maxClearChars} 字符）`,
-            `恢复预算：单次 restore 最多注入 ${config.restoreMaxChars ?? 12000} 字符，只取最近轮次`,
+            `恢复预算：单次 restore 最多注入 ${config.restoreMaxChars ?? 12000} 字符，从尾部取最近的轮次/事件段`,
             `自动整理：${config.autoEnabled ? `开启（每 ${config.autoEveryRounds} 轮按相似度；上下文占用到 ${config.contextUsagePercent}% 时全量重置）` : '关闭'}`,
             ...(context.gitignore?.warning ? [`⚠ ${context.gitignore.warning}`] : []),            `保留策略：staging ${config.stagingRetentionDays ?? 30} 天（仅已归档文件）；`
               + `contexts ${config.contextRetentionDays > 0 ? `${config.contextRetentionDays} 天` : '不自动删除'}；`
@@ -2376,6 +2381,12 @@ export function installContextManagement(ctx, config, deps, runtime) {
     return content.filter((item) => item && item.type === 'text').map((item) => item.text ?? '').join('\n').trim();
   };
 
+  const textOfUserMessage = (message) => {
+    const content = message?.content;
+    if (!Array.isArray(content)) return '';
+    return content.filter((item) => item && item.type === 'text').map((item) => item.text ?? '').join('\n').trim();
+  };
+
   /**
    * When a harness checkpoint/schema notice arrives as the newest "user"
    * message, keep the last real request in view with one short developer note.
@@ -2392,6 +2403,18 @@ export function installContextManagement(ctx, config, deps, runtime) {
       const stripped = value.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, ' ').trim();
       return HARNESS_USER_RE.test(stripped);
     };
+    // `payload.messages` is exactly what will enter this step. If it already
+    // contains a real user request, never inject a stale anchor: a checkpoint
+    // and the next request can arrive together, and the anchor used to run
+    // before the request was visible in `ownEvents`.
+    const incoming = Array.isArray(payload?.messages) ? payload.messages : [];
+    const hasIncomingRequest = incoming.some((message) => {
+      if (message?.role !== 'user') return false;
+      if (message?.source?.kind === 'ai-for-memory') return false;
+      const text = textOfUserMessage(message);
+      return text !== '' && !isHarnessText(text);
+    });
+    if (hasIncomingRequest) return;
     let latestUser = null;
     let realRequest = null;
     for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -2426,8 +2449,9 @@ export function installContextManagement(ctx, config, deps, runtime) {
         },
         content: [{
           type: 'text',
-          text: `【当前请求锚点】上一轮真实用户请求：${anchor}\n`
-            + '这是内部提醒：系统时间、工具 schema 更新、插件重载不是新请求；只处理上面这个请求，不要重复历史回答。',
+          text: `【上一轮请求参考】最后一条真实用户请求：${anchor}\n`
+            + '这是内部提醒，不是新请求。如果本次已经有更新的用户输入，以新输入为准；'
+            + '系统时间、工具 schema 更新、插件重载都不是新任务。',
         }],
       }, { surfaceOp: 'append' });
       anchorState.set(id, { latestSeq: latestUser.seq, requestSeq: realRequest.seq });
@@ -2778,15 +2802,15 @@ export function installContextManagement(ctx, config, deps, runtime) {
           + (latestAssistant === '' ? '' : `\n最近进展：${clip(latestAssistant, 420)}`)
         : '';
       const replacementNote = [modelNote, taskBrief].filter((text) => text !== '').join('\n');
-      // Keep the raw, untruncated event rows as well. The rendered `turns`
-      // above deliberately cap text for display, but a hard reset must not
-      // discard tool results or the tail of a long message that exists nowhere
-      // else.
+      // Keep the raw event rows as well. The rendered `turns` above
+      // deliberately cap text for display, but restore needs tool calls,
+      // developer messages and complete tool results that exist nowhere else.
       const rawRanges = chosen.map((run) => [run.startSeq, run.endSeq]);
       const rawEvents = events
         .filter((event) => Number.isInteger(event?.seq)
           && rawRanges.some(([start, end]) => event.seq >= start && event.seq <= end))
-        .filter((event) => ['turn/start', 'turn/end', 'user/message', 'assistant/message', 'tool/result'].includes(event.type))
+        .filter((event) => ['turn/start', 'turn/end', 'developer/message', 'user/message',
+          'assistant/message', 'tool/call', 'tool/result'].includes(event.type))
         .map((event) => ({ type: event.type, data: event.data, seq: event.seq }));
       // Archive first: nothing leaves the window before it is restorable.
       const saved = store.saveContext({

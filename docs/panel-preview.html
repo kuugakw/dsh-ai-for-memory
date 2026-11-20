@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AI for Memory 面板预览</title>
+<style>
+  :root { color-scheme: light; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --brand:#2563eb; --bg:#f5f7fb; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:28px; background:var(--bg); color:var(--ink);
+    font:14px/1.55 "Microsoft YaHei","PingFang SC","Segoe UI",sans-serif; }
+  .shell { max-width:1120px; margin:0 auto; border:1px solid var(--line); border-radius:18px;
+    background:#fff; box-shadow:0 18px 50px rgba(15,23,42,.10); overflow:hidden; }
+  .top { display:flex; align-items:center; gap:14px; padding:18px 24px; border-bottom:1px solid var(--line); }
+  .logo { width:38px; height:38px; border-radius:11px; background:linear-gradient(135deg,#2563eb,#7c3aed);
+    display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:17px; }
+  h1 { margin:0; font-size:18px; letter-spacing:.2px; }
+  .sub { margin-top:2px; color:var(--muted); font-size:12px; }
+  .pill { margin-left:auto; padding:4px 10px; border-radius:999px; background:#ecfdf5; color:#047857;
+    border:1px solid #a7f3d0; font-size:12px; font-weight:600; }
+  .body { display:grid; grid-template-columns:190px 1fr; min-height:520px; }
+  .side { padding:18px 12px; border-right:1px solid var(--line); background:#fbfcfe; }
+  .side .label { padding:0 10px 8px; color:#9ca3af; font-size:11px; letter-spacing:.12em; }
+  .nav { padding:9px 11px; border-radius:9px; color:#4b5563; margin:2px 0; }
+  .nav.on { background:#eff6ff; color:#1d4ed8; font-weight:600; }
+  .nav .n { float:right; color:#94a3b8; font-weight:400; }
+  .main { padding:20px 24px 22px; }
+  .toolbar { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
+  .select { padding:8px 12px; border:1px solid var(--line); border-radius:9px; color:#374151; background:#fff; }
+  .search { flex:1; padding:8px 12px; border:1px solid var(--line); border-radius:9px; color:#9ca3af; }
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .card { border:1px solid var(--line); border-radius:12px; padding:13px 14px; background:#fff; }
+  .card .k { color:var(--muted); font-size:12px; }
+  .card .v { margin-top:4px; font-size:25px; font-weight:700; letter-spacing:.3px; }
+  .card .v small { font-size:12px; color:var(--muted); font-weight:400; margin-left:4px; }
+  .section { margin-top:18px; }
+  .section h2 { margin:0 0 9px; font-size:13px; color:#374151; }
+  .row { display:flex; align-items:flex-start; gap:10px; padding:9px 0; border-bottom:1px solid #f1f5f9; }
+  .row:last-child { border-bottom:0; }
+  .tag { flex:none; padding:2px 7px; border-radius:6px; background:#f1f5f9; color:#475569; font-size:11px; }
+  .row .txt { color:#374151; }
+  .muted { color:var(--muted); }
+  .note { margin-top:12px; padding:10px 12px; border:1px solid #fde68a; background:#fffbeb;
+    border-radius:10px; color:#92400e; font-size:12px; }
+  .footer { padding:10px 24px; border-top:1px solid var(--line); color:#9ca3af; font-size:11px;
+    display:flex; justify-content:space-between; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="top">
+    <div class="logo">A</div>
+    <div><h1>AI for Memory</h1><div class="sub">面向 DSH 的项目级记忆插件 · 本对话</div></div>
+    <div class="pill">本地模式 · 未联网</div>
+  </div>
+  <div class="body">
+    <aside class="side">
+      <div class="label">记忆层</div>
+      <div class="nav on">总览 <span class="n">6</span></div>
+      <div class="nav">过程记录 <span class="n">72</span></div>
+      <div class="nav">归档 <span class="n">72</span></div>
+      <div class="nav">快照 <span class="n">2</span></div>
+      <div class="nav">知识库 <span class="n">11</span></div>
+      <div class="nav">决策 <span class="n">0</span></div>
+      <div class="nav">上下文 <span class="n">7</span></div>
+      <div class="label" style="margin-top:14px">设置</div>
+      <div class="nav">常规与上下文</div>
+      <div class="nav">模型与检索</div>
+      <div class="nav">网络同步</div>
+    </aside>
+    <main class="main">
+      <div class="toolbar">
+        <div class="select">工作区：D:\ai\工作区\这是准备发布在github上的内容</div>
+        <div class="search">检索知识库：输入一句话，自动选择 BM25 / SQL / RAG…</div>
+      </div>
+      <div class="grid">
+        <div class="card"><div class="k">过程记录</div><div class="v">72<small>条</small></div></div>
+        <div class="card"><div class="k">知识库</div><div class="v">11<small>篇</small></div></div>
+        <div class="card"><div class="k">上下文占用</div><div class="v">12.6<small>%</small></div></div>
+      </div>
+      <div class="section">
+        <h2>最近过程记录</h2>
+        <div class="row"><span class="tag">digest</span><span class="txt">自动记忆 · 第 146-147 轮：.engine.lock 并发启动会丢一条锁记录</span></div>
+        <div class="row"><span class="tag">digest</span><span class="txt">自动记忆 · 第 148-149 轮：改为一个模型一个锁文件，避免孤儿引擎</span></div>
+        <div class="row"><span class="tag">digest</span><span class="txt">自动记忆 · 第 151 轮：RAG 索引缓存与 500 上限拆分显示</span></div>
+      </div>
+      <div class="section">
+        <h2>上下文与自动行为</h2>
+        <div class="row"><span class="tag">已启用</span><span class="txt">上下文达到阈值时全量清出，下一次请求前回载当前任务；轮末没有下一次请求则直接清空。</span></div>
+        <div class="note">当前为静态界面预览：展示总览、记忆层计数、检索入口和最近记录；实际数据以本机面板为准。</div>
+      </div>
+    </main>
+  </div>
+  <div class="footer"><span>AI for Memory · 0.1.1</span><span>JSON 底座 · SQL / RAG 可选 · 本地优先</span></div>
+</div>
+</body>
+</html>

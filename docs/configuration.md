@@ -61,7 +61,7 @@
 | `restoreMaxChars` | 12000 | 单次 restore 最多注入字符数 |
 | `stagingRetentionDays` | 30 | 旧过程记录保留天数；只删已归档文件 |
 | `contextRetentionDays` | 0 | 上下文存档保留天数；0=不自动删 |
-| `requestAnchor` | `true` | 检查点/时间提示到达时，给模型加一条“当前真实请求”提醒，避免答旧题 |
+| `requestAnchor` | `true` | 检查点到达且本步没有新用户请求时，加一条“上一轮请求参考”；有新请求则不注入 |
 | `decisionRetentionDays` | 0 | 决策记录保留天数；0=不自动删 |
 | `ragMount` | false | 是否把 RAG 索引挂到检索 |
 | `externalBaseUrl` | 空 | 外部模型主地址；空=未配置，不发起探活或请求。示例见面板 placeholder |
