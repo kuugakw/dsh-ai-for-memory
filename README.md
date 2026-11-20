@@ -5,12 +5,6 @@
 [![Version](https://img.shields.io/badge/version-0.1.1-lightgrey.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-<p align="center">
-  <img src="docs/panel-preview.png" alt="AI for Memory 面板预览：记忆层计数、检索入口、最近过程记录和上下文自动行为" width="900">
-  <br>
-  <sub>面板界面预览（静态示意；实际布局以本机 DSH Web 面板为准）</sub>
-</p>
-
 > **0.1.1 是 0.1.0 的修复版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、五个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。
 >
 > 升级前请备份记忆目录。

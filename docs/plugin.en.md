@@ -2,9 +2,7 @@
 
 Layered project memory for **DeepSeek Harness (DSH)**: six independent layers, five `aim_*` tools, a Web panel, conversation isolation, restorable context cleanup, BM25/SQL/RAG retrieval, conflict-checked knowledge, and risk-reviewed decisions — packaged as an installable DSH bundle.
 
-![Web panel preview](panel-preview.png)
-
-> A static preview of the panel. The live layout follows the DSH Web shell.
+> The Web panel is part of the plugin; its overview exposes the live memory counts, knowledge search, context policy and runtime status.
 
 ## What it keeps separate
 
