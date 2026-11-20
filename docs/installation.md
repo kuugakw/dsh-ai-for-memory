@@ -22,7 +22,7 @@ git check-ignore -v .ai-for-memory/
 
 如果已经提交过，`.gitignore` 不会删除历史记录；需要先 `git rm -r --cached .ai-for-memory`，再视情况轮换密钥或清理历史。
 
-插件只做一层兜底：默认目录首次创建、且 `.gitignore` 已存在时，会尝试追加这条规则；不新建 `.gitignore`，也不会处理自定义目录。仍然建议你自己确认。
+插件只做一层兜底：默认目录首次创建、且 `.gitignore` 已存在时，会尝试追加这条规则；不新建 `.gitignore`，也不会处理自定义目录。项目没有 `.gitignore`、或目录已存在但未被忽略时，`aim_memory status` 和面板会明确警告，不会静默当作已保护。仍然建议你自己确认。
 
 ### 2. 安装 bundle
 

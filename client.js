@@ -112,20 +112,24 @@ window.__ModuleLoader__.load({
         externalBase: 'API 地址',
         externalModel: '模型名（可留空）',
         externalTimeout: '超时（毫秒）',
-        externalHint: 'Embedding 和 Rerank 不只给 RAG 用：归档分类、知识库提炼和上下文清理也可以走它们。本插件不在进程内加载权重或做推理；推荐用 llama.cpp / Ollama / LM Studio 等工具启动模型，再通过 API 接入。模型文件夹放在插件的 models/ 下，详见「本地模型目录」。',
+        externalHint: 'Embedding 和 Rerank 不只给 RAG 用：归档分类、知识库提炼和上下文清理也可以走它们。本插件不在进程内加载权重或做推理；推荐用 llama.cpp / Ollama / LM Studio 等工具启动模型，再通过 API 接入。模型配置放在 $DSH_HOME/ai-for-memory/models/，详见「本地模型目录」。',
         localModelsTitle: '本地模型目录（手动放置）',
-        localModelsHint: '插件只读取 models/ 下的分类目录和 model.json，不加载权重、不运行推理。把文件夹放进 models/Embedding 或 models/Rerank，启动本地服务后在下面一键填入地址。',
-        localModelsEmpty: '还没有发现已登记模型。在插件的 models/ 下新建模型文件夹和 model.json。',
+        localModelsHint: '用户配置从 $DSH_HOME/ai-for-memory/models/ 读取；插件自带的 models/ 只作为可选扫描源，更新插件不会保留里面的 model.json。把文件夹放进 models/Embedding 或 models/Rerank，启动本地服务后在下面一键填入地址。',
+        localModelsEmpty: '还没有发现已登记模型。在 $DSH_HOME/ai-for-memory/models/ 下新建模型文件夹和 model.json。',
         localModelsRoot: '目录',
         localModelReady: '已配置 API',
         localModelGguf: '已发现 GGUF（本地引擎）',
         localModelEngineRunning: '本地引擎运行中',
+        localModelAdopted: '已接管（插件重启前启动）',
+        localModelStaleEngine: '配置已变更，待重启',
         localModelUnconfigured: '未配置 API',
         localModelUse: '填入地址',
         localModelStart: '启动引擎并填入',
         localModelStarting: '启动本地引擎中…',
         localModelStarted: '本地引擎已启动并填入地址；确认后点「保存设置」。',
         localModelStartFailed: '本地引擎启动失败',
+        localModelStale: '模型配置已变更，旧引擎不再复用；请先停止引擎，再重新启动。',
+        localModelDiagnostics: '启动失败诊断（llama-server stderr）',
         localModelApplied: '已填入模型地址；确认后点「保存设置」。',
         localModelReserved: '预留分类，尚未接入调用。',
         localModelFuture: '其他目录会按名字显示，插件不限制未来的能力类型。',
@@ -395,20 +399,24 @@ window.__ModuleLoader__.load({
         externalBase: 'API address',
         externalModel: 'Model name (optional)',
         externalTimeout: 'Timeout (ms)',
-        externalHint: 'Embedding and Rerank are not only for RAG: archive classification, knowledge extraction and context cleanup can use them too. This plugin does not load weights or run inference in-process; run the model with llama.cpp / Ollama / LM Studio and connect over API. Put model folders under the plugin models/ directory; see "Local model folder".',
+        externalHint: 'Embedding and Rerank are not only for RAG: archive classification, knowledge extraction and context cleanup can use them too. This plugin does not load weights or run inference in-process; run the model with llama.cpp / Ollama / LM Studio and connect over API. Model configuration goes under $DSH_HOME/ai-for-memory/models/; see "Local model folder".',
         localModelsTitle: 'Local model folder (manual)',
-        localModelsHint: 'The plugin only reads category folders and model.json under models/; it never loads weights or runs inference. Put a folder in models/Embedding or models/Rerank, start the local server, then fill the address below.',
-        localModelsEmpty: 'No registered model found. Create a model folder and model.json under the plugin models/ directory.',
+        localModelsHint: 'User configuration is read from $DSH_HOME/ai-for-memory/models/. The plugin-bundled models/ directory is only an optional scan source; model.json there is lost on update. Put a folder in models/Embedding or models/Rerank, start the local server, then fill the address below.',
+        localModelsEmpty: 'No registered model found. Create a model folder and model.json under $DSH_HOME/ai-for-memory/models/.',
         localModelsRoot: 'Directory',
         localModelReady: 'API configured',
         localModelGguf: 'GGUF found (local engine)',
         localModelEngineRunning: 'Local engine running',
+        localModelAdopted: 'Adopted from before the plugin reload',
+        localModelStaleEngine: 'Config changed; restart required',
         localModelUnconfigured: 'API not configured',
         localModelUse: 'Use this address',
         localModelStart: 'Start engine & use',
         localModelStarting: 'Starting local engine…',
         localModelStarted: 'Local engine started and address filled; click "Save settings" to apply.',
         localModelStartFailed: 'Local engine failed to start',
+        localModelStale: 'The model configuration changed, so the old engine was not reused. Stop it and start again.',
+        localModelDiagnostics: 'Startup diagnostics (llama-server stderr)',
         localModelApplied: 'Model address filled; click "Save settings" to apply.',
         localModelReserved: 'Reserved category; not wired into calls yet.',
         localModelFuture: 'Other folders are shown by name; future capabilities are not restricted.',
@@ -1286,6 +1294,7 @@ window.__ModuleLoader__.load({
 
       const selectedRoot = data?.selectedRoot ?? '';
       const roots = Array.isArray(data?.roots) ? data.roots : [];
+      const gitignoreWarning = typeof data?.gitignore?.warning === 'string' ? data.gitignore.warning : '';
       const counts = data?.counts ?? {};
       const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
       const showSession = data?.scope === 'all';
@@ -1568,7 +1577,15 @@ window.__ModuleLoader__.load({
               body: { model: model.id },
             });
             if (payload?.ok !== true || !payload?.endpoint) {
-              setNotice({ kind: 'err', text: `${t.localModelStartFailed}: ${payload?.error ?? ''}` });
+              setNotice({
+                kind: 'err',
+                text: payload?.stale === true
+                  ? t.localModelStale
+                  : `${t.localModelStartFailed}: ${clipPreview(payload?.error ?? '', 500)}`,
+              });
+              // Refresh the engine list so the persistent diagnostics block
+              // below the model row keeps the stderr tail, not just a toast.
+              await load('');
               return;
             }
             fill(payload.endpoint.baseUrl, payload.endpoint.model || model.model);
@@ -2360,6 +2377,17 @@ window.__ModuleLoader__.load({
           }, notice.text)
           : null,
 
+        gitignoreWarning !== ''
+          ? h('div', {
+            className: 'aim-notice',
+            style: {
+              ...styles.notice,
+              color: colors.warn,
+              borderColor: colors.warn,
+            },
+          }, `⚠ ${gitignoreWarning}`)
+          : null,
+
         error !== null
           ? h('div', { style: styles.card },
             h('p', { style: styles.hint }, `${t.loadFailed}: ${error}`),
@@ -2520,8 +2548,11 @@ window.__ModuleLoader__.load({
           },
           h('div', { style: { fontWeight: 600, fontSize: '12.5px' } }, t.localModelsTitle),
           h('p', { style: styles.hint }, t.localModelsHint),
-          data?.localModels?.root
-            ? h('p', { style: styles.meta }, `${t.localModelsRoot}: ${data.localModels.root}`)
+          (data?.localModels?.roots ?? (data?.localModels?.root
+            ? [{ dir: data.localModels.root }]
+            : [])).length > 0
+            ? h('p', { style: styles.meta }, `${t.localModelsRoot}: ${(data.localModels.roots
+              ?? [{ dir: data.localModels.root }]).map((row) => row.dir).join(' · ')}`)
             : null,
           (data?.localModels?.categories ?? []).length === 0
             ? h('p', { style: styles.hint }, t.localModelsEmpty)
@@ -2540,7 +2571,11 @@ window.__ModuleLoader__.load({
               h('span', { style: styles.hint },
                 model.runnable
                   ? ((data?.localEngines ?? []).find((engine) => engine.id === model.id)?.ready
-                    ? `${t.localModelEngineRunning}：${(data?.localEngines ?? []).find((engine) => engine.id === model.id)?.baseUrl ?? ''}`
+                    ? `${(data?.localEngines ?? []).find((engine) => engine.id === model.id)?.stale
+                      ? t.localModelStaleEngine
+                      : (data?.localEngines ?? []).find((engine) => engine.id === model.id)?.adopted
+                        ? t.localModelAdopted
+                        : t.localModelEngineRunning}：${(data?.localEngines ?? []).find((engine) => engine.id === model.id)?.baseUrl ?? ''}`
                     : t.localModelGguf)
                   : (model.configured ? t.localModelReady : (model.error || t.localModelUnconfigured))),
               (model.runnable || model.configured) && ['Embedding', 'Rerank'].includes(category.name)
@@ -2554,6 +2589,27 @@ window.__ModuleLoader__.load({
                   ? t.localModelStarting
                   : (model.runnable ? t.localModelStart : t.localModelUse))
                 : null)))),
+          ((data?.localEngines ?? []).filter((engine) => engine.error).length > 0
+            ? h('div', { style: { marginTop: '8px' } },
+              h('div', { style: { fontWeight: 600, fontSize: '12px' } }, t.localModelDiagnostics),
+              ...(data.localEngines ?? []).filter((engine) => engine.error).map((engine) => h('pre', {
+                key: `engine-error-${engine.id}`,
+                style: {
+                  margin: '4px 0 0',
+                  padding: '8px',
+                  maxHeight: '240px',
+                  overflow: 'auto',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  fontSize: '11px',
+                  lineHeight: 1.45,
+                  fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
+                  background: 'rgba(0, 0, 0, 0.04)',
+                  border: '1px solid rgba(0, 0, 0, 0.12)',
+                  borderRadius: '6px',
+                },
+              }, engine.error)))
+            : null),
           h('p', { style: styles.hint }, t.localModelFuture))),
           h('div', { style: styles.grid2 },
             h('label', { style: styles.label },

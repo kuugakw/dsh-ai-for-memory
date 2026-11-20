@@ -12,10 +12,10 @@
 
 ## 本地模型文件夹
 
-插件目录下有一个 `models/` 文件夹，供你手动放置本地模型和 GGUF 权重（插件不下载权重）：
+模型配置放在**用户目录** `$DSH_HOME/ai-for-memory/models/`（未设置 `DSH_HOME` 时为 `~/.dsh/ai-for-memory/models/`），插件更新不会覆盖；插件自带的 `models/` 只作为可选的示例/扫描源：
 
 ```text
-models/
+$DSH_HOME/ai-for-memory/models/
 ├── Embedding/
 │   └── bge-m3/
 │       ├── model.json
@@ -31,6 +31,8 @@ models/
     └── 某个模型/
         └── model.json
 ```
+
+`model.json` 里的 `extraArgs`、`ctxSize`、`port`、`binary` 是机器相关配置，必须放在这个用户目录，不要放插件安装目录。用户目录中的同名模型优先于插件自带的 `models/`。
 
 直接连接已经启动的本地服务：
 
@@ -71,7 +73,10 @@ Rerank 示例：
 - `modelPath` 相对于模型文件夹；省略时自动找文件夹里的 `.gguf`；
 - `pooling` 用于 Embedding，BGE-M3 建议 `cls`；`ctxSize` 默认 8192；`port` 省略时自动选空闲端口；
 - 面板里点「启动引擎并填入」会启动 `llama-server`，再填入地址和模型名，仍需点「保存设置」；
-- `Routing` 是给后续模型路由预留的分类，目前只显示、不参与调用；
+- 启动失败时插件保留 `llama-server` 的 stderr/stdout 尾部、实际启动命令和按日志识别的修复提示（GGUF 版本、`--reranking`、`--pooling`、OOM、路径问题等），面板的「启动失败诊断」会一直显示，不用去终端手敲参数；
+- 每次启动会把 `{pid, port, model, modelPath, baseUrl, command, startedAt, fingerprint}` 写入 `models/.engine.lock`；插件重新加载/DSH 重启后先探测该端口的 `/health`、`/props`（必要时 `/v1/models`），模型路径或名称对得上就接管进「模型」页，端口已被占用时不会再起第二份；对不上只清理锁文件，不杀未知进程；
+- `model.json` 或 GGUF 的 `mtime+size` 变化后，已在运行的引擎会被标记为 stale，下一次启动返回 `stale: true` 并拒绝复用；先停止旧引擎，再启动新配置；
+- `Routing` 是给后续模型路由预留的分类，目前只显示、不能启动本地引擎、不参与调用；对 `Routing` 调用 `/local-engine/start` 会被拒绝；
 - 没有 `model.json` 的文件夹也会显示，但标记为“未配置 API”。
 
 **重要：插件不在 Node 进程里做张量推理，也不下载权重。** 本地引擎管理的是 `llama-server` 子进程：Embedding 用 `--embeddings --pooling cls`，Rerank 用 `--reranking`；插件再通过已有的 OpenAI 兼容客户端调用它。请把 GGUF 放在模型文件夹里，不要把大型权重提交到仓库。

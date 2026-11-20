@@ -3,15 +3,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { execFileSync } from 'node:child_process';
+import net from 'node:net';
+import { execFileSync, spawn } from 'node:child_process';
 
 import { MemoryStore } from '../lib/store.js';
-import { ensureDefaultMemoryDirIgnored, ensureGitignoreEntry } from '../lib/gitignore.js';
+import { defaultMemoryDirIgnoreStatus, ensureDefaultMemoryDirIgnored, ensureGitignoreEntry } from '../lib/gitignore.js';
 import { MemoryScopes, sessionKey } from '../lib/scopes.js';
 import { decodeWorkspaceBucket, encodeWorkspace, resolveWorkspacePath, workspaceIndex } from '../lib/dsh-workspace.js';
 import {
   chat, embed, listModels, normalizeExternal, parseEmbeddingResponse, parseRerankResponse,
-  probe, resolveBaseUrl, embedEndpoint, rerankEndpoint, buildRequest,
+  probe, resolveBaseUrl, embedEndpoint, rerankEndpoint, buildRequest, PROBE_TIMEOUT_MS,
 } from '../lib/external.js';
 import {
   classifyRecord,
@@ -36,10 +37,11 @@ import {
 import { RRF_K, reciprocalRankFusion, search, tokenize } from '../lib/retrieval.js';
 import { CATEGORIES, hourKey, listJsonlFiles } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
-import { listLocalModels } from '../lib/model-catalog.js';
-import { buildServerArgs, findModelFile, resolveModel } from '../lib/local-engine.js';
+import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
+import { buildServerArgs, findModelFile, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine } from '../lib/local-engine.js';
 import {
   commitSync, initSync, pullSync, pushSync, readSyncConfig, syncStatus, writeSyncConfig,
+  parseGitRemote, probeHost,
 } from '../lib/git-sync.js';
 import { collectTurnDigest } from '../lib/auto.js';
 import { buildContextSnapshot, collectTurns, formatRestoreContext, snapshotOfTurns } from '../lib/context.js';
@@ -51,7 +53,9 @@ import { exceedsUsageThreshold, formatPressure, usagePercentOf } from '../lib/pr
 import { boostScore, recencyWeight, USAGE_HALF_LIFE_DAYS } from '../lib/usage.js';
 import {
   candidatesFromDecision, candidatesFromRecord, candidatesFromTurn, findDuplicate,
-  KNOWLEDGE_CATEGORIES, knowledgeKey, normalizeCategory, normalizeSource, stripInjectedText, withTokens,
+  materialChange, splitSentenceDetails,
+  KNOWLEDGE_CATEGORIES, knowledgeKey, normalizeCategory, normalizeKnowledge, normalizeProvenance,
+  normalizeSource, stripInjectedText, withTokens,
 } from '../lib/knowledge.js';
 import { listRootRows, readRoots, rememberRoot, resolveRegisteredRoot } from '../lib/registry.js';
 import { isTrustedRequest } from '../lib/api.js';
@@ -59,6 +63,23 @@ import { apply, compileParameterSchema, Config, createTools, installContextManag
 
 function tempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agm-test-'));
+}
+
+/** Explicit local endpoint: the product default is now "unconfigured". */
+function localExternal(extra = {}) {
+  return normalizeExternal({ baseUrl: 'http://127.0.0.1:8080', ...extra });
+}
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address !== null ? address.port : 0;
+      server.close(() => (port > 0 ? resolve(port) : reject(new Error('no free port'))));
+    });
+  });
 }
 
 function fakeExec(cwd) {
@@ -887,6 +908,14 @@ test('knowledge normalizes categories, ids and duplicates', () => {
   assert.equal(normalizeCategory('unknown-thing', 'workflow_rules'), 'workflow_rules');
   assert.equal(normalizeSource('web'), 'web');
   assert.equal(normalizeSource('gui'), 'unknown');
+  // An absent/misspelled source must not become "authored and verified"; the
+  // only caller of the write tool is the model, so it defaults to a claim.
+  assert.equal(normalizeProvenance(undefined, 'unknown'), 'model');
+  assert.equal(normalizeProvenance(undefined, 'gui'), 'model');
+  const untrusted = normalizeKnowledge({ text: '来路不明的一条结论', source: 'gui' });
+  assert.equal(untrusted.provenance, 'model');
+  assert.equal(untrusted.verified, false);
+  assert.equal(normalizeProvenance(undefined, 'context'), 'user');
 
   // The id is derived from the text, so the same fact always lands on one file.
   assert.equal(knowledgeKey('部署前必须跑测试'), knowledgeKey('  部署前必须跑测试  '));
@@ -896,6 +925,39 @@ test('knowledge normalizes categories, ids and duplicates', () => {
   assert.equal(findDuplicate('发布前必须跑测试，通过后才允许打标签', docs)?.doc_id, 'k_a');
   assert.equal(findDuplicate('晚餐吃火锅还是烧烤', docs), null);
 });
+
+test('split long prose restores a subject and tags clause fragments', () => {
+  const long = `这个网关的超时默认是 30 秒，必须改成 120 秒，否则大文件上传会断，${'补充背景'.repeat(100)}`;
+  const details = splitSentenceDetails(long);
+  assert.ok(details.length >= 2);
+  assert.equal(details.every((detail) => detail.clause === true), true);
+  assert.match(details[0].text, /这个网关的超时默认是 30 秒/);
+  // The subjectless "必须改成 120 秒" is not allowed to stand alone.
+  const prefixed = details.find((detail) => detail.text.includes('必须改成 120 秒'));
+  assert.ok(prefixed);
+  assert.match(prefixed.text, /这个网关的超时，必须改成 120 秒/);
+
+  const candidates = candidatesFromRecord({
+    dedup_id: 'd7', content: long, kind: 'action', verify: 'pass',
+  }, 'staging');
+  assert.ok(candidates.length >= 1);
+  assert.ok(candidates.every((candidate) => candidate.tags.includes('clause')));
+  assert.equal(candidates.find((candidate) => candidate.text.includes('必须改成 120 秒'))?.confidence, 0.35);
+
+  const fromUser = candidatesFromTurn({ turn: 1, user: long }, 'ctx-long');
+  assert.ok(fromUser.length >= 1);
+  assert.ok(fromUser.every((candidate) => candidate.tags.includes('clause')));
+  assert.equal(fromUser.find((candidate) => candidate.text.includes('必须改成 120 秒'))?.confidence, 0.6);
+});
+
+test('material changes catch common Chinese polarity flips', () => {
+  assert.equal(materialChange('网关默认打开', '网关默认关闭')?.kind, 'polarity');
+  assert.equal(materialChange('端口默认是 8080', '端口默认否 8080')?.kind, 'polarity');
+  assert.equal(materialChange('旧目录保留', '旧目录删除')?.kind, 'polarity');
+  assert.equal(materialChange('走内网', '走公网')?.kind, 'polarity');
+  assert.equal(materialChange('默认开启', '默认关闭')?.kind, 'polarity');
+});
+
 
 test('knowledge candidates come from verified records, decisions and user rules only', () => {
   const error = candidatesFromRecord({
@@ -1613,7 +1675,9 @@ test('default memory directory is appended to an existing project .gitignore onc
       path.join(workspace, '.ai-for-memory'), workspace, '.ai-for-memory',
     );
     assert.equal(missing.reason, 'no-gitignore');
+    assert.match(missing.warning, /没有 \.gitignore/);
     assert.equal(fs.existsSync(file), false);
+    assert.equal(defaultMemoryDirIgnoreStatus(path.join(workspace, '.ai-for-memory'), workspace).state, 'no-gitignore');
 
     fs.writeFileSync(file, 'dist/\n');
     const custom = ensureDefaultMemoryDirIgnored(
@@ -1755,6 +1819,7 @@ test('config validator bounds auto settings', () => {
   assert.equal(defaults.keepRecentTurns, 2);
   assert.equal(defaults.similarityThreshold, 0.05);
   assert.equal(defaults.minClearChars, 200);
+  assert.equal(defaults.externalBaseUrl, '');
   const validator = Config['~standard'].validate;
   assert.equal(validator({ autoEnabled: true, autoEveryRounds: 3 }).value.autoEnabled, true);
   assert.equal(validator({ defaultPublic: false }).value.defaultPublic, false);
@@ -1916,6 +1981,12 @@ test('similarity clear removes unrelated turns and their archive stays restorabl
     const replacement = log.find((event) => event.type === 'user/message' && event.surfaceOp);
     assert.match(replacement.data.content[0].text, /上下文清理/);
     assert.match(replacement.data.content[0].text, new RegExp(contexts[0].context_id));
+    assert.deepEqual(replacement.data.source, {
+      kind: 'ai-for-memory',
+      form: 'notice',
+      summary: replacement.data.source.summary,
+    });
+    assert.match(replacement.data.source.summary, /^上下文清理：/);
     assert.deepEqual(replacement.sourceEventSeqs, [1, 2, 5, 6]);
     assert.ok(log.some((event) => event.type === 'compaction/prune'));
 
@@ -2149,6 +2220,8 @@ test('prompt and tool refreshes inside a turn do not block clearing it', async (
     // interleaved system/developer nodes (seqs 2 and 4).
     const replacement = log.find((event) => event.type === 'user/message' && event.surfaceOp);
     assert.ok(replacement, 'expected one replacement note');
+    assert.equal(replacement.data.source.kind, 'ai-for-memory');
+    assert.equal(replacement.data.source.form, 'notice');
     assert.deepEqual(replacement.sourceEventSeqs, [1, 2, 3, 4, 7, 8]);
     assert.equal(nodes.length, 5);
 
@@ -2345,15 +2418,21 @@ test('local engine resolves GGUF files and builds llama.cpp arguments', () => {
     const models = path.join(root, 'models');
     const embedDir = path.join(models, 'Embedding', 'bge-m3');
     const rerankDir = path.join(models, 'Rerank', 'bge-reranker-v2-m3');
+    const routingDir = path.join(models, 'Routing', 'my-router');
     fs.mkdirSync(embedDir, { recursive: true });
     fs.mkdirSync(rerankDir, { recursive: true });
+    fs.mkdirSync(routingDir, { recursive: true });
     fs.writeFileSync(path.join(embedDir, 'bge-m3-Q8_0.gguf'), '');
     fs.writeFileSync(path.join(rerankDir, 'bge-reranker.gguf'), '');
+    fs.writeFileSync(path.join(routingDir, 'router.gguf'), '');
     fs.writeFileSync(path.join(embedDir, 'model.json'), JSON.stringify({
       name: 'BGE-M3', model: 'bge-m3', pooling: 'cls',
     }));
     fs.writeFileSync(path.join(rerankDir, 'model.json'), JSON.stringify({
       name: 'BGE Reranker v2 m3', model: 'bge-reranker-v2-m3',
+    }));
+    fs.writeFileSync(path.join(routingDir, 'model.json'), JSON.stringify({
+      name: 'My Router', model: 'my-router',
     }));
 
     assert.equal(path.basename(findModelFile(embedDir)), 'bge-m3-Q8_0.gguf');
@@ -2373,9 +2452,158 @@ test('local engine resolves GGUF files and builds llama.cpp arguments', () => {
 
     const missing = resolveModel({ modelsRoot: models, modelId: 'Embedding/missing' });
     assert.equal(missing.ok, false);
+
+    const routing = resolveModel({ modelsRoot: models, modelId: 'Routing/my-router' });
+    assert.equal(routing.ok, false);
+    assert.match(routing.error, /Routing|预留/);
+    const catalog = listLocalModels(models);
+    const routingCategory = catalog.categories.find((category) => category.name === 'Routing');
+    assert.equal(routingCategory.models[0].runnable, false);
+    assert.match(routingCategory.models[0].error, /预留/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('a failed llama-server start reports its stderr and exact command', async () => {
+  const root = tempRoot();
+  try {
+    const models = path.join(root, 'models');
+    const modelDir = path.join(models, 'Embedding', 'fake');
+    fs.mkdirSync(modelDir, { recursive: true });
+    fs.writeFileSync(path.join(modelDir, 'fake.gguf'), '');
+    // The test executable deliberately does not understand llama-server's
+    // -m/--host flags, so it exits quickly with a real stderr diagnostic.
+    fs.writeFileSync(path.join(modelDir, 'model.json'), JSON.stringify({
+      binary: process.execPath,
+      startupTimeoutMs: 1500,
+    }));
+
+    const started = await startLocalEngine({ modelsRoot: models, modelId: 'Embedding/fake' });
+    assert.equal(started.ok, false);
+    assert.match(started.error, /bad option|unknown option|--/i);
+    assert.match(started.error, /stderr:/);
+    assert.match(started.error, /命令：/);
+    assert.ok(started.engine.stderr.length > 0);
+    assert.match(started.engine.command, /fake\.gguf/);
+  } finally {
+    await stopAllLocalEngines();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a live llama-server from the previous plugin process is adopted', async () => {
+  const root = tempRoot();
+  let child = null;
+  try {
+    const models = path.join(root, 'models');
+    const modelDir = path.join(models, 'Embedding', 'fake');
+    fs.mkdirSync(modelDir, { recursive: true });
+    const modelPath = path.join(modelDir, 'fake.gguf');
+    fs.writeFileSync(modelPath, '');
+    fs.writeFileSync(path.join(modelDir, 'model.json'), JSON.stringify({ model: 'fake' }));
+
+    const port = await freePort();
+    const readyFile = path.join(root, 'engine-ready');
+    const serverScript = [
+      "const http = require('http');",
+      "const fs = require('fs');",
+      "const server = http.createServer((req, res) => {",
+      "  if (req.url === '/health') { res.end('ok'); return; }",
+      "  if (req.url === '/props') { res.setHeader('content-type', 'application/json');",
+      "    res.end(JSON.stringify({ model_path: process.argv[1] })); return; }",
+      "  res.statusCode = 404; res.end();",
+      "});",
+      `server.listen(Number(process.argv[3]), '127.0.0.1', () => fs.writeFileSync(process.argv[2], 'ready'));`,
+    ].join('\n');
+    child = spawn(process.execPath, ['-e', serverScript, modelPath, readyFile, String(port)], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    for (let attempt = 0; attempt < 100 && !fs.existsSync(readyFile); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.ok(fs.existsSync(readyFile), 'fake llama-server did not start');
+
+    fs.writeFileSync(path.join(models, '.engine.lock'), JSON.stringify({
+      version: 1,
+      engines: [{
+        id: 'Embedding/fake',
+        pid: child.pid,
+        port,
+        model: 'fake',
+        modelPath,
+        baseUrl: `http://127.0.0.1:${port}`,
+        command: 'llama-server',
+        startedAt: new Date().toISOString(),
+      }],
+    }));
+
+    const statuses = await restoreLocalEngines({ modelsRoot: models });
+    const adopted = statuses.find((row) => row.id === 'Embedding/fake');
+    assert.ok(adopted, 'expected the live engine to be adopted');
+    assert.equal(adopted.ready, true);
+    assert.equal(adopted.adopted, true);
+    assert.equal(adopted.pid, child.pid);
+    assert.equal(adopted.stale, false);
+
+    // A model.json edit changes the fingerprint; the live process is not
+    // silently reused under the old name.
+    fs.writeFileSync(path.join(modelDir, 'model.json'), JSON.stringify({ model: 'fake-v2' }));
+    const stale = await startLocalEngine({ modelsRoot: models, modelId: 'Embedding/fake' });
+    assert.equal(stale.ok, false);
+    assert.equal(stale.stale, true);
+    assert.match(stale.error, /配置已变更/);
+
+    // Even if model.json now points at a different weight file, the old
+    // process is still adopted so it can be reclaimed; it remains stale.
+    fs.writeFileSync(path.join(modelDir, 'fake2.gguf'), '');
+    fs.writeFileSync(path.join(modelDir, 'model.json'), JSON.stringify({
+      model: 'fake-v2', modelPath: 'fake2.gguf',
+    }));
+    const readopted = await restoreLocalEngines({ modelsRoot: models });
+    const readoptedRow = readopted.find((row) => row.id === 'Embedding/fake');
+    assert.ok(readoptedRow);
+    assert.equal(readoptedRow.stale, true);
+
+    // Stopping an adopted engine must terminate the surviving process too.
+    await stopLocalEngine('Embedding/fake');
+    for (let attempt = 0; attempt < 100 && child.exitCode === null; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.notEqual(child.exitCode, null, 'adopted process was not terminated');
+    const lock = JSON.parse(fs.readFileSync(path.join(models, '.engine.lock'), 'utf8'));
+    assert.equal(lock.engines.length, 0);
+  } finally {
+    if (child && child.exitCode === null) child.kill();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('probeHost accepts scp remotes and probes common ports concurrently', async () => {
+  assert.deepEqual(parseGitRemote('git@github.com:kuugakw/dsh-ai-for-memory.git'), {
+    host: 'github.com', port: null, path: 'kuugakw/dsh-ai-for-memory.git',
+  });
+  assert.equal(parseGitRemote('ssh://git@github.com:2222/kuugakw/dsh-ai-for-memory.git').port, 2222);
+  assert.equal(parseGitRemote('https://github.com/kuugakw/dsh-ai-for-memory.git').host, 'github.com');
+  assert.equal(parseGitRemote('not a remote'), null);
+
+  const started = [];
+  const result = await probeHost('git@example.test:group/repo.git', async (host, port) => {
+    started.push(port);
+    if (port === 443) return { ok: true, host, port };
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    return { ok: false, host, port };
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.port, 443);
+  assert.deepEqual(started.sort((a, b) => a - b), [22, 80, 443, 9418]);
+});
+
+test('probeHost rejects only addresses that cannot be parsed', async () => {
+  const result = await probeHost('not a remote');
+  assert.equal(result.ok, false);
+  assert.match(result.error, /git@host:path/);
 });
 
 test('a fact that disagrees with stored knowledge waits for the user', () => {
@@ -2404,6 +2632,28 @@ test('a fact that disagrees with stored knowledge waits for the user', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('external endpoint is unconfigured by default and probes use a 5s budget', async () => {
+  assert.equal(normalizeExternal({}).baseUrl, '');
+  assert.equal(resolveBaseUrl('').api, '');
+  assert.equal(PROBE_TIMEOUT_MS, 5000);
+
+  let called = 0;
+  const result = await probe(normalizeExternal({}), async () => {
+    called += 1;
+    throw new Error('must not be contacted');
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.via, 'unconfigured');
+  assert.match(result.error, /未配置外部模型地址/);
+  assert.equal(called, 0);
+
+  // An explicit endpoint still works; only the empty default is inert.
+  const explicit = await probe(localExternal(), async (url) => (
+    url.endsWith('/health') ? new Response('{"status":"ok"}', { status: 200 }) : new Response('{}')
+  ));
+  assert.equal(explicit.ok, true);
 });
 
 test('external client speaks the llama.cpp OpenAI-compatible protocol', async () => {
@@ -2443,7 +2693,7 @@ test('external client turns failures into readable messages', async () => {
     JSON.stringify({ error: { message: 'model not loaded' } }),
     { status: 400 },
   );
-  const failed = await chat(normalizeExternal({}), { prompt: 'hi' }, rejecting);
+  const failed = await chat(localExternal(), { prompt: 'hi' }, rejecting);
   assert.equal(failed.ok, false);
   assert.ok(failed.error.includes('400'));
   assert.ok(failed.error.includes('model not loaded'));
@@ -2451,14 +2701,14 @@ test('external client turns failures into readable messages', async () => {
   const hanging = async (url, init) => new Promise((resolve, reject) => {
     init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
   });
-  const timedOut = await chat(normalizeExternal({ timeoutMs: 1000 }), { prompt: 'hi' }, hanging);
+  const timedOut = await chat(localExternal({ timeoutMs: 1000 }), { prompt: 'hi' }, hanging);
   assert.equal(timedOut.ok, false);
   assert.ok(timedOut.error.includes('超时'));
 
   const unreachable = async () => {
     throw Object.assign(new Error('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
   };
-  const offline = await chat(normalizeExternal({}), { prompt: 'hi' }, unreachable);
+  const offline = await chat(localExternal(), { prompt: 'hi' }, unreachable);
   assert.equal(offline.ok, false);
   assert.ok(offline.error.includes('ECONNREFUSED'));
   assert.ok(offline.error.includes('llama.cpp'));
@@ -2473,13 +2723,13 @@ test('external embeddings keep input order and explain a missing --embeddings', 
       data: Array.from({ length: count }, (_, index) => ({ embedding: [0.1, 0.2, index] })),
     }), { status: 200 });
   };
-  const vectors = await embed(normalizeExternal({}), ['a', 'b'], embedding);
+  const vectors = await embed(localExternal(), ['a', 'b'], embedding);
   assert.equal(vectors.ok, true);
   assert.equal(vectors.vectors.length, 2);
   assert.equal(vectors.vectors[1][2], 1);
 
   const wrong = async () => new Response(JSON.stringify({ data: [{ embedding: [0.1] }] }), { status: 200 });
-  const missing = await embed(normalizeExternal({}), ['a', 'b'], wrong);
+  const missing = await embed(localExternal(), ['a', 'b'], wrong);
   assert.equal(missing.ok, false);
   assert.ok(missing.error.includes('--embeddings'));
 });
@@ -2489,7 +2739,7 @@ test('probe falls back from /health to /v1/models', async () => {
     if (url.endsWith('/health')) return new Response('not found', { status: 404 });
     return new Response(JSON.stringify({ data: [{ id: 'qwen2.5-7b' }] }), { status: 200 });
   };
-  const result = await probe(normalizeExternal({}), fakeFetch);
+  const result = await probe(localExternal(), fakeFetch);
   assert.equal(result.ok, true);
   assert.equal(result.via, 'models');
   assert.deepEqual(result.models, ['qwen2.5-7b']);
@@ -2598,7 +2848,7 @@ test('external classify uses embeddings, then rerank when available', async () =
       results: [{ index: 0, relevance_score: 0.9 }, { index: 1, relevance_score: 0.1 }],
     }), { status: 200 });
   };
-  const config = normalizeExternal({});
+  const config = localExternal();
   const picked = await classifyRecord(config, { kind: 'state', content: '面板截图显示按钮位置' }, fake);
   assert.equal(picked.ok, true);
   assert.equal(picked.category, 'ui_facts');
@@ -2629,7 +2879,7 @@ test('external extract and summary are extractive and fail closed', async () => 
     const inputs = Array.isArray(body.input) ? body.input : [body.input];
     return new Response(JSON.stringify({ data: inputs.map((input) => ({ embedding: vec(input) })) }), { status: 200 });
   };
-  const config = normalizeExternal({});
+  const config = localExternal();
   const mined = await extractFacts(config, [
     '面板范围改成两级目录。',
     '面板范围改成两级目录。',
@@ -2684,7 +2934,7 @@ test('probe deep reports embedding and rerank capabilities', async () => {
     }
     return new Response('no', { status: 404 });
   };
-  const result = await probe(normalizeExternal({}), fake, { deep: true });
+  const result = await probe(localExternal(), fake, { deep: true });
   assert.equal(result.ok, true);
   assert.equal(result.capabilities.embeddings.ok, true);
   assert.equal(result.capabilities.rerank.ok, true);
@@ -2694,7 +2944,7 @@ test('probe deep reports embedding and rerank capabilities', async () => {
   const noEmbed = async (url) => (url.endsWith('/health')
     ? new Response('{"status":"ok"}', { status: 200 })
     : new Response('missing', { status: 404 }));
-  const plain = await probe(normalizeExternal({}), noEmbed, { deep: true });
+  const plain = await probe(localExternal(), noEmbed, { deep: true });
   assert.equal(plain.capabilities.embeddings.ok, false);
   assert.equal(plain.capabilities.rerank.ok, false);
 });
@@ -2716,7 +2966,7 @@ test('RAG index embeds once, reuses unchanged docs and prunes removed ones', asy
       data: inputs.map((text) => ({ embedding: [text.length, 1, 0] })),
     }), { status: 200 });
   };
-  const endpoint = normalizeExternal({});
+  const endpoint = localExternal();
   const built = await buildRagIndex(store, endpoint, { fetchImpl: fake });
   assert.equal(built.ok, true);
   assert.equal(built.indexed, 2);
@@ -2746,12 +2996,12 @@ test('RAG embedding failure leaves the previous index intact', async () => {
   const root = tempRoot();
   const store = { root, documents: () => [{ doc_id: 'k_a', text: 'old', category: 'ui_facts', source: 'agent' }] };
   const good = async () => new Response(JSON.stringify({ data: [{ embedding: [1, 0] }] }), { status: 200 });
-  const first = await buildRagIndex(store, normalizeExternal({}), { fetchImpl: good });
+  const first = await buildRagIndex(store, localExternal(), { fetchImpl: good });
   assert.equal(first.ok, true);
   const oldHash = readRagIndex(root).docs.k_a.hash;
   store.documents = () => [{ doc_id: 'k_a', text: 'new', category: 'ui_facts', source: 'agent' }];
   const failing = async () => new Response(JSON.stringify({ error: { message: 'down' } }), { status: 500 });
-  const failed = await buildRagIndex(store, normalizeExternal({}), { fetchImpl: failing });
+  const failed = await buildRagIndex(store, localExternal(), { fetchImpl: failing });
   assert.equal(failed.ok, false);
   assert.equal(readRagIndex(root).docs.k_a.hash, oldHash);
 });
@@ -2771,7 +3021,7 @@ test('RAG candidates honour the category filter and rerank falls back to embeddi
     }
     return new Response('nope', { status: 404 });
   };
-  await buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake });
+  await buildRagIndex(store, localExternal(), { fetchImpl: fake });
   const all = ragCandidates(store, [4, 0, 0], { topK: 5 });
   assert.equal(all.ok, true);
   assert.equal(all.candidates.length, 2);
@@ -2780,7 +3030,7 @@ test('RAG candidates honour the category filter and rerank falls back to embeddi
   assert.equal(filtered.candidates[0].doc.doc_id, 'k_a');
   assert.equal(cosine([1, 0], [1, 0]), 1);
   // The rerank endpoint is missing: the embedding order must still be returned.
-  const reranked = await rerankCandidates(normalizeExternal({}), 'aaaa', all.candidates, {
+  const reranked = await rerankCandidates(localExternal(), 'aaaa', all.candidates, {
     topK: 1,
     fetchImpl: fake,
   });
@@ -2941,7 +3191,7 @@ test('knowledge, SQL and RAG exports can be selected in any combination', async 
     const inputs = Array.isArray(body.input) ? body.input : [body.input];
     return new Response(JSON.stringify({ data: inputs.map(() => ({ embedding: [1, 0, 0] })) }), { status: 200 });
   };
-  await buildRagIndex(store, normalizeExternal({}), { fetchImpl: fakeEmbed });
+  await buildRagIndex(store, localExternal(), { fetchImpl: fakeEmbed });
   const rag = exportArtifact(store, { type: 'rag' });
   assert.equal(rag.ok, true);
   assert.ok(rag.filename.endsWith('.json'));
@@ -2964,7 +3214,7 @@ test('RAG index is sharded and rewrites only changed shards', async () => {
       data: inputs.map((text) => ({ embedding: [text.length, 1, 0] })),
     }), { status: 200 });
   };
-  const first = await buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake });
+  const first = await buildRagIndex(store, localExternal(), { fetchImpl: fake });
   assert.equal(first.ok, true);
   assert.equal(first.shards, 2);
   const manifest1 = JSON.parse(fs.readFileSync(ragManifestPath(root), 'utf8'));
@@ -2978,14 +3228,14 @@ test('RAG index is sharded and rewrites only changed shards', async () => {
   const hashes1 = Object.fromEntries(manifest1.shards.map((shard) => [shard.id, shard.hash]));
 
   // Nothing changed: no embedding and no shard rewrite.
-  const second = await buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake });
+  const second = await buildRagIndex(store, localExternal(), { fetchImpl: fake });
   assert.equal(second.embedded, 0);
   const manifest2 = JSON.parse(fs.readFileSync(ragManifestPath(root), 'utf8'));
   assert.deepEqual(Object.fromEntries(manifest2.shards.map((shard) => [shard.id, shard.hash])), hashes1);
 
   // Only the touched category's shard changes.
   docs = docs.map((doc) => (doc.doc_id === 'k_a' ? { ...doc, text: 'aaaa-changed' } : doc));
-  const third = await buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake });
+  const third = await buildRagIndex(store, localExternal(), { fetchImpl: fake });
   assert.equal(third.embedded, 1);
   const manifest3 = JSON.parse(fs.readFileSync(ragManifestPath(root), 'utf8'));
   const hashes3 = Object.fromEntries(manifest3.shards.map((shard) => [shard.id, shard.hash]));
@@ -3016,7 +3266,7 @@ test('single-file RAG indexes are rejected and deleted on rebuild', async () => 
   const docs = [{ doc_id: 'k_new', text: 'nn', category: 'ui_facts', source: 'user' }];
   const store = { root, documents: () => docs };
   const fake = async () => new Response(JSON.stringify({ data: [{ embedding: [2, 1, 0] }] }), { status: 200 });
-  const built = await buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake });
+  const built = await buildRagIndex(store, localExternal(), { fetchImpl: fake });
   assert.equal(built.ok, true);
   // Rebuilding cleans up the old file instead of migrating it.
   assert.equal(fs.existsSync(path.join(root, 'rag', 'index.json')), false);
@@ -3065,8 +3315,8 @@ test('concurrent RAG builds serialize and a stale writer lock is ignored', async
   fs.utimesSync(lockFile, past, past);
 
   const [a, b] = await Promise.all([
-    buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake }),
-    buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake }),
+    buildRagIndex(store, localExternal(), { fetchImpl: fake }),
+    buildRagIndex(store, localExternal(), { fetchImpl: fake }),
   ]);
   assert.equal(a.ok, true);
   assert.equal(b.ok, true);
@@ -3087,6 +3337,9 @@ test('knowledge backend config accepts json / sqlite and rejects unknown values'
   assert.equal(normalizeConfig({ knowledgeBackend: 'sql' }).knowledgeBackend, 'sqlite');
   const validator = Config['~standard'].validate;
   assert.equal(validator({ knowledgeBackend: 'sqlite' }).value.knowledgeBackend, 'sqlite');
+  // The loader only sees Config.validate; an accepted alias must already be
+  // normalized there, otherwise the store silently falls back to JSON.
+  assert.equal(validator({ knowledgeBackend: 'sql' }).value.knowledgeBackend, 'sqlite');
   assert.ok(validator({ knowledgeBackend: 'mysql' }).issues);
 });
 
@@ -3316,9 +3569,59 @@ test('local model folders are discovered by category without loading weights', (
     assert.equal(Object.hasOwn(embed, 'apiKey'), false);
     assert.equal(catalog.categories[1].models[0].configured, false);
     assert.equal(catalog.categories[2].models[0].configured, false);
+    assert.match(catalog.categories[2].models[0].error, /预留/);
     assert.equal(catalog.categories[3].models[0].configured, false);
-    assert.equal(catalog.categories[3].models[0].error, '');
+    assert.match(catalog.categories[3].models[0].error, /预留/);
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('default model configuration lives under DSH home, not the plugin install root', () => {
+  const root = tempRoot();
+  const previousHome = process.env.DSH_HOME;
+  try {
+    process.env.DSH_HOME = root;
+    const userModel = path.join(root, 'ai-for-memory', 'models', 'Embedding', 'user-model');
+    fs.mkdirSync(userModel, { recursive: true });
+    fs.writeFileSync(path.join(userModel, 'weights.gguf'), '');
+    const resolved = resolveModel({ modelId: 'Embedding/user-model' });
+    assert.equal(resolved.ok, true);
+    assert.equal(resolved.model.modelsRoot, path.join(root, 'ai-for-memory', 'models'));
+
+    // The plugin-bundled models/ directory is still visible as a secondary
+    // source, but it is not where user configuration is written.
+    const catalog = listLocalModels();
+    assert.equal(catalog.root, path.join(root, 'ai-for-memory', 'models'));
+    assert.deepEqual(catalog.roots.map((row) => row.source), ['user', 'install']);
+  } finally {
+    resetLocalModelsCache();
+    if (previousHome === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = previousHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the model catalog is TTL-cached instead of walking the tree on every state read', () => {
+  const root = tempRoot();
+  try {
+    const models = path.join(root, 'models');
+    fs.mkdirSync(path.join(models, 'Embedding', 'first'), { recursive: true });
+    const first = listLocalModelsCached(models, 60000);
+    assert.equal(first.categories[0].models[0].id, 'Embedding/first');
+
+    // A new folder inside the TTL window is intentionally not visible yet.
+    fs.mkdirSync(path.join(models, 'Embedding', 'second'), { recursive: true });
+    const cached = listLocalModelsCached(models, 60000);
+    assert.deepEqual(cached.categories[0].models.map((model) => model.id), ['Embedding/first']);
+
+    resetLocalModelsCache();
+    const fresh = listLocalModelsCached(models, 60000);
+    assert.deepEqual(fresh.categories[0].models.map((model) => model.id).sort(), [
+      'Embedding/first', 'Embedding/second',
+    ]);
+  } finally {
+    resetLocalModelsCache();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -3475,8 +3778,10 @@ test('harness checkpoints get a current-request anchor, not a repeated answer', 
     const preStep = handlers.get('agent/pre-step');
     await preStep({ agent: { session }, signal: new AbortController().signal }, () => {});
     assert.equal(appended.length, 1);
-    assert.equal(appended[0].type, 'developer/message');
-    assert.match(appended[0].data.message.content[0].text, /真实请求：加网络层/);
+    assert.equal(appended[0].type, 'user/message');
+    assert.equal(appended[0].data.source.kind, 'ai-for-memory');
+    assert.equal(appended[0].data.source.form, 'notice');
+    assert.match(appended[0].data.content[0].text, /真实请求：加网络层/);
     // Same checkpoint must not add the anchor again on every step.
     await preStep({ agent: { session }, signal: new AbortController().signal }, () => {});
     assert.equal(appended.length, 1);
@@ -3720,7 +4025,7 @@ test('云端服务可分别配置嵌入/重排的地址、模型与 API Key', as
   assert.equal(rerankEp.model, 'jina-reranker-v2-base-multilingual');
 
   // 没单独配 key 的端点沿用主 key（本地服务一般留空）
-  const inherited = normalizeExternal({ apiKey: 'sk-main' });
+  const inherited = localExternal({ apiKey: 'sk-main' });
   assert.equal(embedEndpoint(inherited).apiKey, 'sk-main');
   assert.equal(rerankEndpoint(inherited).apiKey, 'sk-main');
 
@@ -3808,7 +4113,7 @@ test('RAG rebuild never mixes dimensions when the endpoint changes its output', 
       data: inputs.map(() => ({ embedding: Array.from({ length: dim }, (_, index) => (index === 0 ? 1 : 0)) })),
     }), { status: 200 });
   };
-  const endpoint = normalizeExternal({});
+  const endpoint = localExternal();
   await buildRagIndex(store, endpoint, { fetchImpl: vectorsOf(3) });
   // A new document arrives after the server silently changed to 4 dimensions.
   docs.push({ doc_id: 'k_b', text: 'beta', category: 'errors_fixes', source: 'agent' });
@@ -4023,7 +4328,7 @@ test('RAG build dedupes near-identical documents by embedding', async () => {
     }), { status: 200 });
   };
   try {
-    const built = await buildRagIndex(store, normalizeExternal({}), { fetchImpl: fake });
+    const built = await buildRagIndex(store, localExternal(), { fetchImpl: fake });
     assert.equal(built.ok, true);
     // k_old is a near-duplicate of k_new in the same category; the cross-category
     // document and the distinct fact stay indexed.

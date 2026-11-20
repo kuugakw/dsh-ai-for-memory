@@ -64,10 +64,10 @@
 | `requestAnchor` | `true` | 检查点/时间提示到达时，给模型加一条“当前真实请求”提醒，避免答旧题 |
 | `decisionRetentionDays` | 0 | 决策记录保留天数；0=不自动删 |
 | `ragMount` | false | 是否把 RAG 索引挂到检索 |
-| `externalBaseUrl` | 空 | 外部模型主地址 |
+| `externalBaseUrl` | 空 | 外部模型主地址；空=未配置，不发起探活或请求。示例见面板 placeholder |
 | `externalEmbedModel` | 空 | Embedding 模型 |
 | `externalRerankModel` | 空 | Rerank 模型 |
-| `externalTimeoutMs` | 60000 | 外部请求超时 |
+| `externalTimeoutMs` | 60000 | 真实外部请求超时；探活固定上限 5000ms |
 
 完整配置可以直接编辑插件配置；面板会覆盖最常用的设置。
 

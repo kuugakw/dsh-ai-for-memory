@@ -23,6 +23,7 @@
 - 当轮仍在进行时不会被清；工具调用/结果对不会拆开；
 - 如果这一轮已经结束、没有下一次模型请求，则在 `turn/end` 直接全部清出，不再载入旧内容；
 - 硬重置不受 `minClearChars`、`maxClearTurns` 的裁剪限制，避免 60%+ 的窗口只清掉一小段；
+- 清出后的便条仍是模型可见的 `user/message`，但带上 `source.kind = ai-for-memory`、`source.form = notice` 和 `source.summary`；真实用户输入的 `source.kind = user`，据此可区分两者；
 - 手动 `clear` 仍按话题相似度选择，不会强制全清。
 
 `topicalClear=false` 时，手动/每轮触发先保存上下文，再走 DSH 原生压缩；上下文占用阈值仍走全量重置。

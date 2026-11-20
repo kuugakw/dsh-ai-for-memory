@@ -1,10 +1,10 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
-[![Status](https://img.shields.io/badge/status-stable%200.1-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.1.0-lightgrey.svg)](package.json)
+[![Status](https://img.shields.io/badge/status-stable%200.1.1-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.1.1-lightgrey.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.1.0 本插件的第一个正式版。** AI for Memory 是面向 DSH 的项目级记忆插件：这一版把六层记忆、五个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。
+> **0.1.1 是 0.1.0 的修复版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、五个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。
 >
 > 升级前请备份记忆目录。
 
@@ -107,7 +107,7 @@ provenance: model
 verified: false
 ```
 
-检索时会被降权，面板上会带黄色「模型自述（未确认）」标记。用户确认后才会转成已确认事实。
+检索时会被降权，面板上会带黄色「模型自述（未确认）」标记。`source` 缺失或拼错时归一为 `unknown`，同样按模型自述处理，不会因为少传一个参数变成已确认事实。用户确认后才会转成已确认事实。
 
 ---
 
@@ -140,7 +140,7 @@ aim_memory action=status
 
 侧栏「AI 记忆」打开面板，包含总览、六层记忆页、插件设置和模型页。面板会显示当前范围、工作区、对话、记忆目录和最近清理状态；工作区分组来自 DSH 的会话分桶，不使用对话中途的 `cwd`。
 
-本地模型文件夹 `models/` 可以放 BGE-M3 和 BGE Reranker v2 m3 的 GGUF。插件不下载权重，而是按 `model.json` 启动 `llama-server`：
+本地模型配置放在 `$DSH_HOME/ai-for-memory/models/`（默认 `~/.dsh/ai-for-memory/models/`），插件自带的 `models/` 只是可选扫描源。可以放 BGE-M3 和 BGE Reranker v2 m3 的 GGUF。插件不下载权重，而是按 `model.json` 启动 `llama-server`：
 
 - Embedding：`--embeddings --pooling cls`；
 - Rerank：`--reranking`；
@@ -160,6 +160,7 @@ aim_memory action=status
 - **上下文占用超过阈值**：在下一次模型请求前做硬重置，已完成轮次全部存档并清出，只回载当前请求和最近进展；如果这一轮已经结束，则在轮末直接全部清出；
 - **自动快照**：每 N 轮保存最近上下文窗口，超限时优先删除相似的旧自动快照；
 - **请求锚点**：系统检查点到达时，提醒模型继续上一轮真实请求，不重复历史回答。
+- **便条与真实输入分开**：插件写入的便条仍是模型可见的 `user/message`，但 `source.kind = ai-for-memory`、`source.form = notice`，并用 `source.summary` 标注；真实用户输入的 `source.kind = user`。
 
 完整规则、保留策略和恢复预算见 [上下文与自动行为](docs/context.md)。
 
@@ -186,14 +187,17 @@ aim_memory action=status
 
 ## 更新内容
 
-当前版本 **0.1.0**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.1.1**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
 - 上下文占用达到阈值时的**全量硬重置**与任务续接；
-- 本地 **llama.cpp 推理引擎**：自动发现 GGUF、启动 `llama-server`、支持 BGE-M3 与 BGE Reranker v2 m3；
+- 本地 **llama.cpp 推理引擎**：自动发现 GGUF、启动 `llama-server`、支持 BGE-M3 与 BGE Reranker v2 m3；启动失败时面板显示 stderr 尾部、实际命令和针对性修复提示；启动前会把 PID/端口写入用户模型目录的 `.engine.lock`，插件重启后自动探测并接管还活着的引擎，不再重复拉起第二份；
 - 设置保存后**自动重载并刷新**，不需要手动重载；
 - 工作区分桶在 Windows / POSIX 上的跨平台解码修复；
+- 外部模型地址默认留空、探活超时 5 秒，未配置时不再连接本地 8080；
+- 网络同步支持 `git@host:path` 式 remote，常见端口并发探测；
+- `.gitignore` 缺失或记忆目录未忽略时，状态和面板明确警告；
 - 面板导航焦点框、布局和若干稳定性修复。
 
 完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。

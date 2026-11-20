@@ -27,6 +27,7 @@ import { evaluateDecision } from './lib/decision.js';
 import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
 import { defaultRegistryDir, rememberRoot } from './lib/registry.js';
 import { installApi } from './lib/api.js';
+import { restoreLocalEngines, stopAllLocalEngines } from './lib/local-engine.js';
 import { collectTurnDigest } from './lib/auto.js';
 import {
   buildContextSnapshot, collectTurns, formatRestoreContext, snapshotOfTurns,
@@ -100,7 +101,10 @@ const DEFAULTS = Object.freeze({
   // External model endpoint: any OpenAI-compatible HTTP API (llama.cpp,
   // Ollama, LM Studio, vLLM, a hosted gateway). This is the transport the
   // future RAG index will use; nothing calls it unless asked.
-  externalBaseUrl: 'http://127.0.0.1:8080',
+  // Empty = not configured. The panel shows a localhost example as a
+  // placeholder, but no request is made until the user fills it in; otherwise
+  // opening/probing the panel would wait on a dead 8080 service.
+  externalBaseUrl: '',
   externalModel: '',
   externalApiKey: '',
   externalTimeoutMs: 60000,
@@ -163,6 +167,11 @@ const NUMERIC_BOUNDS = Object.freeze({
   externalTimeoutMs: [1000, 600000],
 });
 
+/** Canonical knowledge backend; `sql` is the friendly alias for `sqlite`. */
+function canonicalKnowledgeBackend(raw) {
+  return raw === 'sql' ? 'sqlite' : raw;
+}
+
 /**
  * Config validator implementing the standard-schema shape DSH's loader uses.
  * `undefined` is valid input (a patch row without `config:`) and means defaults.
@@ -201,8 +210,13 @@ export const Config = Object.freeze({
           issues.push({ message: `${key} 必须是 ${fallbackType}`, path: [key] });
           continue;
         }
-        if (key === 'knowledgeBackend' && !['json', 'sqlite', 'sql'].includes(input[key])) {
-          issues.push({ message: 'knowledgeBackend 必须是 json 或 sqlite', path: [key] });
+        if (key === 'knowledgeBackend') {
+          const backend = canonicalKnowledgeBackend(input[key]);
+          if (!['json', 'sqlite'].includes(backend)) {
+            issues.push({ message: 'knowledgeBackend 必须是 json 或 sqlite', path: [key] });
+            continue;
+          }
+          value[key] = backend;
           continue;
         }
         value[key] = input[key];
@@ -221,7 +235,7 @@ export function normalizeConfig(raw) {
     if (Object.hasOwn(input, key) && input[key] !== undefined) value[key] = input[key];
   }
   // `sql` is a friendly alias; anything unknown falls back to the file backend.
-  if (value.knowledgeBackend === 'sql') value.knowledgeBackend = 'sqlite';
+  value.knowledgeBackend = canonicalKnowledgeBackend(value.knowledgeBackend);
   if (!['json', 'sqlite'].includes(value.knowledgeBackend)) value.knowledgeBackend = 'json';
   return value;
 }
@@ -350,10 +364,13 @@ export function memoryContext(config, exec, deps = {}, runtime = undefined) {
   // `.gitignore`, add the directory before its first creation so `git add .`
   // cannot sweep the archive into a public repository. Custom roots are left
   // alone; the README tells users to ignore those themselves.
+  let gitignore = null;
   try {
-    ensureDefaultMemoryDirIgnored(root, workspace, config.directoryName);
-  } catch {
-    // Never let a read-only `.gitignore` block memory writes.
+    gitignore = ensureDefaultMemoryDirIgnored(root, workspace, config.directoryName);
+  } catch (error) {
+    // Never let a read-only `.gitignore` block memory writes, but keep the
+    // warning so status/panel can tell the user the archive is unprotected.
+    gitignore = { changed: false, reason: 'error', warning: `无法检查 .gitignore：${error?.message ?? error}` };
   }
   const registryDir = deps.registryDir ?? defaultRegistryDir();
   try {
@@ -364,7 +381,14 @@ export function memoryContext(config, exec, deps = {}, runtime = undefined) {
   }
   const sessionId = sessionOf(exec);
   if (runtime && sessionId !== '') markActivity(runtime, sessionId);
-  return { scopes: createScopes(root, config), sessionId, workspace, root, meta: sessionMetaFrom(exec, workspace) };
+  return {
+    scopes: createScopes(root, config),
+    sessionId,
+    workspace,
+    root,
+    meta: sessionMetaFrom(exec, workspace),
+    gitignore,
+  };
 }
 
 // ---- conversation activity ----------------------------------------------
@@ -2102,7 +2126,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
               + `单次最多 ${config.maxClearTurns} 轮（${config.minClearChars}~${config.maxClearChars} 字符）`,
             `恢复预算：单次 restore 最多注入 ${config.restoreMaxChars ?? 12000} 字符，只取最近轮次`,
             `自动整理：${config.autoEnabled ? `开启（每 ${config.autoEveryRounds} 轮按相似度；上下文占用到 ${config.contextUsagePercent}% 时全量重置）` : '关闭'}`,
-            `保留策略：staging ${config.stagingRetentionDays ?? 30} 天（仅已归档文件）；`
+            ...(context.gitignore?.warning ? [`⚠ ${context.gitignore.warning}`] : []),            `保留策略：staging ${config.stagingRetentionDays ?? 30} 天（仅已归档文件）；`
               + `contexts ${config.contextRetentionDays > 0 ? `${config.contextRetentionDays} 天` : '不自动删除'}；`
               + `decisions ${config.decisionRetentionDays > 0 ? `${config.decisionRetentionDays} 天` : '不自动删除'}`,            (() => {
               const meter = deps.getService?.('tokenMeter');
@@ -2168,7 +2192,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         + '这里的模型主要用作 Embedding 和 Rerank：三层记忆的「外部模型」模式靠 embed + rerank 工作，不依赖 chat。'
         + 'chat 可传 sources 作为编号来源，回答里用 [n] 标注依据，结果末尾会附「来源对照 + 调用记录」'
         + '（模型、地址、请求 id、输入 sha256、输出长度、截断状态），方便追溯一次摘要具体来自哪次调用、哪些材料。'
-        + '只连插件配置的地址（默认 http://127.0.0.1:8080；填 .../v1 或完整接口地址也认），不写任何记忆。',
+        + '只连插件配置的地址（externalBaseUrl 留空=未配置，不联网；示例 http://127.0.0.1:8080，填 .../v1 或完整接口地址也认），不写任何记忆。',
       parameters: {
         action: {
           type: 'string',
@@ -2373,6 +2397,8 @@ export function installContextManagement(ctx, config, deps, runtime) {
     for (let index = events.length - 1; index >= 0; index -= 1) {
       const event = events[index];
       if (event?.type !== 'user/message') continue;
+      // Never treat a plugin-authored notice as the real user request.
+      if (event?.data?.source?.kind === 'ai-for-memory') continue;
       const text = textOfUserEvent(event);
       if (text === '') continue;
       if (latestUser === null) latestUser = { seq: event.seq, text };
@@ -2388,22 +2414,25 @@ export function installContextManagement(ctx, config, deps, runtime) {
     if (previous && previous.requestSeq === realRequest.seq) return;
     const anchor = clip(realRequest.text, 260);
     try {
-      session.append('developer/message', {
-        message: {
-          source: { kind: 'ai-for-memory' },
-          role: 'developer',
-          id: randomUUID(),
-          content: [{
-            type: 'text',
-            text: `【当前请求锚点】上一轮真实用户请求：${anchor}\n`
-              + '这是内部提醒：系统时间、工具 schema 更新、插件重载不是新请求；只处理上面这个请求，不要重复历史回答。',
-          }],
+      // Same carrier rule as clear notes: user-visible/model-visible, but
+      // tagged as an ai-for-memory notice rather than genuine user input.
+      session.append('user/message', {
+        id: randomUUID(),
+        role: 'user',
+        source: {
+          kind: 'ai-for-memory',
+          form: 'notice',
+          summary: '当前请求锚点',
         },
-        headerSeq: latestUser.seq,
+        content: [{
+          type: 'text',
+          text: `【当前请求锚点】上一轮真实用户请求：${anchor}\n`
+            + '这是内部提醒：系统时间、工具 schema 更新、插件重载不是新请求；只处理上面这个请求，不要重复历史回答。',
+        }],
       }, { surfaceOp: 'append' });
       anchorState.set(id, { latestSeq: latestUser.seq, requestSeq: realRequest.seq });
     } catch {
-      // A surface that cannot take developer messages must not break pre-step.
+      // A surface that cannot take the anchor must not break pre-step.
     }
   };
 
@@ -2594,6 +2623,10 @@ export function installContextManagement(ctx, config, deps, runtime) {
     } catch {
       // keep clearing
     }
+    // Keep the note model-visible, but tag it as plugin-authored context rather
+    // than typing it as user input. DSH's developer/message is a tool/system
+    // update (and can fail provider projection), so the stable carrier is a
+    // user message with a `notice` source. Real user input keeps kind `user`.
     session.append('user/message', {
       id: randomUUID(),
       role: 'user',
@@ -2604,7 +2637,11 @@ export function installContextManagement(ctx, config, deps, runtime) {
           + `原文完整保存在本对话的记忆存档 ${contextId}。`
           + `需要时调用 aim_context restore（context_id=${contextId}）即可调回。`,
       }],
-      source: { kind: 'ai-for-memory' },
+      source: {
+        kind: 'ai-for-memory',
+        form: 'notice',
+        summary: clip(`上下文清理：${describeTurns(run.turns, run.similarity)}`, 120),
+      },
     }, {
       surfaceOp: { op: 'replace', startSeq: run.startSeq, endSeq: run.endSeq },
       sourceEventSeqs: run.seqs,
@@ -3214,6 +3251,21 @@ export function apply(ctx, config) {
       // eslint-disable-next-line no-console
       console.error(`[ai-for-memory] 工具 ${tool.name} 注册失败：${error?.message ?? error}`);
     }
+  }
+
+  // Adopt llama-server processes left by a previous DSH/plugin process before
+  // the panel can offer a start button; otherwise a reload can spawn a second
+  // server on a new port while the survivor keeps its VRAM.
+  try {
+    void restoreLocalEngines();
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(`[ai-for-memory] 本地引擎接管失败：${error?.message ?? error}`);
+  }
+  if (typeof ctx?.effect === 'function') {
+    ctx.effect(() => () => {
+      void stopAllLocalEngines();
+    });
   }
 
   // The Web panel reads the same store over a small same-origin HTTP API.
