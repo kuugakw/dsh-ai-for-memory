@@ -1,11 +1,11 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.1.1-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.1.1-lightgrey.svg)](package.json)
+[![Status](https://img.shields.io/badge/status-stable%200.2.0-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.2.0-lightgrey.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.1.1 是 0.1.0 的修复版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、五个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。
+> **0.2.0 是 0.1.1 之后的功能版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、五个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版新增诊断/用量页、面板操作审计、知识筛选与批量确认、单条 JSON 打开/下载、快照对比和实时上下文占用显示。
 >
 > 升级前请备份记忆目录。
 
@@ -188,10 +188,15 @@ aim_memory action=status
 
 ## 更新内容
 
-当前版本 **0.1.1**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.2.0**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
+- **诊断/用量页**：运行环境、知识命中与权重、对话磁盘占用、批量开放/关闭和面板操作审计集中在一页；
+- 知识页支持**分类/来源/确认状态筛选**、**时间/置信度/命中次数/权重排序**、**批量确认**与**撤销确认**；
+- 知识、上下文和快照条目可直接**打开 JSON / 下载全文**，诊断页支持两个快照并排对比；
+- 总览补齐六层卡片，并显示 tokenMeter 的**实时上下文占用**（阈值单独保留）；
+- **MCP 出口**：本机 MCP 客户端可列出记忆根并调用现有 `aim_*` 工具；
 - 上下文占用达到阈值时的**全量硬重置**与任务续接；
 - 本地 **llama.cpp 推理引擎**：自动发现 GGUF、启动 `llama-server`、支持 BGE-M3 与 BGE Reranker v2 m3；启动失败时面板显示 stderr 尾部、实际命令和针对性修复提示；启动前会把 PID/端口写入用户模型目录的 `.engine.lock/<模型>.json`（一个模型一个文件，并发启动不会覆盖彼此的锁记录），插件重启后自动探测并接管还活着的引擎，不再重复拉起第二份；
 - 设置保存后**自动重载并刷新**，不需要手动重载；

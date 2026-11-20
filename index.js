@@ -25,7 +25,7 @@ import { ensureDefaultMemoryDirIgnored } from './lib/gitignore.js';
 import { markActivity } from './lib/activity.js';
 import { evaluateDecision } from './lib/decision.js';
 import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
-import { defaultRegistryDir, rememberRoot } from './lib/registry.js';
+import { defaultRegistryDir, listRootRows, rememberRoot } from './lib/registry.js';
 import { installApi } from './lib/api.js';
 import { restoreLocalEngines, stopAllLocalEngines } from './lib/local-engine.js';
 import { collectTurnDigest } from './lib/auto.js';
@@ -146,6 +146,12 @@ const DEFAULTS = Object.freeze({
   // not answer an older topic. A real incoming request always wins. Off only
   // for token-strict setups.
   requestAnchor: true,
+  // MCP egress over the DSH Web server's loopback listener. It exposes a small
+  // read/write memory surface to other MCP clients; the route itself is still
+  // protected by the same loopback/Host guard as the panel. Set a token when the
+  // DSH listener is reachable through a local reverse proxy.
+  mcpEnabled: true,
+  mcpToken: '',
 });
 
 /** Integer bounds for the numeric settings; `null` marks a float setting. */
@@ -221,6 +227,9 @@ export const Config = Object.freeze({
           continue;
         }
         value[key] = input[key];
+      }
+      if (typeof value.mcpToken === 'string' && value.mcpToken.length > 500) {
+        issues.push({ message: 'mcpToken 不能超过 500 字符', path: ['mcpToken'] });
       }
       if (issues.length > 0) return { issues };
       return { value };
@@ -3256,6 +3265,52 @@ export function apply(ctx, config) {
   const deps = { workingDirectory, registryDir, getService };
   const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
 
+  /**
+   * Run one existing memory tool for an MCP caller. The caller supplies a
+   * registered root; the synthetic session is only a carrier for the root and
+   * never a real DSH conversation.
+   */
+  const runMcpTool = async (toolName, args, target = {}) => {
+    if (typeof toolName !== 'string' || toolName === '') throw new Error('缺少工具名');
+    const root = typeof target.root === 'string' && target.root !== ''
+      ? target.root
+      : resolved.root;
+    const workspace = typeof target.workspace === 'string' && target.workspace !== ''
+      ? target.workspace
+      : root;
+    const tools = createTools({ ...resolved, root }, deps, runtime);
+    const tool = tools.find((candidate) => candidate.name === toolName);
+    if (!tool || typeof tool.execute !== 'function') throw new Error(`未知工具：${toolName}`);
+    let liveAgent = target.agent;
+    if (!liveAgent && typeof target.sessionId === 'string' && target.sessionId !== '') {
+      const agents = getService('agents');
+      if (agents && typeof agents.get === 'function') liveAgent = agents.get(target.sessionId);
+    }
+    const liveSession = liveAgent?.session
+      ?? (target.session || null)
+      ?? {
+        id: `mcp-${process.pid}`,
+        header: { cwd: workspace },
+      };
+    let injected = null;
+    const exec = {
+      agent: {
+        session: liveSession,
+        whenIdle: typeof liveAgent?.whenIdle === 'function' ? liveAgent.whenIdle.bind(liveAgent) : undefined,
+        inject: async (payload) => {
+          const text = Array.isArray(payload?.content)
+            ? payload.content.map((item) => item?.text ?? '').filter(Boolean).join('\n')
+            : '';
+          if (text !== '') injected = text;
+          if (liveAgent && typeof liveAgent.inject === 'function') await liveAgent.inject(payload);
+        },
+      },
+    };
+    const output = await tool.execute(args ?? {}, exec);
+    return injected ?? output;
+  };
+  const listMcpRoots = () => listRootRows(registryDir, resolved.root);
+
   try {
     installContextManagement(ctx, resolved, deps, runtime);
   } catch (error) {
@@ -3307,6 +3362,9 @@ export function apply(ctx, config) {
       registryDir,
       runtime,
       getService,
+      runMcpTool,
+      listMcpRoots,
+      version: '0.2.0',
     });
   } catch (error) {
     // eslint-disable-next-line no-console

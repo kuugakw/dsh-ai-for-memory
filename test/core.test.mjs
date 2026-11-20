@@ -45,6 +45,7 @@ import {
 } from '../lib/git-sync.js';
 import { collectTurnDigest } from '../lib/auto.js';
 import { buildContextSnapshot, collectTurns, formatRestoreContext, snapshotOfTurns } from '../lib/context.js';
+import { handleMcpMessage, MCP_PATH, mcpToolNames } from '../lib/mcp.js';
 import { contentTokens, selectTurnsByTopic, topicSimilarity } from '../lib/similarity.js';
 import {
   AUTO_SNAPSHOT_PREFIX, isAutoSnapshot, planSnapshotPrune, snapshotText,
@@ -58,6 +59,7 @@ import {
   normalizeSource, stripInjectedText, withTokens,
 } from '../lib/knowledge.js';
 import { listRootRows, readRoots, rememberRoot, resolveRegisteredRoot } from '../lib/registry.js';
+import { appendAudit, readAudit } from '../lib/audit.js';
 import { isTrustedRequest } from '../lib/api.js';
 import { apply, compileParameterSchema, Config, createTools, installContextManagement, memoryContext, normalizeConfig, searchWithRag, workspaceOf } from '../index.js';
 
@@ -1561,6 +1563,16 @@ test('verification clears a model claim and incidents are compact unverified pro
     assert.equal(after.evidence.length, evidenceBefore + 1);
     assert.equal(after.evidence.at(-1).kind, 'user-confirm');
 
+    const undone = store.unverifyKnowledge(claim.doc_id);
+    assert.equal(undone.undone, true);
+    const reverted = store.documents().find((doc) => doc.doc_id === claim.doc_id);
+    assert.equal(reverted.verified, false);
+    assert.equal(reverted.confirmed, false);
+    assert.equal(reverted.source, before.source);
+    assert.equal(reverted.evidence.length, evidenceBefore);
+    // A second undo is a no-op rather than a source-mangling edit.
+    assert.equal(store.unverifyKnowledge(claim.doc_id).undone, undefined);
+
     // A claim written without a source is untraceable by default. Confirming it
     // must make the confirmation itself the traceable source; otherwise every
     // reload forces verified back to false and the panel button looks broken.
@@ -1610,16 +1622,64 @@ test('ui state exposes knowledge provenance and pending count', () => {
       evidence: [{ kind: 'authored', ref: 'user' }],
     });
     store.stage({ content: '提交前必须先跑测试', kind: 'action' });
+    const stored = store.documents()[0];
+    store.recordKnowledgeUsage([stored.doc_id]);
     const state = buildUiState([{ store, scope: 'session', label: '本对话' }]);
     assert.equal(state.counts.knowledge, 1);
+    assert.equal(state.knowledgeTotal, 1);
+    assert.equal(state.knowledgeReturned, 1);
+    assert.equal(state.knowledgeLimit, 200);
+    assert.equal(state.knowledgeLimited, false);
     const doc = state.knowledge[0];
     assert.equal(doc.category, 'workflow_rules');
     assert.equal(doc.source, 'user');
     assert.deepEqual(doc.tags, ['rule']);
     assert.equal(doc.evidence_count, 1);
+    assert.equal(doc.hits, 1);
+    assert.ok(doc.weight > 0);
     assert.ok(state.knowledgePending >= 1);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ui state discloses the 200-row knowledge cap instead of hiding rows', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    fs.mkdirSync(path.join(root, 'knowledge'), { recursive: true });
+    for (let index = 0; index < 201; index += 1) {
+      // Write the JSON base directly: `remember` intentionally merges
+      // near-duplicate prose, which would make this a dedupe test instead of a
+      // pagination-cap test.
+      fs.writeFileSync(path.join(root, 'knowledge', `k_cap_${index}.json`), JSON.stringify({
+        doc_id: `k_cap_${index}`,
+        text: `唯一知识条目 ${index} 用于验证知识点分页上限`,
+        category: 'project_facts',
+        source: 'user',
+        evidence: [{ kind: 'authored', ref: 'user' }],
+      }));
+    }
+    const state = buildUiState([{ store, scope: 'session', label: '本对话' }]);
+    assert.equal(state.counts.knowledge, 201);
+    assert.equal(state.knowledgeTotal, 201);
+    assert.equal(state.knowledgeReturned, 200);
+    assert.equal(state.knowledgeLimit, 200);
+    assert.equal(state.knowledgeLimited, true);
+    assert.equal(state.knowledge.length, 200);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('panel wiring keeps knowledge filters, batch confirm and cap disclosure', () => {
+  const source = fs.readFileSync(new URL('../client.js', import.meta.url), 'utf8');
+  for (const needle of [
+    'knowledgeCategory', 'knowledgeSource', 'knowledgeStatus', 'knowledgeSort',
+    'selectedKnowledge', 'verifySelectedKnowledge', 'knowledgeLimited',
+    'cappedNotice', 'verifyUndo', 'retentionConfirm', 'localModelStopConfirm',
+  ]) {
+    assert.ok(source.includes(needle), `panel wiring is missing ${needle}`);
   }
 });
 
@@ -1884,6 +1944,23 @@ test('context pressure triggers only when measured usage reaches the threshold',
 test('config validator accepts defaults and rejects wrong types', () => {
   const validator = normalizeConfig;
   assert.equal(validator({}).directoryName, '.ai-for-memory');
+  assert.equal(validator({}).mcpEnabled, true);
+  assert.equal(validator({}).maxContextChars, 30000);
+  assert.equal(validator({}).defaultTopK, 5);
+  assert.equal(validator({}).reviewHighRiskOnly, true);
+  assert.equal(validator({}).maxContentChars, 20000);
+  assert.equal(validator({}).maxSnapshotBytes, 262144);
+  assert.equal(validator({}).maxClearTurns, 8);
+  assert.equal(validator({}).minClearChars, 200);
+  assert.equal(validator({}).maxClearChars, 120000);
+  assert.equal(validator({}).autoKnowledge, true);
+  assert.equal(validator({}).autoKnowledgeLimit, 10);
+  assert.equal(validator({}).stagingRetentionDays, 30);
+  assert.equal(validator({}).contextRetentionDays, 0);
+  assert.equal(validator({}).decisionRetentionDays, 0);
+  assert.equal(validator({}).requestAnchor, true);
+  assert.equal(validator({ mcpEnabled: false }).mcpEnabled, false);
+  assert.equal(validator({ mcpToken: 'secret' }).mcpToken, 'secret');
   assert.equal(validator({ defaultTopK: 9 }).defaultTopK, 9);
   const tools = createTools(normalizeConfig({ defaultTopK: 7 }));
   assert.match(tools[1].parameters.top_k.description, /7/);
@@ -2044,6 +2121,113 @@ test('raw context archives keep tool results and untruncated message tails', () 
   const restored = formatRestoreContext(record, { maxChars: 100000 });
   assert.match(restored, /TOOL_OUTPUT_MARKER/);
   assert.match(restored, /TAIL_MARKER/);
+});
+
+test('plugin notices stay out of turn.user and never become user rules', () => {
+  const notice = '版本号只在正式发布到 GitHub 时修改，本地修 bug 不要改。';
+  const events = [
+    { type: 'turn/start', data: { turn: 1 } },
+    { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '检查一下发布流程' }] } },
+    { type: 'assistant/message', data: { message: { role: 'assistant', content: [{ type: 'text', text: '收到' }] } } },
+    // A clear/anchor note is model-visible, but it is not the user speaking.
+    { type: 'user/message', data: {
+      role: 'user',
+      content: [{ type: 'text', text: notice }],
+      source: { kind: 'ai-for-memory', form: 'notice' },
+    } },
+    { type: 'turn/end', data: { turn: 1 } },
+  ];
+  const turns = collectTurns(events);
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].user, '检查一下发布流程');
+  assert.deepEqual(turns[0].notices, [notice]);
+  // The archive still shows the notice, just not as the user's words.
+  assert.match(snapshotOfTurns(turns, { maxChars: Infinity }).text, /便条：/);
+  assert.ok(candidatesFromTurn(turns[0], 'ctx-notice').every((item) => !item.text.includes('版本号')));
+  const digest = collectTurnDigest(events, 1);
+  assert.ok(digest);
+  assert.doesNotMatch(digest, /版本号/);
+  // Older archives predate the source tag; the text-level guard still keeps
+  // known notice lines out of knowledge mining.
+  const legacy = { turn: 1, user: '检查一下发布流程\n只处理上面这个请求，不要重复历史回答' };
+  assert.ok(candidatesFromTurn(legacy, 'ctx-legacy').every((item) => !item.text.includes('只处理上面')));
+});
+
+test('MCP egress lists and routes root-scoped memory tools', async () => {
+  const root = tempRoot();
+  try {
+    const roots = [
+      { root: path.join(root, 'mem-a'), workspace: path.join(root, 'work-a'), label: 'a' },
+      { root: path.join(root, 'mem-b'), workspace: path.join(root, 'work-b'), label: 'b' },
+    ];
+    const calls = [];
+    const deps = {
+      version: '0.1.0',
+      listRoots: () => roots,
+      runTool: async (name, args, target) => {
+        calls.push({ name, args, target });
+        return `${name}:${args.query ?? args.text ?? ''}@${target.root}`;
+      },
+    };
+    assert.equal(MCP_PATH, '/ai-for-memory/mcp');
+    assert.ok(mcpToolNames().includes('aim_search'));
+    assert.ok(mcpToolNames().includes('aim_remember'));
+
+    const init = await handleMcpMessage({
+      jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' },
+    }, deps);
+    assert.equal(init.result.protocolVersion, '2025-06-18');
+    assert.equal(init.result.serverInfo.name, 'ai-for-memory');
+
+    const listed = await handleMcpMessage({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, deps);
+    assert.ok(listed.result.tools.some((tool) => tool.name === 'aim_context_list'));
+
+    const search = await handleMcpMessage({
+      jsonrpc: '2.0', id: 3, method: 'tools/call',
+      params: { name: 'aim_search', arguments: { query: '发布', root: roots[1].root } },
+    }, deps);
+    assert.equal(search.result.isError, false);
+    assert.ok(search.result.content[0].text.endsWith(`@${roots[1].root}`));
+    assert.equal(calls[0].target.workspace, roots[1].workspace);
+
+    const remembered = await handleMcpMessage({
+      jsonrpc: '2.0', id: 4, method: 'tools/call',
+      params: { name: 'aim_remember', arguments: { text: '发布前跑测试', root: roots[0].root } },
+    }, deps);
+    assert.equal(remembered.result.isError, false);
+    assert.equal(calls[1].name, 'aim_memory');
+    assert.equal(calls[1].args.action, 'remember');
+    assert.equal(calls[1].args.scope, 'shared');
+
+    const missing = await handleMcpMessage({
+      jsonrpc: '2.0', id: 5, method: 'tools/call',
+      params: { name: 'aim_status', arguments: { root: path.join(root, 'nope') } },
+    }, deps);
+    assert.equal(missing.result.isError, true);
+    assert.match(missing.result.content[0].text, /没有登记这个记忆根目录/);
+
+    const notice = await handleMcpMessage({ jsonrpc: '2.0', method: 'notifications/initialized' }, deps);
+    assert.equal(notice, null);
+    const unknown = await handleMcpMessage({ jsonrpc: '2.0', id: 6, method: 'nope' }, deps);
+    assert.equal(unknown.error.code, -32601);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('audit log is append-only, bounded and newest first', () => {
+  const root = tempRoot();
+  try {
+    appendAudit(root, { action: 'knowledge.verify', root: '/memory', detail: 'k_a' });
+    appendAudit(root, { action: 'context.clear', root: '/memory', detail: 'c_a' });
+    const rows = readAudit(root, 10);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].action, 'context.clear');
+    assert.equal(rows[1].action, 'knowledge.verify');
+    assert.equal(readAudit(root, 1).length, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('raw context restore keeps the newest segments when the budget is small', () => {

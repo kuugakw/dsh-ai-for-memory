@@ -28,6 +28,41 @@ window.__ModuleLoader__.load({
         navLayers: '记忆数据',
         navSystem: '系统',
         navSettings: '设置',
+        navDiagnostics: '诊断',
+        diagTitle: '诊断与用量',
+        diagSubtitle: '运行时健康、知识命中权重、对话占用和面板操作审计。',
+        diagRefresh: '重新检查',
+        diagHealth: '运行环境',
+        diagNode: 'Node',
+        diagSqlite: 'node:sqlite',
+        diagGit: 'Git',
+        diagLlama: 'llama-server',
+        diagModels: '本地模型目录',
+        diagWritable: '记忆目录可写',
+        diagGitignore: 'gitignore 保护',
+        diagStorage: '磁盘占用',
+        diagUsage: '知识命中与权重',
+        diagUsageHint: '按权重从低到高排列；权重 0 表示本对话从未命中，可能是死条目。',
+        diagHits: '命中',
+        diagWeight: '权重',
+        diagDead: '未命中',
+        diagConversations: '对话占用与批量开放',
+        diagBulkOpen: '批量开放',
+        diagBulkClose: '批量关闭',
+        diagBytes: '磁盘',
+        diagAudit: '操作审计',
+        diagNoAudit: '还没有审计记录。',
+        diagOpenFile: '打开 JSON',
+        diagDownload: '下载全文',
+        diagCompare: '快照对比',
+        diagCompareLeft: '左侧快照',
+        diagCompareRight: '右侧快照',
+        diagCompareRun: '对比',
+        diagNoUsage: '还没有知识条目。',
+        diagAvailable: '可用',
+        diagUnavailable: '不可用',
+        diagNoSnapshotCompare: '至少需要两个快照。',
+        diagNoConversations: '还没有对话记忆。',
         overviewTitle: '记忆总览',
         overviewSubtitle: '当前工作区的记忆规模、运行状态和最近活动。',
         overviewHealth: '运行状态',
@@ -55,6 +90,7 @@ window.__ModuleLoader__.load({
         settingsSubtitle: '插件内部设置；保存后自动重载，不需要打开 DSH 设置页。',
         settingsGeneral: '常规与上下文',
         settingsModels: '模型与检索',
+        settingsAdvanced: '高级策略与保留',
         settingsNetwork: '网络同步',
         settingsConversation: '当前对话',
         settingsBack: '返回总览',
@@ -103,9 +139,64 @@ window.__ModuleLoader__.load({
         pendingUpdates: '待确认知识更新',
         pendingUpdatesHint: '后台提炼想改写已有事实，但没有写入；核对后再决定是否覆盖。',
         pendingUpdateTarget: '目标',
+        pendingAccepted: '已接受更新并写入知识库',
+        pendingRejected: '已拒绝这条待确认更新',
+        pendingResolveFailed: '处理待确认更新失败',
+        pendingAccept: '接受并写入',
+        pendingReject: '拒绝',
+        delete: '删除这条',
+        confirmDelete: '再点一次确认删除',
+        forgotten: '知识已删除',
+        forgetFailed: '删除知识失败',
+        searchResult: '检索结果',
+        searching: '检索中…',
+        searchFailed: '检索失败',
+        searchRun: '检索',
+        sqlRun: '执行 SQL',
+        sqlResult: 'SQL 查询结果',
+        sqlPlaceholder: 'SELECT category, count(*) AS n FROM knowledge_docs GROUP BY category',
+        contextRestoreTitle: '上下文恢复内容',
+        contextRestore: '恢复到当前对话',
+        contextSaveTitle: '保存上下文结果',
+        contextSave: '保存当前上下文',
+        contextSaved: '当前上下文已保存',
+        contextClearTitle: '清理上下文结果',
+        contextClear: '清理上下文',
+        contextClearConfirm: '再点一次确认清理',
+        contextClearQueued: '清理已登记，将按策略生效',
+        contextActionFailed: '上下文操作失败',
+        contextRestored: '上下文已恢复注入，将在下一步生效',
+        contextRestoreFailed: '恢复上下文失败',
+        snapshotRestoreTitle: '快照状态',
+        snapshotRestore: '查看状态',
+        snapshotRestoreFailed: '读取快照失败',
+        quickActions: '立即操作',
+        memoryTextPlaceholder: '一段过程记录 / 一条事实 / 事故经过…',
+        memoryNamePlaceholder: '快照名或事故标题（可选）',
+        memoryTextRequired: '请先填写内容',
+        memoryActionDone: '操作完成',
+        memoryActionFailed: '操作失败',
+        memoryActionResult: '操作结果',
+        actionStage: '记过程',
+        actionRemember: '写事实',
+        actionPromote: '立即提炼',
+        actionSnapshot: '打快照',
+        actionArchive: '立即归档',
+        actionIncident: '记事故',
+        askTitle: '外部模型调试',
+        askHint: '直接调用 aim_ask：列出远端模型、发一句话看向量、或按 query 对候选做 rerank。用于排查模型名和本地 llama-server。',
+        askModels: '列出模型',
+        askProbe: '深度探活',
+        askChat: 'Chat',
+        askEmbed: 'Embed',
+        askRerank: 'Rerank',
+        askTextPlaceholder: '要发给模型的一句话 / 向量文本 / rerank query',
+        askDocsPlaceholder: 'rerank 候选，每行一条（留空则用上面的文本）',
+        askFailed: '外部模型调用失败',
         knowledgeHint: '知识库只存结论：三层里提炼出的用户规则/错误修复/决策理由，加上模型写入的内容；每条都带分类与出处。模型通过 remember/learn/incident 写入的内容默认是未确认自述，点「确认这条」后才转为已确认。新内容与库中已有知识或我的认知冲突时，会先问你，确认后才写入。',
         exportButton: '导出',
         exportClose: '收起导出',
+        closePanel: '关闭',
         exportKnowledge: '知识库（JSON / Markdown）',
         exportSql: 'SQL 镜像（.sqlite）',
         exportRag: 'RAG 索引',
@@ -134,6 +225,10 @@ window.__ModuleLoader__.load({
         localModelStarting: '启动本地引擎中…',
         localModelStarted: '本地引擎已启动并填入地址；确认后点「保存设置」。',
         localModelStartFailed: '本地引擎启动失败',
+        localModelStop: '停止引擎',
+        localModelStopConfirm: '停止这个本地引擎？正在使用它的请求会失败。',
+        localModelStopped: '本地引擎已停止',
+        localModelStopFailed: '停止本地引擎失败',
         localModelStale: '模型配置已变更，旧引擎不再复用；请先停止引擎，再重新启动。',
         localModelDiagnostics: '启动失败诊断（llama-server stderr）',
         localModelApplied: '已填入模型地址；确认后点「保存设置」。',
@@ -203,6 +298,9 @@ window.__ModuleLoader__.load({
         verifying: '确认中…',
         verified: '已确认',
         verifyFailed: '确认失败',
+        verifyUndone: '已撤销确认，恢复为模型自述',
+        verifyUndo: '撤销确认',
+        verifyUndoFailed: '撤销确认失败',
         updated: '已更新',
         updatedHint: '这条知识的正文被修改过；展开可见上一版。',
         previousText: '上一版',
@@ -252,6 +350,30 @@ window.__ModuleLoader__.load({
         clearingKeep: '始终保留最近几轮',
         clearingHint: '按话题相似度清理：以当轮与上轮为基准，相似度低的老轮次被清出，相似度高的原样保留；清出前先完整存档，随时可以 restore 调回。',
         restoreBudget: '恢复时最多注入字符数',
+        advancedHint: '这些是 DSH 记忆内核的硬边界：上下文预算、检索条数、归档字符上限、自动提炼和三层保留。留空/0 的保留天数表示不自动删除。',
+        maxContextChars: '上下文窗口总预算（字符）',
+        defaultTopK: '默认检索条数 top_k',
+        reviewHighRiskOnly: '只审查高风险（medium 自动放行）',
+        maxContentChars: '单条知识/记录最大字符',
+        maxSnapshotBytes: '快照最大字节',
+        maxClearTurns: '单次清理最多轮数',
+        minClearChars: '清理最少字符',
+        maxClearChars: '清理最多字符',
+        autoKnowledge: '自动整理时提炼知识',
+        autoKnowledgeLimit: '每次自动提炼上限',
+        retentionTitle: '保留与磁盘',
+        stagingRetentionDays: '过程记录保留天数（只删已归档）',
+        contextRetentionDays: '上下文存档保留天数（0=永不删）',
+        decisionRetentionDays: '决策记录保留天数（0=永不删）',
+        requestAnchor: '系统检查点请求锚点',
+        retentionNever: '0 = 永不自动删除',
+        storageUsed: '当前记忆目录占用',
+        storageContexts: '上下文存档',
+        retentionCleanup: '立即执行保留清理',
+        retentionConfirm: '立即删除超过保留期的存档？此操作不可撤销（已归档的过程记录会先确认已归档）。',
+        retentionCleaning: '清理中…',
+        retentionDone: '保留清理完成',
+        retentionFailed: '保留清理失败',
         ragTitle: 'RAG 挂载（知识库检索）',
         ragNeedModels: '启用 RAG 需要同时填写 Embedding 模型和 Rerank 模型（在下方「外部模型」区设置）；缺一个都不能挂载。',
         ragHintOn: '已挂载：aim_search 优先用外部嵌入 + 重排检索知识库，结果会标注「检索方式：RAG」；关掉即回到本地 BM25。',
@@ -271,8 +393,20 @@ window.__ModuleLoader__.load({
         storageSqlOn: '已启用：每次写入 JSON 后同步一份 knowledge/knowledge.sqlite，供 SQL 工具查询；关掉不影响 JSON，也不影响 RAG。',
         storageSqlOff: '未启用：只写 JSON 底座；SQL 查询仍会从 JSON 临时建只读表，RAG 也不受影响。',
         storageSqliteUnavailable: '当前 Node 不支持 node:sqlite（需要 Node 22.5+），会继续只用 JSON。',
-        contextRestoreHint: '需要恢复时，在对话里让我执行 aim_context restore。',
         searchPlaceholder: '搜索知识库（id/正文/分类/来源/标签）',
+        filterCategory: '分类',
+        filterSource: '来源',
+        filterStatus: '状态',
+        all: '全部',
+        unverified: '未确认',
+        sortUpdated: '按更新时间',
+        sortConfidence: '按置信度',
+        sortHits: '按命中次数',
+        sortWeight: '按权重',
+        selectAll: '全选当前列表',
+        batchVerify: '批量确认',
+        loadedOf: '当前显示',
+        cappedNotice: '只加载最新 {n} 条',
         clearSearch: '清空',
         state: '状态',
         time: '时间',
@@ -281,12 +415,44 @@ window.__ModuleLoader__.load({
         category: '分类',
         kind: '类型',
         risk: '风险',
+        confidence: '置信度',
+        lastChange: '最近变化',
+        decisionReviewed: '已审查',
+        decisionAuto: '自动放行',
+        decisionApproved: '已批准',
+        decisionRejected: '已拒绝',
+        decisionGate: '可逆性',
+        decisionIrreversible: '不可逆',
+        decisionReversible: '可恢复',
+        decisionRecoverable: '恢复路径',
+        decisionStats: '决策分布',
+        overviewLimits: '容量上限',
+        overviewSessions: '对话',
+        overviewGitignore: '.gitignore 保护',
+        gitignoreIgnored: '已忽略',
+        gitignoreNoFile: '无 .gitignore',
+        gitignoreNotIgnored: '未忽略',
+        gitignoreAlready: '目录已存在但未忽略',
+        gitignoreCustom: '自定义目录（不适用）',
+        gitignoreInvalid: '目录名无效',
+        gitignoreError: '读取失败',
+        gitignoreNotApplicable: '固定目录（不适用）',
+        networkAhead: '领先',
+        networkBehind: '落后',
+        networkStaged: '已暂存',
         outcome: '结果',
         reason: '理由',
         thesis: '正',
         antithesis: '反',
         storageSettings: '使用与存储设置',
         storageHint: '固定目录：所有项目共用这个文件夹（绝对路径）；留空则每个项目各自保存在工作区下的目录里。保存后插件会自动重载。',
+        mcpTitle: 'MCP 出口',
+        mcpHint: '把记忆开放给其他 MCP 工具：同一台机器上的客户端连这个地址即可，默认只监听回环地址。工具：aim_roots / aim_search / aim_remember / aim_status / aim_context_list / aim_context_restore。',
+        mcpEnabledLabel: '启用 MCP 出口',
+        mcpUrlLabel: 'MCP 地址',
+        mcpTokenLabel: '访问令牌（可选）',
+        mcpTokenSaved: '已设置，留空保持不变，填 - 清除',
+        mcpTokenNone: '未设置；只靠回环地址保护',
         autoMode: '自动整理',
         switchOn: '开',
         switchOff: '关',
@@ -325,6 +491,41 @@ window.__ModuleLoader__.load({
         navLayers: 'Memory data',
         navSystem: 'System',
         navSettings: 'Settings',
+        navDiagnostics: 'Diagnostics',
+        diagTitle: 'Diagnostics and usage',
+        diagSubtitle: 'Runtime health, knowledge hit weights, conversation disk use and panel audit.',
+        diagRefresh: 'Check again',
+        diagHealth: 'Runtime',
+        diagNode: 'Node',
+        diagSqlite: 'node:sqlite',
+        diagGit: 'Git',
+        diagLlama: 'llama-server',
+        diagModels: 'Local models',
+        diagWritable: 'Memory directory writable',
+        diagGitignore: 'gitignore protection',
+        diagStorage: 'Disk use',
+        diagUsage: 'Knowledge hits and weights',
+        diagUsageHint: 'Lowest weight first; 0 means never used in this conversation and may be dead.',
+        diagHits: 'Hits',
+        diagWeight: 'Weight',
+        diagDead: 'Never used',
+        diagConversations: 'Conversation disk and bulk access',
+        diagBulkOpen: 'Open selected',
+        diagBulkClose: 'Close selected',
+        diagBytes: 'Disk',
+        diagAudit: 'Action audit',
+        diagNoAudit: 'No audit entries yet.',
+        diagOpenFile: 'Open JSON',
+        diagDownload: 'Download',
+        diagCompare: 'Snapshot compare',
+        diagCompareLeft: 'Left snapshot',
+        diagCompareRight: 'Right snapshot',
+        diagCompareRun: 'Compare',
+        diagNoUsage: 'No knowledge entries yet.',
+        diagAvailable: 'available',
+        diagUnavailable: 'unavailable',
+        diagNoSnapshotCompare: 'At least two snapshots are required.',
+        diagNoConversations: 'No conversation memory yet.',
         overviewTitle: 'Memory overview',
         overviewSubtitle: 'Size, runtime health and recent activity for the selected workspace.',
         overviewHealth: 'Runtime status',
@@ -352,6 +553,7 @@ window.__ModuleLoader__.load({
         settingsSubtitle: 'Plugin-local settings. Saving reloads the plugin automatically; no DSH settings page needed.',
         settingsGeneral: 'General & context',
         settingsModels: 'Models & retrieval',
+        settingsAdvanced: 'Advanced & retention',
         settingsNetwork: 'Network sync',
         settingsConversation: 'Current conversation',
         settingsBack: 'Back to overview',
@@ -400,9 +602,64 @@ window.__ModuleLoader__.load({
         pendingUpdates: 'Knowledge updates awaiting confirmation',
         pendingUpdatesHint: 'Background mining wanted to rewrite an existing fact; nothing was written. Review before overwriting.',
         pendingUpdateTarget: 'Target',
+        pendingAccepted: 'Update accepted and written',
+        pendingRejected: 'Pending update rejected',
+        pendingResolveFailed: 'Failed to resolve pending update',
+        pendingAccept: 'Accept & write',
+        pendingReject: 'Reject',
+        delete: 'Delete this',
+        confirmDelete: 'Click again to confirm',
+        forgotten: 'Knowledge deleted',
+        forgetFailed: 'Failed to delete knowledge',
+        searchResult: 'Search results',
+        searching: 'Searching…',
+        searchFailed: 'Search failed',
+        searchRun: 'Search',
+        sqlRun: 'Run SQL',
+        sqlResult: 'SQL query results',
+        sqlPlaceholder: 'SELECT category, count(*) AS n FROM knowledge_docs GROUP BY category',
+        contextRestoreTitle: 'Restored context',
+        contextRestore: 'Restore into current chat',
+        contextSaveTitle: 'Save context result',
+        contextSave: 'Save current context',
+        contextSaved: 'Current context saved',
+        contextClearTitle: 'Clear context result',
+        contextClear: 'Clear context',
+        contextClearConfirm: 'Click again to confirm clear',
+        contextClearQueued: 'Clear registered and will apply by policy',
+        contextActionFailed: 'Context action failed',
+        contextRestored: 'Context restored and injected; it applies on the next step',
+        contextRestoreFailed: 'Failed to restore context',
+        snapshotRestoreTitle: 'Snapshot state',
+        snapshotRestore: 'View state',
+        snapshotRestoreFailed: 'Failed to read snapshot',
+        quickActions: 'Quick actions',
+        memoryTextPlaceholder: 'A process record / fact / incident description…',
+        memoryNamePlaceholder: 'Snapshot name or incident title (optional)',
+        memoryTextRequired: 'Enter some text first',
+        memoryActionDone: 'Action completed',
+        memoryActionFailed: 'Action failed',
+        memoryActionResult: 'Action result',
+        actionStage: 'Log process',
+        actionRemember: 'Write fact',
+        actionPromote: 'Distill now',
+        actionSnapshot: 'Snapshot',
+        actionArchive: 'Archive now',
+        actionIncident: 'Log incident',
+        askTitle: 'External model debug',
+        askHint: 'Calls aim_ask directly: list remote models, send a chat/embed request, or rerank candidates. Useful for model-name and llama-server troubleshooting.',
+        askModels: 'List models',
+        askProbe: 'Deep probe',
+        askChat: 'Chat',
+        askEmbed: 'Embed',
+        askRerank: 'Rerank',
+        askTextPlaceholder: 'Prompt / text to embed / rerank query',
+        askDocsPlaceholder: 'Rerank candidates, one per line (empty = use the text above)',
+        askFailed: 'External model call failed',
         knowledgeHint: 'Knowledge stores conclusions only: user rules, error→fix pairs and decision reasons mined from the three layers, plus model-written content. Each document carries a category and a source. Content written through remember/learn/incident starts as an unverified model claim; click "Confirm this" to accept it. When a new fact conflicts with stored knowledge or with the model’s own understanding, you are asked first and it is stored only after you agree.',
         exportButton: 'Export',
         exportClose: 'Close export',
+        closePanel: 'Close',
         exportKnowledge: 'Knowledge base (JSON / Markdown)',
         exportSql: 'SQL mirror (.sqlite)',
         exportRag: 'RAG index',
@@ -431,6 +688,10 @@ window.__ModuleLoader__.load({
         localModelStarting: 'Starting local engine…',
         localModelStarted: 'Local engine started and address filled; click "Save settings" to apply.',
         localModelStartFailed: 'Local engine failed to start',
+        localModelStop: 'Stop engine',
+        localModelStopConfirm: 'Stop this local engine? In-flight requests using it will fail.',
+        localModelStopped: 'Local engine stopped',
+        localModelStopFailed: 'Failed to stop local engine',
         localModelStale: 'The model configuration changed, so the old engine was not reused. Stop it and start again.',
         localModelDiagnostics: 'Startup diagnostics (llama-server stderr)',
         localModelApplied: 'Model address filled; click "Save settings" to apply.',
@@ -500,6 +761,9 @@ window.__ModuleLoader__.load({
         verifying: 'Confirming…',
         verified: 'Confirmed',
         verifyFailed: 'Confirmation failed',
+        verifyUndone: 'Confirmation undone; back to a model claim',
+        verifyUndo: 'Undo confirmation',
+        verifyUndoFailed: 'Could not undo confirmation',
         updated: 'Updated',
         updatedHint: 'The stored text was changed; expand to see the previous version.',
         previousText: 'Previous version',
@@ -549,7 +813,30 @@ window.__ModuleLoader__.load({
         clearingKeep: 'Always keep the last N turns',
         clearingHint: 'Topic-aware clearing: each older turn is compared with the current and previous turn. Turns that still share the topic stay verbatim; only the ones the conversation has left behind are cleared, and their full text is archived first so restore can always bring them back.',
         restoreBudget: 'Max characters injected by restore',
-        contextRestoreHint: 'To restore one, ask me in the chat to run aim_context restore.',
+        advancedHint: 'Hard bounds of the memory core: context budget, retrieval count, archive size limits, auto-distillation and per-layer retention. A retention of 0 means never auto-delete.',
+        maxContextChars: 'Context window budget (chars)',
+        defaultTopK: 'Default retrieval top_k',
+        reviewHighRiskOnly: 'Review high risk only (auto-pass medium)',
+        maxContentChars: 'Max chars per knowledge/record entry',
+        maxSnapshotBytes: 'Max snapshot bytes',
+        maxClearTurns: 'Max turns cleared per run',
+        minClearChars: 'Min chars to clear',
+        maxClearChars: 'Max chars to clear',
+        autoKnowledge: 'Distill knowledge during auto tidy',
+        autoKnowledgeLimit: 'Auto-distill items per run',
+        retentionTitle: 'Retention & disk',
+        stagingRetentionDays: 'Process log retention days (archived only)',
+        contextRetentionDays: 'Context archive retention days (0 = never)',
+        decisionRetentionDays: 'Decision retention days (0 = never)',
+        requestAnchor: 'Harness checkpoint request anchor',
+        retentionNever: '0 = never auto-delete',
+        storageUsed: 'Current memory directory usage',
+        storageContexts: 'Context archives',
+        retentionCleanup: 'Run retention cleanup now',
+        retentionConfirm: 'Delete archives older than the retention window now? This cannot be undone (process records are only removed after archival).',
+        retentionCleaning: 'Cleaning…',
+        retentionDone: 'Retention cleanup finished',
+        retentionFailed: 'Retention cleanup failed',
         ragTitle: 'RAG mount (knowledge search)',
         ragNeedModels: 'RAG needs both an embedding model and a rerank model (set them in External model below). It cannot be mounted with only one.',
         ragHintOn: 'Mounted: aim_search uses external embeddings + rerank over the knowledge layer and marks results as RAG. Turn it off to go back to local BM25.',
@@ -570,6 +857,19 @@ window.__ModuleLoader__.load({
         storageSqlOff: 'Off: JSON stays the only base; SQL queries still build a temporary read-only table from JSON, and RAG is unaffected.',
         storageSqliteUnavailable: 'This Node build has no node:sqlite (Node 22.5+ required); JSON only.',
         searchPlaceholder: 'Search the knowledge base (id, text, category, source, tag)',
+        filterCategory: 'Category',
+        filterSource: 'Source',
+        filterStatus: 'Status',
+        all: 'All',
+        unverified: 'Unverified',
+        sortUpdated: 'By update time',
+        sortConfidence: 'By confidence',
+        sortHits: 'By hits',
+        sortWeight: 'By weight',
+        selectAll: 'Select shown',
+        batchVerify: 'Confirm selected',
+        loadedOf: 'Showing',
+        cappedNotice: 'only the newest {n} are loaded',
         clearSearch: 'Clear',
         state: 'State',
         time: 'Time',
@@ -578,12 +878,44 @@ window.__ModuleLoader__.load({
         category: 'Category',
         kind: 'Kind',
         risk: 'Risk',
+        confidence: 'Confidence',
+        lastChange: 'Last change',
+        decisionReviewed: 'Reviewed',
+        decisionAuto: 'Auto-approved',
+        decisionApproved: 'Approved',
+        decisionRejected: 'Rejected',
+        decisionGate: 'Reversibility',
+        decisionIrreversible: 'Irreversible',
+        decisionReversible: 'Recoverable',
+        decisionRecoverable: 'Recovery path',
+        decisionStats: 'Decision mix',
+        overviewLimits: 'Limits',
+        overviewSessions: 'Conversations',
+        overviewGitignore: '.gitignore protection',
+        gitignoreIgnored: 'Ignored',
+        gitignoreNoFile: 'No .gitignore',
+        gitignoreNotIgnored: 'Not ignored',
+        gitignoreAlready: 'Directory exists but is not ignored',
+        gitignoreCustom: 'Custom directory (not applicable)',
+        gitignoreInvalid: 'Invalid directory name',
+        gitignoreError: 'Read failed',
+        gitignoreNotApplicable: 'Fixed directory (not applicable)',
+        networkAhead: 'Ahead',
+        networkBehind: 'Behind',
+        networkStaged: 'Staged',
         outcome: 'Outcome',
         reason: 'Reason',
         thesis: 'Thesis',
         antithesis: 'Antithesis',
         storageSettings: 'Usage and storage settings',
         storageHint: 'Fixed directory: every project shares this folder (absolute path). Leave empty to keep one memory directory inside each workspace. The plugin reloads after saving.',
+        mcpTitle: 'MCP egress',
+        mcpHint: 'Expose memory to other MCP tools: a client on this machine can connect to this URL; the listener stays loopback-only. Tools: aim_roots / aim_search / aim_remember / aim_status / aim_context_list / aim_context_restore.',
+        mcpEnabledLabel: 'Enable MCP egress',
+        mcpUrlLabel: 'MCP URL',
+        mcpTokenLabel: 'Access token (optional)',
+        mcpTokenSaved: 'Stored; leave empty to keep, enter - to clear',
+        mcpTokenNone: 'Not set; loopback address is the only guard',
         autoMode: 'Auto tidy',
         switchOn: 'On',
         switchOff: 'Off',
@@ -1021,7 +1353,9 @@ window.__ModuleLoader__.load({
     function formatBytes(value) {
       const bytes = Number(value) || 0;
       if (bytes < 1024) return `${bytes} B`;
-      return `${(bytes / 1024).toFixed(1)} KB`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+      return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
     }
 
     function PanelIcon(props) {
@@ -1071,6 +1405,9 @@ window.__ModuleLoader__.load({
     function LogRow(props) {
       const open = props.open === true;
       return h('div', { className: 'aim-log', style: { ...styles.row, gap: '6px' } },
+        props.leading
+          ? h('span', { key: 'leading', style: { display: 'flex', alignItems: 'center', paddingLeft: '2px' } }, props.leading)
+          : null,
         h('button', {
           type: 'button',
           className: 'aim-log-head',
@@ -1106,7 +1443,10 @@ window.__ModuleLoader__.load({
           h('p', { key: 'content', style: styles.content }, row.content ?? ''),
           row.source || row.dedup_id ? h('div', { key: 'meta', style: styles.meta },
             row.source ? h('span', null, `${t.source}: ${row.source}`) : null,
-            row.dedup_id ? h('span', { style: styles.mono }, row.dedup_id.slice(0, 10)) : null) : null,
+            row.dedup_id ? h('span', { style: styles.mono }, row.dedup_id.slice(0, 10)) : null,
+            Number.isInteger(row.entry_index)
+              ? h('span', { style: styles.mono }, `#${row.entry_index}`)
+              : null) : null,
         ],
       });
     }
@@ -1149,6 +1489,42 @@ window.__ModuleLoader__.load({
       // Overview search is a shortcut into the knowledge layer, not a second
       // independent filter: pressing Enter opens the same filtered list.
       const [overviewQuery, setOverviewQuery] = React.useState('');
+      // Server-side retrieval / debug / maintenance output. `toolText` is a
+      // shared result card so search, SQL and memory actions do not need four
+      // different inline renderers.
+      const [toolTitle, setToolTitle] = React.useState('');
+      const [toolText, setToolText] = React.useState('');
+      const [toolBusy, setToolBusy] = React.useState('');
+      const [sqlQuery, setSqlQuery] = React.useState('');
+      const [deleteArmed, setDeleteArmed] = React.useState('');
+      const [contextClearArmed, setContextClearArmed] = React.useState(false);
+      const [pendingBusy, setPendingBusy] = React.useState('');
+      // Compact memory-action form (stage/remember/promote/snapshot/archive/incident).
+      const [memoryAction, setMemoryAction] = React.useState('remember');
+      const [memoryText, setMemoryText] = React.useState('');
+      const [memoryName, setMemoryName] = React.useState('');
+      const [askAction, setAskAction] = React.useState('models');
+      const [askText, setAskText] = React.useState('ping');
+      const [askDocs, setAskDocs] = React.useState('');
+      const [askBusy, setAskBusy] = React.useState(false);
+      const [askResult, setAskResult] = React.useState('');
+      const [retentionBusy, setRetentionBusy] = React.useState(false);
+      // Diagnostics is a separate top-level page: health, usage weights,
+      // conversation bytes and the panel action audit in one place.
+      const [diagnostics, setDiagnostics] = React.useState(null);
+      const [diagnosticsBusy, setDiagnosticsBusy] = React.useState(false);
+      const [selectedConversations, setSelectedConversations] = React.useState(() => new Set());
+      const [bulkBusy, setBulkBusy] = React.useState('');
+      const [snapshotCompare, setSnapshotCompare] = React.useState({ left: '', right: '', result: null, error: '' });
+      // Knowledge filters and multi-select. Filters operate on the rows already
+      // returned by /state; the total/returned metadata is shown so a capped
+      // list never looks like data loss.
+      const [knowledgeCategory, setKnowledgeCategory] = React.useState('all');
+      const [knowledgeSource, setKnowledgeSource] = React.useState('all');
+      const [knowledgeStatus, setKnowledgeStatus] = React.useState('all');
+      const [knowledgeSort, setKnowledgeSort] = React.useState('updated');
+      const [selectedKnowledge, setSelectedKnowledge] = React.useState(() => new Set());
+      const [knowledgeBusy, setKnowledgeBusy] = React.useState('');
       // Log lists collapse: `openRows` holds the row keys the user opened and
       // `listLimit` how many rows each list shows before "show more".
       const [openRows, setOpenRows] = React.useState(() => new Set());
@@ -1175,9 +1551,28 @@ window.__ModuleLoader__.load({
       const [formThreshold, setFormThreshold] = React.useState(0.05);
       const [formKeepRecent, setFormKeepRecent] = React.useState(2);
       const [formRestoreMax, setFormRestoreMax] = React.useState(12000);
+      const [formMaxContext, setFormMaxContext] = React.useState(30000);
+      const [formTopK, setFormTopK] = React.useState(5);
+      const [formReviewHighRiskOnly, setFormReviewHighRiskOnly] = React.useState(true);
+      const [formMaxContent, setFormMaxContent] = React.useState(20000);
+      const [formMaxSnapshotBytes, setFormMaxSnapshotBytes] = React.useState(262144);
+      const [formMaxClearTurns, setFormMaxClearTurns] = React.useState(8);
+      const [formMinClearChars, setFormMinClearChars] = React.useState(200);
+      const [formMaxClearChars, setFormMaxClearChars] = React.useState(120000);
+      const [formAutoKnowledge, setFormAutoKnowledge] = React.useState(true);
+      const [formAutoKnowledgeLimit, setFormAutoKnowledgeLimit] = React.useState(10);
+      const [formStagingRetention, setFormStagingRetention] = React.useState(30);
+      const [formContextRetention, setFormContextRetention] = React.useState(0);
+      const [formDecisionRetention, setFormDecisionRetention] = React.useState(0);
+      const [formRequestAnchor, setFormRequestAnchor] = React.useState(true);
       // RAG is mounted on the knowledge layer: the switch decides whether
       // aim_search uses the vector index; building the index is a separate click.
       const [formRagMount, setFormRagMount] = React.useState(false);
+      // MCP egress for other local tools. The token is write-only: state only
+      // reports whether one is stored, never the value.
+      const [formMcpEnabled, setFormMcpEnabled] = React.useState(true);
+      const [formMcpToken, setFormMcpToken] = React.useState('');
+      const [mcpHasToken, setMcpHasToken] = React.useState(false);
       const [ragIndex, setRagIndex] = React.useState({
         built: false, docs: 0, considered: 0, truncated: 0, deduped: 0, dim: 0, model: '', built_at: '',
       });
@@ -1281,6 +1676,9 @@ window.__ModuleLoader__.load({
           if (typeof payload.defaultPublic === 'boolean') setFormDefaultPublic(payload.defaultPublic);
           if (typeof payload.topicalClear === 'boolean') setFormTopical(payload.topicalClear);
           if (typeof payload.ragMount === 'boolean') setFormRagMount(payload.ragMount);
+          if (typeof payload.mcpEnabled === 'boolean') setFormMcpEnabled(payload.mcpEnabled);
+          setMcpHasToken(payload.mcpHasToken === true);
+          setFormMcpToken('');
           if (payload.ragIndex && typeof payload.ragIndex === 'object') setRagIndex(payload.ragIndex);
           if (payload.knowledgeBackend === 'sqlite' || payload.knowledgeBackend === 'json') {
             setFormStorage(payload.knowledgeBackend);
@@ -1295,6 +1693,20 @@ window.__ModuleLoader__.load({
           if (typeof payload.similarityThreshold === 'number') setFormThreshold(payload.similarityThreshold);
           if (Number.isInteger(payload.keepRecentTurns)) setFormKeepRecent(payload.keepRecentTurns);
           if (Number.isInteger(payload.restoreMaxChars)) setFormRestoreMax(payload.restoreMaxChars);
+          if (Number.isInteger(payload.maxContextChars)) setFormMaxContext(payload.maxContextChars);
+          if (Number.isInteger(payload.defaultTopK)) setFormTopK(payload.defaultTopK);
+          if (typeof payload.reviewHighRiskOnly === 'boolean') setFormReviewHighRiskOnly(payload.reviewHighRiskOnly);
+          if (Number.isInteger(payload.maxContentChars)) setFormMaxContent(payload.maxContentChars);
+          if (Number.isInteger(payload.maxSnapshotBytes)) setFormMaxSnapshotBytes(payload.maxSnapshotBytes);
+          if (Number.isInteger(payload.maxClearTurns)) setFormMaxClearTurns(payload.maxClearTurns);
+          if (Number.isInteger(payload.minClearChars)) setFormMinClearChars(payload.minClearChars);
+          if (Number.isInteger(payload.maxClearChars)) setFormMaxClearChars(payload.maxClearChars);
+          if (typeof payload.autoKnowledge === 'boolean') setFormAutoKnowledge(payload.autoKnowledge);
+          if (Number.isInteger(payload.autoKnowledgeLimit)) setFormAutoKnowledgeLimit(payload.autoKnowledgeLimit);
+          if (Number.isInteger(payload.stagingRetentionDays)) setFormStagingRetention(payload.stagingRetentionDays);
+          if (Number.isInteger(payload.contextRetentionDays)) setFormContextRetention(payload.contextRetentionDays);
+          if (Number.isInteger(payload.decisionRetentionDays)) setFormDecisionRetention(payload.decisionRetentionDays);
+          if (typeof payload.requestAnchor === 'boolean') setFormRequestAnchor(payload.requestAnchor);
           if (typeof payload.externalBaseUrl === 'string') setFormExternalBase(payload.externalBaseUrl);
           if (typeof payload.externalModel === 'string') setFormExternalModel(payload.externalModel);
           if (Number.isInteger(payload.externalTimeoutMs)) setFormExternalTimeout(payload.externalTimeoutMs);
@@ -1332,6 +1744,18 @@ window.__ModuleLoader__.load({
       const selectedRoot = data?.selectedRoot ?? '';
       const roots = Array.isArray(data?.roots) ? data.roots : [];
       const gitignoreWarning = typeof data?.gitignore?.warning === 'string' ? data.gitignore.warning : '';
+      const gitignoreState = data?.gitignore?.state ?? '';
+      const gitignoreText = data?.gitignore === null || data?.gitignore === undefined
+        ? t.gitignoreNotApplicable
+        : ({
+          ignored: t.gitignoreIgnored,
+          'no-gitignore': t.gitignoreNoFile,
+          'not-ignored': t.gitignoreNotIgnored,
+          'already-created': t.gitignoreAlready,
+          'custom-root': t.gitignoreCustom,
+          'invalid-directory': t.gitignoreInvalid,
+          error: t.gitignoreError,
+        }[gitignoreState] ?? gitignoreState)
       const counts = data?.counts ?? {};
       const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
       const showSession = data?.scope === 'all';
@@ -1476,10 +1900,26 @@ window.__ModuleLoader__.load({
           defaultPublic: formDefaultPublic,
           topicalClear: formTopical,
           ragMount: formRagMount,
+          mcpEnabled: formMcpEnabled,
+          mcpToken: formMcpToken.trim(),
           knowledgeBackend: formStorage,
           similarityThreshold: Number(formThreshold) || 0.05,
           keepRecentTurns: Number(formKeepRecent) || 2,
           restoreMaxChars: Number(formRestoreMax) || 12000,
+          maxContextChars: Number(formMaxContext) || 30000,
+          defaultTopK: Number(formTopK) || 5,
+          reviewHighRiskOnly: formReviewHighRiskOnly,
+          maxContentChars: Number(formMaxContent) || 20000,
+          maxSnapshotBytes: Number(formMaxSnapshotBytes) || 262144,
+          maxClearTurns: Number(formMaxClearTurns) || 8,
+          minClearChars: Number(formMinClearChars) || 0,
+          maxClearChars: Number(formMaxClearChars) || 120000,
+          autoKnowledge: formAutoKnowledge,
+          autoKnowledgeLimit: Number(formAutoKnowledgeLimit) || 10,
+          stagingRetentionDays: Number(formStagingRetention) || 0,
+          contextRetentionDays: Number(formContextRetention) || 0,
+          decisionRetentionDays: Number(formDecisionRetention) || 0,
+          requestAnchor: formRequestAnchor,
           externalBaseUrl: formExternalBase.trim(),
           externalModel: formExternalModel.trim(),
           externalTimeoutMs: Number(formExternalTimeout) || 60000,
@@ -1498,6 +1938,9 @@ window.__ModuleLoader__.load({
         // The config editor reconciles the profile before /config resolves, so
         // the next state read normally shows the new values. Poll briefly anyway:
         // a slow reload must not leave the panel displaying stale settings.
+        const expectedHasToken = body.mcpToken === ''
+          ? mcpHasToken
+          : body.mcpToken !== '-';
         const configMatches = (payload) => Boolean(payload)
           && payload.fixedRoot === body.root
           && payload.directoryName === body.directoryName
@@ -1510,10 +1953,26 @@ window.__ModuleLoader__.load({
           && payload.defaultPublic === body.defaultPublic
           && payload.topicalClear === body.topicalClear
           && payload.ragMount === body.ragMount
+          && payload.mcpEnabled === body.mcpEnabled
+          && payload.mcpHasToken === expectedHasToken
           && payload.knowledgeBackend === body.knowledgeBackend
           && payload.similarityThreshold === body.similarityThreshold
           && payload.keepRecentTurns === body.keepRecentTurns
           && payload.restoreMaxChars === body.restoreMaxChars
+          && payload.maxContextChars === body.maxContextChars
+          && payload.defaultTopK === body.defaultTopK
+          && payload.reviewHighRiskOnly === body.reviewHighRiskOnly
+          && payload.maxContentChars === body.maxContentChars
+          && payload.maxSnapshotBytes === body.maxSnapshotBytes
+          && payload.maxClearTurns === body.maxClearTurns
+          && payload.minClearChars === body.minClearChars
+          && payload.maxClearChars === body.maxClearChars
+          && payload.autoKnowledge === body.autoKnowledge
+          && payload.autoKnowledgeLimit === body.autoKnowledgeLimit
+          && payload.stagingRetentionDays === body.stagingRetentionDays
+          && payload.contextRetentionDays === body.contextRetentionDays
+          && payload.decisionRetentionDays === body.decisionRetentionDays
+          && payload.requestAnchor === body.requestAnchor
           && payload.externalBaseUrl === body.externalBaseUrl
           && payload.externalModel === body.externalModel
           && payload.externalTimeoutMs === body.externalTimeoutMs
@@ -1828,6 +2287,307 @@ window.__ModuleLoader__.load({
         }
       };
 
+      const verifySelectedKnowledge = async () => {
+        const chosen = (data?.knowledge ?? []).filter((doc) => selectedKnowledge.has(doc.doc_id));
+        if (chosen.length === 0) return;
+        setKnowledgeBusy('verify');
+        setNotice(null);
+        try {
+          const groups = new Map();
+          for (const doc of chosen) {
+            const scopeKind = doc.session_scope === 'shared' ? 'shared' : 'session';
+            const session = doc.session_key
+              || (scopeKind === 'session' ? (data?.currentSessionId || scope?.key || '') : '');
+            const key = `${scopeKind}:${session}`;
+            if (!groups.has(key)) groups.set(key, { scope: scopeKind, session, ids: [] });
+            groups.get(key).ids.push(doc.doc_id);
+          }
+          let verified = 0;
+          for (const group of groups.values()) {
+            const result = await callApi('/knowledge/verify/batch', {
+              method: 'POST',
+              body: { root: selectedRoot, scope: group.scope, session: group.session, doc_ids: group.ids },
+            });
+            verified += Number(result?.verified ?? 0);
+          }
+          setNotice({ kind: 'ok', text: `${t.verified} ${verified}/${chosen.length}` });
+          setSelectedKnowledge(new Set());
+          await load(selectedRoot);
+        } catch (batchError) {
+          setNotice({ kind: 'err', text: `${t.verifyFailed}: ${String(batchError?.message ?? batchError)}` });
+        } finally {
+          setKnowledgeBusy('');
+        }
+      };
+
+      const unverifyKnowledgeDoc = async (doc) => {
+        setVerifyingId(doc.doc_id);
+        setNotice(null);
+        try {
+          await callApi('/knowledge/unverify', {
+            method: 'POST',
+            body: {
+              root: selectedRoot,
+              scope: doc.session_scope === 'shared' ? 'shared' : 'session',
+              session: doc.session_key || panelSession,
+              doc_id: doc.doc_id,
+            },
+          });
+          setNotice({ kind: 'ok', text: t.verifyUndone });
+          await load(selectedRoot);
+        } catch (undoError) {
+          setNotice({ kind: 'err', text: `${t.verifyUndoFailed}: ${String(undoError?.message ?? undoError)}` });
+        } finally {
+          setVerifyingId('');
+        }
+      };
+
+      const panelSession = data?.currentSessionId
+        || data?.selectedSession?.session_id
+        || scope?.key
+        || '';
+      const panelScope = scope?.kind === 'shared' ? 'shared' : 'session';
+      const showTool = (title, text) => {
+        setToolTitle(title);
+        setToolText(String(text ?? ''));
+      };
+      const closeTool = () => {
+        setToolTitle('');
+        setToolText('');
+      };
+
+      const runSearch = async (text, route = 'auto') => {
+        const next = String(text ?? query).trim();
+        if (next === '' || selectedRoot === '') return;
+        setQuery(next);
+        setToolBusy('search');
+        showTool(t.searchResult, t.searching);
+        try {
+          const payload = await callApi('/search', {
+            method: 'POST',
+            body: {
+              root: selectedRoot,
+              session: panelSession,
+              query: next,
+              scope: panelScope,
+              route,
+              mode: 'hybrid',
+              top_k: 10,
+            },
+          });
+          showTool(route === 'sql' ? t.sqlResult : t.searchResult, payload.text ?? '');
+        } catch (searchError) {
+          showTool(t.searchResult, `${t.searchFailed}: ${String(searchError?.message ?? searchError)}`);
+        } finally {
+          setToolBusy('');
+        }
+      };
+
+      const stopLocalEngine = async (model) => {
+        if (typeof window !== 'undefined' && !window.confirm(t.localModelStopConfirm)) return;
+        setLocalModelBusy(model.id);
+        setNotice(null);
+        try {
+          await callApi('/local-engine/stop', { method: 'POST', body: { model: model.id } });
+          setNotice({ kind: 'ok', text: t.localModelStopped });
+          await load('');
+        } catch (stopError) {
+          setNotice({ kind: 'err', text: `${t.localModelStopFailed}: ${String(stopError?.message ?? stopError)}` });
+        } finally {
+          setLocalModelBusy('');
+        }
+      };
+
+      const runContextAction = async (action) => {
+        if (action === 'clear' && !contextClearArmed) {
+          setContextClearArmed(true);
+          return;
+        }
+        setContextClearArmed(false);
+        setToolBusy(`context:${action}`);
+        try {
+          const payload = await callApi('/context/action', {
+            method: 'POST',
+            body: { root: selectedRoot, session: panelSession, action },
+          });
+          showTool(action === 'save' ? t.contextSaveTitle : t.contextClearTitle, payload.text ?? '');
+          setNotice({ kind: 'ok', text: action === 'save' ? t.contextSaved : t.contextClearQueued });
+          await load(selectedRoot);
+        } catch (actionError) {
+          setNotice({ kind: 'err', text: `${t.contextActionFailed}: ${String(actionError?.message ?? actionError)}` });
+        } finally {
+          setToolBusy('');
+        }
+      };
+
+      const restoreContextRow = async (row) => {        setToolBusy(`context:${row.context_id}`);
+        try {
+          const payload = await callApi('/context/restore', {
+            method: 'POST',
+            body: {
+              root: selectedRoot,
+              session: panelSession,
+              context_id: row.context_id,
+              scope: 'all',
+            },
+          });
+          showTool(t.contextRestoreTitle, payload.text ?? '');
+          setNotice({ kind: 'ok', text: t.contextRestored });
+          await load(selectedRoot);
+        } catch (restoreError) {
+          setNotice({ kind: 'err', text: `${t.contextRestoreFailed}: ${String(restoreError?.message ?? restoreError)}` });
+        } finally {
+          setToolBusy('');
+        }
+      };
+
+      const restoreSnapshotRow = async (row) => {
+        setToolBusy(`snapshot:${row.snapshot_id}`);
+        try {
+          const payload = await callApi('/snapshot/restore', {
+            method: 'POST',
+            body: { root: selectedRoot, session: panelSession, snapshot_id: row.snapshot_id },
+          });
+          showTool(t.snapshotRestoreTitle, payload.text ?? '');
+        } catch (restoreError) {
+          setNotice({ kind: 'err', text: `${t.snapshotRestoreFailed}: ${String(restoreError?.message ?? restoreError)}` });
+        } finally {
+          setToolBusy('');
+        }
+      };
+
+      const resolvePendingUpdate = async (row, action) => {
+        setPendingBusy(row.pending_id);
+        setNotice(null);
+        try {
+          await callApi('/knowledge/pending/resolve', {
+            method: 'POST',
+            body: {
+              root: selectedRoot,
+              scope: row.origin_scope === 'shared' ? 'shared' : 'session',
+              session: row.origin_key || panelSession,
+              pending_id: row.pending_id,
+              action,
+            },
+          });
+          setNotice({ kind: 'ok', text: action === 'accept' ? t.pendingAccepted : t.pendingRejected });
+          await load(selectedRoot);
+        } catch (resolveError) {
+          setNotice({ kind: 'err', text: `${t.pendingResolveFailed}: ${String(resolveError?.message ?? resolveError)}` });
+        } finally {
+          setPendingBusy('');
+        }
+      };
+
+      const forgetKnowledgeDoc = async (doc) => {
+        if (deleteArmed !== doc.doc_id) {
+          setDeleteArmed(doc.doc_id);
+          return;
+        }
+        setDeleteArmed('');
+        try {
+          await callApi('/knowledge/forget', {
+            method: 'POST',
+            body: {
+              root: selectedRoot,
+              scope: doc.session_scope === 'shared' ? 'shared' : 'session',
+              session: doc.session_key || doc.session_id || panelSession,
+              doc_id: doc.doc_id,
+            },
+          });
+          setNotice({ kind: 'ok', text: t.forgotten });
+          await load(selectedRoot);
+        } catch (forgetError) {
+          setNotice({ kind: 'err', text: `${t.forgetFailed}: ${String(forgetError?.message ?? forgetError)}` });
+        }
+      };
+
+      const runMemoryAction = async () => {
+        const action = memoryAction;
+        const body = {
+          root: selectedRoot,
+          session: panelSession,
+          action,
+          scope: panelScope,
+        };
+        if (action === 'stage') {
+          if (memoryText.trim() === '') {
+            setNotice({ kind: 'err', text: t.memoryTextRequired });
+            return;
+          }
+          body.content = memoryText.trim();
+          body.kind = 'action';
+          body.source = 'gui';
+          body.verify = 'pass';
+        } else if (action === 'remember') {
+          if (memoryText.trim() === '') {
+            setNotice({ kind: 'err', text: t.memoryTextRequired });
+            return;
+          }
+          body.text = memoryText.trim();
+          body.category = 'project_facts';
+        } else if (action === 'snapshot') {
+          body.name = memoryName.trim() || `panel_${Date.now()}`;
+          body.state = {};
+        } else if (action === 'incident') {
+          body.title = memoryName.trim() || memoryText.trim().split('\n')[0] || '面板记录的事故';
+          body.what_happened = memoryText.trim();
+          body.severity = 'medium';
+        }
+        setToolBusy(`memory:${action}`);
+        try {
+          const payload = await callApi('/memory/action', { method: 'POST', body });
+          showTool(t.memoryActionResult, payload.text ?? '');
+          setNotice({ kind: 'ok', text: t.memoryActionDone });
+          setMemoryText('');
+          await load(selectedRoot);
+        } catch (memoryError) {
+          setNotice({ kind: 'err', text: `${t.memoryActionFailed}: ${String(memoryError?.message ?? memoryError)}` });
+        } finally {
+          setToolBusy('');
+        }
+      };
+
+      const runAskAction = async (action) => {
+        setAskAction(action);
+        setAskBusy(true);
+        setAskResult('');
+        const body = { root: selectedRoot, action };
+        if (action === 'chat') body.prompt = askText.trim() || 'ping';
+        else if (action === 'embed') body.text = askText.trim() || 'ping';
+        else if (action === 'rerank') {
+          body.query = askText.trim() || 'ping';
+          body.documents = askDocs.split('\n').map((row) => row.trim()).filter(Boolean);
+          if (body.documents.length === 0) body.documents = [askText.trim() || 'ping'];
+        } else if (action === 'probe') body.deep = true;
+        try {
+          const payload = await callApi('/ask', { method: 'POST', body });
+          setAskResult(payload.text ?? '');
+        } catch (askError) {
+          setAskResult(`${t.askFailed}: ${String(askError?.message ?? askError)}`);
+        } finally {
+          setAskBusy(false);
+        }
+      };
+
+      const runRetentionCleanup = async () => {
+        if (typeof window !== 'undefined' && !window.confirm(t.retentionConfirm)) return;
+        setRetentionBusy(true);
+        try {
+          const payload = await callApi('/retention/cleanup', {
+            method: 'POST',
+            body: { root: selectedRoot },
+          });
+          showTool(t.retentionDone, JSON.stringify(payload, null, 2));
+          setNotice({ kind: 'ok', text: t.retentionDone });
+          await load(selectedRoot);
+        } catch (cleanupError) {
+          setNotice({ kind: 'err', text: `${t.retentionFailed}: ${String(cleanupError?.message ?? cleanupError)}` });
+        } finally {
+          setRetentionBusy(false);
+        }
+      };
+
       const tabs = [
         { id: 'staging', label: t.tabStaging, count: counts.staging },
         { id: 'archive', label: t.tabArchive, count: counts.archive },
@@ -1840,12 +2600,43 @@ window.__ModuleLoader__.load({
       const settingsSections = [
         { id: 'general', label: t.settingsGeneral },
         { id: 'models', label: t.settingsModels },
+        { id: 'advanced', label: t.settingsAdvanced },
         { id: 'network', label: t.settingsNetwork },
         { id: 'conversation', label: t.settingsConversation },
       ];
       const activeLayer = tabs.find((item) => item.id === tab) ?? tabs[0];
       const isOverview = view === 'overview';
       const isSettings = view === 'settings';
+      const isDiagnostics = view === 'diagnostics';
+      React.useEffect(() => {
+        if (!isDiagnostics || selectedRoot === '') return undefined;
+        let cancelled = false;
+        setDiagnosticsBusy(true);
+        void callApi(`/diagnostics?root=${encodeURIComponent(selectedRoot)}`)
+          .then((payload) => {
+            if (!cancelled) {
+              setDiagnostics(payload ?? null);
+              setSelectedConversations(new Set());
+            }
+          })
+          .catch((diagError) => {
+            if (!cancelled) setError(String(diagError?.message ?? diagError));
+          })
+          .finally(() => {
+            if (!cancelled) setDiagnosticsBusy(false);
+          });
+        return () => { cancelled = true; };
+      }, [isDiagnostics, selectedRoot]);
+      React.useEffect(() => {
+        if (!isSettings || settingsSection !== 'network' || selectedRoot === '') return undefined;
+        let cancelled = false;
+        void callApi(`/network/status?root=${encodeURIComponent(selectedRoot)}`)
+          .then((payload) => {
+            if (!cancelled) setNetworkStatus(payload?.status ?? null);
+          })
+          .catch(() => {});
+        return () => { cancelled = true; };
+      }, [isSettings, settingsSection, selectedRoot]);
       const goOverview = () => setView('overview');
       const goLayer = (id) => {
         setTab(id);
@@ -1857,15 +2648,19 @@ window.__ModuleLoader__.load({
         setSettingsSection(section || settingsSection);
         setView('settings');
       };
+      const goDiagnostics = () => {
+        setView('diagnostics');
+      };
       const searchFromOverview = () => {
         const next = overviewQuery.trim();
         if (next !== '') setQuery(next);
         goLayer('knowledge');
+        if (next !== '') void runSearch(next);
       };
       const navIcon = (id) => {
         const glyphs = {
           overview: '▦', staging: '≡', archive: '▤', snapshots: '◫',
-          knowledge: '◇', decisions: '⌘', contexts: '▧', settings: '⚙',
+          knowledge: '◇', decisions: '⌘', contexts: '▧', settings: '⚙', diagnostics: '▣',
         };
         return h('span', {
           key: 'icon',
@@ -1891,16 +2686,34 @@ window.__ModuleLoader__.load({
       h('span', null, item.label),
       item.count === undefined ? null : h('span', { style: styles.navBadge }, String(item.count ?? 0)));
 
-      const knowledge = (data?.knowledge ?? []).filter((doc) => {
-        if (query.trim() === '') return true;
-        const needle = query.trim().toLowerCase();
-        return String(doc.doc_id).toLowerCase().includes(needle)
-          || String(doc.category).toLowerCase().includes(needle)
-          || String(doc.source ?? '').toLowerCase().includes(needle)
-          || (Array.isArray(doc.tags) ? doc.tags.join(' ') : '').toLowerCase().includes(needle)
-          || String(doc.url ?? '').toLowerCase().includes(needle)
-          || String(doc.text).toLowerCase().includes(needle);
-      });
+      const knowledgeRows = data?.knowledge ?? [];
+      const knowledgeCategories = [...new Set(knowledgeRows.map((doc) => String(doc.category ?? '')).filter(Boolean))].sort();
+      const knowledgeSources = [...new Set(knowledgeRows.flatMap((doc) => [
+        String(doc.source ?? 'unknown'),
+        String(doc.provenance ?? ''),
+      ]).filter(Boolean))].sort();
+      const knowledge = knowledgeRows
+        .filter((doc) => {
+          if (knowledgeCategory !== 'all' && String(doc.category ?? '') !== knowledgeCategory) return false;
+          if (knowledgeSource !== 'all' && String(doc.source ?? 'unknown') !== knowledgeSource
+            && String(doc.provenance ?? '') !== knowledgeSource) return false;
+          if (knowledgeStatus === 'verified' && doc.verified !== true) return false;
+          if (knowledgeStatus === 'unverified' && doc.verified === true) return false;
+          if (query.trim() === '') return true;
+          const needle = query.trim().toLowerCase();
+          return String(doc.doc_id).toLowerCase().includes(needle)
+            || String(doc.category ?? '').toLowerCase().includes(needle)
+            || String(doc.source ?? '').toLowerCase().includes(needle)
+            || (Array.isArray(doc.tags) ? doc.tags.join(' ') : '').toLowerCase().includes(needle)
+            || String(doc.url ?? '').toLowerCase().includes(needle)
+            || String(doc.text ?? '').toLowerCase().includes(needle);
+        })
+        .sort((left, right) => {
+          if (knowledgeSort === 'confidence') return Number(right.confidence ?? 0) - Number(left.confidence ?? 0);
+          if (knowledgeSort === 'hits') return Number(right.hits ?? 0) - Number(left.hits ?? 0);
+          if (knowledgeSort === 'weight') return Number(right.weight ?? 0) - Number(left.weight ?? 0);
+          return String(right.updated_at ?? '').localeCompare(String(left.updated_at ?? ''));
+        });
       const keyOf = (sessionKey, id) => `${sessionKey ?? ''}:${id}`;
       const rowOpen = (key) => openRows.has(key);
       const toggleRow = (key) => setOpenRows((prev) => {
@@ -2007,7 +2820,44 @@ window.__ModuleLoader__.load({
                   h('span', { key: 'time', style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.timestamp)),
                 ],
                 preview: row.state_text,
-                children: h('pre', { style: styles.pre }, row.state_text),
+                children: [
+                  h('pre', { key: 'state', style: styles.pre }, row.state_text),
+                  h('div', { key: 'files', style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+                    h('button', {
+                      type: 'button',
+                      className: 'aim-btn',
+                      style: styles.button,
+                      onClick: (event) => {
+                        event.stopPropagation();
+                        void callApi('/reveal', {
+                          method: 'POST',
+                          body: { root: selectedRoot, scope: 'session', session: row.session_key || panelSession, kind: 'snapshot', id: row.snapshot_id },
+                        }).catch((openError) => setNotice({ kind: 'err', text: String(openError?.message ?? openError) }));
+                      },
+                    }, t.diagOpenFile),
+                    h('a', {
+                      href: `/ai-for-memory/api/record/download?${new URLSearchParams({
+                        root: selectedRoot, scope: 'session', session: row.session_key || panelSession,
+                        kind: 'snapshot', id: row.snapshot_id,
+                      }).toString()}`,
+                      target: '_blank',
+                      rel: 'noreferrer',
+                      className: 'aim-btn',
+                      style: { ...styles.button, textDecoration: 'none' },
+                      onClick: (event) => event.stopPropagation(),
+                    }, t.diagDownload)),
+                  h('button', {
+                    key: 'restore',
+                    type: 'button',
+                    className: 'aim-btn',
+                    style: styles.primary,
+                    disabled: toolBusy === `snapshot:${row.snapshot_id}`,
+                    onClick: (event) => {
+                      event.stopPropagation();
+                      void restoreSnapshotRow(row);
+                    },
+                  }, toolBusy === `snapshot:${row.snapshot_id}` ? '…' : t.snapshotRestore),
+                ],
               });
             }),
             rows.length > listLimit ? moreRow('more-snapshots', rows.length) : null);
@@ -2020,7 +2870,17 @@ window.__ModuleLoader__.load({
               placeholder: t.searchPlaceholder,
               value: query,
               onChange: (event) => setQuery(event.target.value),
+              onKeyDown: (event) => {
+                if (event.key === 'Enter') void runSearch(query);
+              },
             }),
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.primary,
+              disabled: toolBusy === 'search',
+              onClick: () => runSearch(query),
+            }, toolBusy === 'search' ? t.searching : t.searchRun),
             query !== '' ? h('button', { type: 'button', className: 'aim-btn', style: styles.button, onClick: () => setQuery('') }, t.clearSearch) : null,
             h('button', {
               type: 'button',
@@ -2028,6 +2888,114 @@ window.__ModuleLoader__.load({
               style: styles.button,
               onClick: () => setExportOpen((current) => !current),
             }, exportOpen ? t.exportClose : t.exportButton)),
+          h('div', { style: styles.actions },
+            h('select', {
+              style: styles.input, value: knowledgeCategory,
+              onChange: (event) => setKnowledgeCategory(event.target.value),
+            },
+            h('option', { value: 'all' }, `${t.filterCategory}: ${t.all}`),
+            knowledgeCategories.map((category) => h('option', { key: category, value: category }, category))),
+            h('select', {
+              style: styles.input, value: knowledgeSource,
+              onChange: (event) => setKnowledgeSource(event.target.value),
+            },
+            h('option', { value: 'all' }, `${t.filterSource}: ${t.all}`),
+            knowledgeSources.map((source) => h('option', { key: source, value: source }, source))),
+            h('select', {
+              style: styles.input, value: knowledgeStatus,
+              onChange: (event) => setKnowledgeStatus(event.target.value),
+            },
+            h('option', { value: 'all' }, `${t.filterStatus}: ${t.all}`),
+            h('option', { value: 'unverified' }, t.unverified),
+            h('option', { value: 'verified' }, t.verified)),
+            h('select', {
+              style: styles.input, value: knowledgeSort,
+              onChange: (event) => setKnowledgeSort(event.target.value),
+            },
+            h('option', { value: 'updated' }, t.sortUpdated),
+            h('option', { value: 'confidence' }, t.sortConfidence),
+            h('option', { value: 'hits' }, t.sortHits),
+            h('option', { value: 'weight' }, t.sortWeight)),
+            h('button', {
+              type: 'button', className: 'aim-btn', style: styles.button,
+              disabled: knowledge.length === 0,
+              onClick: () => setSelectedKnowledge((prev) => {
+                const next = new Set(prev);
+                const allSelected = knowledge.every((doc) => next.has(doc.doc_id));
+                for (const doc of knowledge) {
+                  if (allSelected) next.delete(doc.doc_id); else next.add(doc.doc_id);
+                }
+                return next;
+              }),
+            }, t.selectAll),
+            h('button', {
+              type: 'button', className: 'aim-btn', style: styles.primary,
+              disabled: knowledgeBusy !== '' || selectedKnowledge.size === 0,
+              onClick: verifySelectedKnowledge,
+            }, knowledgeBusy === 'verify' ? '…' : `${t.batchVerify} (${selectedKnowledge.size})`),
+            h('span', { style: { ...styles.meta, marginLeft: 'auto' } },
+              `${t.loadedOf}: ${knowledge.length}/${data?.knowledgeTotal ?? knowledgeRows.length}`
+                + (data?.knowledgeLimited
+                  ? `｜${t.cappedNotice.replace('{n}', String(data?.knowledgeLimit ?? 200))}`
+                  : ''))),
+          h('div', { style: styles.actions },
+            h('input', {
+              style: { ...styles.input, maxWidth: '520px' },
+              placeholder: t.sqlPlaceholder,
+              value: sqlQuery,
+              onChange: (event) => setSqlQuery(event.target.value),
+              onKeyDown: (event) => {
+                if (event.key === 'Enter') void runSearch(sqlQuery, 'sql');
+              },
+            }),
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              disabled: toolBusy === 'search',
+              onClick: () => runSearch(sqlQuery || query, 'sql'),
+            }, t.sqlRun)),
+          h('div', {
+            style: {
+              padding: '8px 10px', border: '1px solid rgba(127,127,127,0.28)',
+              borderRadius: '8px', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center',
+            },
+          },
+          h('span', { style: { fontSize: '12.5px', fontWeight: 600 } }, t.quickActions),
+          h('select', {
+            style: { ...styles.input, maxWidth: '150px' },
+            value: memoryAction,
+            onChange: (event) => setMemoryAction(event.target.value),
+          },
+          h('option', { value: 'stage' }, t.actionStage),
+          h('option', { value: 'remember' }, t.actionRemember),
+          h('option', { value: 'promote' }, t.actionPromote),
+          h('option', { value: 'snapshot' }, t.actionSnapshot),
+          h('option', { value: 'archive' }, t.actionArchive),
+          h('option', { value: 'incident' }, t.actionIncident)),
+          ['stage', 'remember', 'incident'].includes(memoryAction)
+            ? h('textarea', {
+              style: { ...styles.input, minWidth: '260px', minHeight: '34px', flex: '1 1 320px' },
+              placeholder: t.memoryTextPlaceholder,
+              value: memoryText,
+              onChange: (event) => setMemoryText(event.target.value),
+            })
+            : null,
+          ['snapshot', 'incident'].includes(memoryAction)
+            ? h('input', {
+              style: { ...styles.input, maxWidth: '220px' },
+              placeholder: t.memoryNamePlaceholder,
+              value: memoryName,
+              onChange: (event) => setMemoryName(event.target.value),
+            })
+            : null,
+          h('button', {
+            type: 'button',
+            className: 'aim-btn',
+            style: styles.button,
+            disabled: toolBusy === `memory:${memoryAction}`,
+            onClick: runMemoryAction,
+          }, toolBusy === `memory:${memoryAction}` ? '…' : t.quickActions)),
           exportOpen
             ? h('div', {
               style: {
@@ -2092,7 +3060,35 @@ window.__ModuleLoader__.load({
             h('div', { style: { fontWeight: 600 } },
               `${t.pendingUpdateTarget}: ${row.update_of}`),
             h('div', { style: { whiteSpace: 'pre-wrap' } }, clipPreview(row.text, 220)),
-            row.origin_label ? h('div', { style: { opacity: 0.8 } }, `对话：${row.origin_label}`) : null)))
+            h('div', { style: { opacity: 0.85, marginTop: '2px' } },
+              `${row.reason || ''}${row.seen_count ? `｜见过 ${row.seen_count} 次` : ''}`
+                + (row.first_seen_at ? `｜首次 ${formatTime(row.first_seen_at)}` : '')),
+            (row.conflicts ?? []).length > 0
+              ? h('div', { style: { marginTop: '3px', opacity: 0.9 } },
+                `⚠ 冲突：${(row.conflicts ?? []).map((item) => item.text ?? item).join(' / ')}`)
+              : null,
+            row.origin_label ? h('div', { style: { opacity: 0.8 } }, `对话：${row.origin_label}`) : null,
+            h('div', { style: { display: 'flex', gap: '6px', marginTop: '5px' } },
+              h('button', {
+                type: 'button',
+                className: 'aim-btn',
+                style: styles.primary,
+                disabled: pendingBusy === row.pending_id,
+                onClick: (event) => {
+                  event.stopPropagation();
+                  resolvePendingUpdate(row, 'accept');
+                },
+              }, pendingBusy === row.pending_id ? '…' : t.pendingAccept),
+              h('button', {
+                type: 'button',
+                className: 'aim-btn',
+                style: styles.button,
+                disabled: pendingBusy === row.pending_id,
+                onClick: (event) => {
+                  event.stopPropagation();
+                  resolvePendingUpdate(row, 'reject');
+                },
+              }, t.pendingReject)))))
             : null,
           knowledge.length === 0
             ? h(Empty, { text: t.emptyKnowledge })
@@ -2105,6 +3101,16 @@ window.__ModuleLoader__.load({
                   rowKey: key,
                   open: rowOpen(key),
                   onToggle: toggleRow,
+                  leading: h('input', {
+                    type: 'checkbox',
+                    checked: selectedKnowledge.has(doc.doc_id),
+                    onClick: (event) => event.stopPropagation(),
+                    onChange: (event) => setSelectedKnowledge((prev) => {
+                      const next = new Set(prev);
+                      if (event.target.checked) next.add(doc.doc_id); else next.delete(doc.doc_id);
+                      return next;
+                    }),
+                  }),
                   head: [
                     h('span', { key: 'id', style: { fontWeight: 600 } }, doc.doc_id),
                     h('span', { key: 'cat', style: badgeStyle('pending') }, doc.category),
@@ -2121,6 +3127,13 @@ window.__ModuleLoader__.load({
                       }, `⚠ ${t.modelClaim}`)
                       : null,
                     doc.source ? h('span', { key: 'src', style: badgeStyle('pending') }, doc.source) : null,
+                    h('span', { key: 'hits', style: styles.meta }, `${t.diagHits}: ${doc.hits ?? 0}`),
+                    h('span', { key: 'weight', style: styles.meta }, `${t.diagWeight}: ${Number(doc.weight ?? 0).toFixed(2)}`),
+                    h('span', { key: 'confidence', style: styles.meta },
+                      `${t.confidence}: ${Number(doc.confidence ?? 0.8).toFixed(2)}`),
+                    Number(doc.revision ?? 1) > 1
+                      ? h('span', { key: 'revision', style: badgeStyle('pending') }, `r${doc.revision}`)
+                      : null,
                     (doc.tags ?? []).map((tag) => h('span', { key: `tag-${tag}`, style: styles.meta }, `#${tag}`)),
                     showSession && doc.session_label
                       ? h('span', { key: 'session', style: badgeStyle('pending') }, doc.session_label)
@@ -2147,10 +3160,71 @@ window.__ModuleLoader__.load({
                         },
                       }, verifyingId === doc.doc_id ? t.verifying : t.verifyClaim)
                       : null,
+                    doc.verified === true && doc.source === 'user-confirmed'
+                      ? h('button', {
+                        key: 'unverify',
+                        type: 'button',
+                        className: 'aim-btn',
+                        style: styles.button,
+                        disabled: verifyingId === doc.doc_id,
+                        onClick: (event) => {
+                          event.stopPropagation();
+                          void unverifyKnowledgeDoc(doc);
+                        },
+                      }, t.verifyUndo)
+                      : null,
+                    h('button', {
+                      key: 'open-file',
+                      type: 'button',
+                      className: 'aim-btn',
+                      style: styles.button,
+                      onClick: (event) => {
+                        event.stopPropagation();
+                        void callApi('/reveal', {
+                          method: 'POST',
+                          body: {
+                            root: selectedRoot,
+                            scope: doc.session_scope === 'shared' ? 'shared' : 'session',
+                            session: doc.session_key || panelSession,
+                            kind: 'knowledge',
+                            id: doc.doc_id,
+                          },
+                        }).catch((openError) => setNotice({ kind: 'err', text: String(openError?.message ?? openError) }));
+                      },
+                    }, t.diagOpenFile),
+                    h('a', {
+                      href: `/ai-for-memory/api/record/download?${new URLSearchParams({
+                        root: selectedRoot,
+                        scope: doc.session_scope === 'shared' ? 'shared' : 'session',
+                        session: doc.session_key || panelSession || '',
+                        kind: 'knowledge',
+                        id: doc.doc_id,
+                      }).toString()}`,
+                      target: '_blank',
+                      rel: 'noreferrer',
+                      className: 'aim-btn',
+                      style: { ...styles.button, textDecoration: 'none' },
+                      onClick: (event) => event.stopPropagation(),
+                    }, t.diagDownload),
+                    h('button', {
+                      key: 'delete',
+                      type: 'button',
+                      className: 'aim-btn',
+                      style: {
+                        ...styles.button,
+                        color: deleteArmed === doc.doc_id ? colors.error : undefined,
+                      },
+                      onClick: (event) => {
+                        event.stopPropagation();
+                        void forgetKnowledgeDoc(doc);
+                      },
+                    }, deleteArmed === doc.doc_id ? t.confirmDelete : t.delete),
                     h('p', { key: 'text', style: styles.content }, doc.text),
                     (doc.changes_count ?? 0) > 0
                       ? h('p', { key: 'updated-hint', style: styles.hint },
-                        `⤴ ${t.updatedHint}`)
+                        `⤴ ${t.updatedHint}`
+                          + (doc.last_change_kind ? `｜${t.lastChange}: ${doc.last_change_kind}` : '')
+                          + (doc.last_change_at ? ` ${formatTime(doc.last_change_at)}` : ''))
                       : null,
                     (doc.changes_count ?? 0) > 0 && doc.previous_text
                       ? h('p', { key: 'previous-text', style: styles.hint },
@@ -2163,7 +3237,13 @@ window.__ModuleLoader__.load({
               knowledge.length > listLimit ? moreRow('more-knowledge', knowledge.length) : null));
       } else if (tab === 'decisions') {
         const rows = data?.decisions ?? [];
-        content = rows.length === 0
+        const outcomeSummary = Object.entries(data?.decisionsByOutcome ?? {})
+          .map(([outcome, count]) => `${outcome}=${count}`).join('｜');
+        content = h('div', null,
+          outcomeSummary !== ''
+            ? h('p', { style: { ...styles.hint, margin: '0 0 8px' } }, `${t.decisionStats}: ${outcomeSummary}`)
+            : null,
+          rows.length === 0
           ? h(Empty, { text: t.emptyDecisions })
           : h('div', { style: styles.list },
             ...rows.slice(0, listLimit).map((row) => {
@@ -2175,6 +3255,10 @@ window.__ModuleLoader__.load({
                 onToggle: toggleRow,
                 head: [
                   h('span', { key: 'outcome', style: badgeStyle(row.outcome) }, row.outcome),
+                  h('span', { key: 'review', style: badgeStyle(row.reviewed ? 'pending' : 'approved') },
+                    row.reviewed ? t.decisionReviewed : t.decisionAuto),
+                  h('span', { key: 'approved', style: badgeStyle(row.approved ? 'approved' : 'rejected') },
+                    row.approved ? t.decisionApproved : t.decisionRejected),
                   h('span', { key: 'risk', style: badgeStyle(row.risk_level) }, `${t.risk}: ${row.risk_level}`),
                   showSession && row.session_label
                     ? h('span', { key: 'session', style: badgeStyle('pending') }, row.session_label)
@@ -2190,13 +3274,34 @@ window.__ModuleLoader__.load({
                       row.thesis ? h('span', null, `${t.thesis}: ${row.thesis}`) : null,
                       row.antithesis ? h('span', null, `${t.antithesis}: ${row.antithesis}`) : null)
                     : null,
+                  row.irreversible !== null && row.irreversible !== undefined
+                    ? h('p', { key: 'gate', style: styles.hint },
+                      `${t.decisionGate}: ${row.irreversible ? t.decisionIrreversible : t.decisionReversible}`
+                        + (row.recoverable_via ? `｜${t.decisionRecoverable}: ${row.recoverable_via}` : ''))
+                    : null,
                 ],
               });
             }),
-            rows.length > listLimit ? moreRow('more-decisions', rows.length) : null);
+            rows.length > listLimit ? moreRow('more-decisions', rows.length) : null));
       } else if (tab === 'contexts') {
         const rows = data?.contexts ?? [];
-        content = rows.length === 0
+        content = h('div', null,
+          h('div', { style: { ...styles.actions, marginBottom: '8px' } },
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.primary,
+              disabled: toolBusy === 'context:save',
+              onClick: () => runContextAction('save'),
+            }, toolBusy === 'context:save' ? '…' : t.contextSave),
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: { ...styles.button, color: contextClearArmed ? colors.error : undefined },
+              disabled: toolBusy === 'context:clear',
+              onClick: () => runContextAction('clear'),
+            }, contextClearArmed ? t.contextClearConfirm : t.contextClear)),
+          rows.length === 0
           ? h(Empty, { text: t.emptyContexts })
           : h('div', { style: styles.list },
             ...rows.slice(0, listLimit).map((row) => {
@@ -2225,15 +3330,52 @@ window.__ModuleLoader__.load({
                     ? h('p', { key: 'summary', style: styles.hint }, row.model_summary)
                     : null,
                   row.text ? h('pre', { key: 'text', style: styles.pre }, row.text) : null,
-                  h('p', { key: 'hint', style: styles.hint }, t.contextRestoreHint),
+                  h('div', { key: 'files', style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+                    h('button', {
+                      type: 'button',
+                      className: 'aim-btn',
+                      style: styles.button,
+                      onClick: (event) => {
+                        event.stopPropagation();
+                        void callApi('/reveal', {
+                          method: 'POST',
+                          body: { root: selectedRoot, scope: 'session', session: row.session_key || panelSession, kind: 'context', id: row.context_id },
+                        }).catch((openError) => setNotice({ kind: 'err', text: String(openError?.message ?? openError) }));
+                      },
+                    }, t.diagOpenFile),
+                    h('a', {
+                      href: `/ai-for-memory/api/record/download?${new URLSearchParams({
+                        root: selectedRoot, scope: 'session', session: row.session_key || panelSession,
+                        kind: 'context', id: row.context_id,
+                      }).toString()}`,
+                      target: '_blank',
+                      rel: 'noreferrer',
+                      className: 'aim-btn',
+                      style: { ...styles.button, textDecoration: 'none' },
+                      onClick: (event) => event.stopPropagation(),
+                    }, t.diagDownload)),
+                  h('button', {
+                    key: 'restore',
+                    type: 'button',
+                    className: 'aim-btn',
+                    style: styles.primary,
+                    disabled: toolBusy === `context:${row.context_id}`,
+                    onClick: (event) => {
+                      event.stopPropagation();
+                      void restoreContextRow(row);
+                    },
+                  }, toolBusy === `context:${row.context_id}` ? t.searching : t.contextRestore),
                 ],
               });
             }),
-            rows.length > listLimit ? moreRow('more-contexts', rows.length) : null);
+            rows.length > listLimit ? moreRow('more-contexts', rows.length) : null));
       }
 
       const healthRows = [
         [t.overviewRoot, selectedRoot || '—'],
+        [t.overviewSessions, `${data?.sessionsTotal ?? sessions.length} 个`],
+        [t.overviewGitignore, `${gitignoreText}${data?.gitignore?.entry ? `（${data.gitignore.entry}）` : ''}`],
+        [t.overviewLimits, `${data?.maxContentChars ?? 30000} 字符｜快照 ${formatBytes(data?.maxSnapshotBytes ?? 262144)}｜top ${data?.defaultTopK ?? 5}`],
         [t.overviewBackend, data?.knowledgeBackend === 'sqlite' ? 'SQLite' : 'JSON'],
         [t.overviewRag, formRagMount
           ? (ragIndex?.built
@@ -2243,12 +3385,20 @@ window.__ModuleLoader__.load({
             : t.overviewOn)
           : t.overviewOff],
         [t.overviewNetwork, formNetworkEnabled ? t.overviewOn : t.overviewOff],
+        [t.overviewContextUsage, data?.contextMeasuredText ?? '未知（还没有测量数据）'],
         [t.overviewClear, t.overviewClearValue.replace('{n}', String(data?.contextUsagePercent ?? 70))],
       ];
       const recentStaging = (data?.staging ?? []).slice(0, 5);
+      const mcpUrl = `${typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:PORT'}`
+        + `${data?.mcpPath ?? '/ai-for-memory/mcp'}`;
       const overview = h('div', { className: 'aim-fade-up', style: { display: 'flex', flexDirection: 'column', gap: '14px' } },
         h('div', { style: styles.overviewToolbar },
           h('span', { style: styles.overviewPill }, `● ${t.overviewLocalPill}`),
+          data?.contextMeasuredPercent === null || data?.contextMeasuredPercent === undefined
+            ? h('span', { style: styles.overviewPill }, `${t.overviewContextUsage}: —`)
+            : h('span', { style: styles.overviewPill },
+              `${t.overviewContextUsage}: ${Number(data.contextMeasuredPercent).toFixed(1)}% / `
+                + `${Number(data?.contextUsagePercent ?? 70)}%`),
           h('input', {
             style: { ...styles.input, ...styles.overviewSearch },
             placeholder: t.overviewSearchPlaceholder,
@@ -2280,12 +3430,11 @@ window.__ModuleLoader__.load({
               h('span', { style: styles.hint }, t.navLayersHint)),
             h('div', { style: styles.tiles }, [
               { id: 'staging', label: t.tabStaging, value: String(counts.staging ?? 0) },
+              { id: 'archive', label: t.tabArchive, value: String(counts.archive ?? 0) },
+              { id: 'snapshots', label: t.tabSnapshots, value: String(counts.snapshots ?? 0) },
               { id: 'knowledge', label: t.tabKnowledge, value: String(counts.knowledge ?? 0) },
-              {
-                id: 'contexts',
-                label: t.overviewContextUsage,
-                value: `${Number(data?.contextUsagePercent ?? 70)}%`,
-              },
+              { id: 'decisions', label: t.tabDecisions, value: String(counts.decisions ?? 0) },
+              { id: 'contexts', label: t.tabContexts, value: String(counts.contexts ?? 0) },
             ].map((item) => h('button', {
               key: item.id,
               type: 'button',
@@ -2355,6 +3504,168 @@ window.__ModuleLoader__.load({
               .replace('{k}', String(data?.keepRecentTurns ?? 2)))));
 
 
+      const refreshDiagnostics = async () => {
+        if (selectedRoot === '') return;
+        setDiagnosticsBusy(true);
+        try {
+          const payload = await callApi(`/diagnostics?root=${encodeURIComponent(selectedRoot)}`);
+          setDiagnostics(payload ?? null);
+        } catch (diagError) {
+          setNotice({ kind: 'err', text: String(diagError?.message ?? diagError) });
+        } finally {
+          setDiagnosticsBusy(false);
+        }
+      };
+      const openRecord = async (kind, id, scope, session) => {
+        try {
+          await callApi('/reveal', {
+            method: 'POST',
+            body: { root: selectedRoot, kind, id, scope, session },
+          });
+        } catch (revealError) {
+          setNotice({ kind: 'err', text: String(revealError?.message ?? revealError) });
+        }
+      };
+      const downloadRecord = (kind, id, scope, session) => {
+        const params = new URLSearchParams({ root: selectedRoot, kind, id, scope: scope ?? 'session' });
+        if (session) params.set('session', session);
+        window.open(`/ai-for-memory/api/record/download?${params.toString()}`, '_blank', 'noopener');
+      };
+      const bulkConversations = async (action) => {
+        if (selectedConversations.size === 0) return;
+        setBulkBusy(action);
+        try {
+          const payload = await callApi('/conversations/bulk', {
+            method: 'POST',
+            body: { root: selectedRoot, action, keys: [...selectedConversations] },
+          });
+          setDiagnostics((prev) => (prev ? { ...prev, conversations: payload.conversations ?? [] } : prev));
+          setSelectedConversations(new Set());
+        } catch (bulkError) {
+          setNotice({ kind: 'err', text: String(bulkError?.message ?? bulkError) });
+        } finally {
+          setBulkBusy('');
+        }
+      };
+      const diag = diagnostics ?? {};
+      const diagHealthRows = [
+        [t.diagNode, diag.node ?? '—'],
+        [t.diagSqlite, diag.sqlite === true ? t.diagAvailable : t.diagUnavailable],
+        [t.diagGit, diag.git?.available === true ? t.diagAvailable : t.diagUnavailable],
+        [t.diagLlama, diag.llamaServer ?? t.diagUnavailable],
+        [t.diagModels, diag.models?.root ?? '—'],
+        [t.diagWritable, diag.writable === true ? t.diagAvailable : t.diagUnavailable],
+        [t.diagGitignore, diag.gitignore?.state ?? '—'],
+        [t.diagStorage, formatBytes(diag.storage?.totalBytes ?? 0)],
+      ];
+      const diagUsage = Array.isArray(diag.usage) ? diag.usage : [];
+      const diagConversations = Array.isArray(diag.conversations) ? diag.conversations : [];
+      const diagAudit = Array.isArray(diag.audit) ? diag.audit : [];
+      const diagPage = h('div', { className: 'aim-fade-up', style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+          h('div', { style: { flex: 1 } },
+            h('h3', { style: styles.cardTitle }, t.diagTitle),
+            h('p', { style: styles.hint }, t.diagSubtitle)),
+          h('button', {
+            type: 'button',
+            className: 'aim-btn',
+            style: styles.button,
+            disabled: diagnosticsBusy,
+            onClick: refreshDiagnostics,
+          }, diagnosticsBusy ? '…' : t.diagRefresh)),
+        h('section', { style: styles.card },
+          h('h3', { style: styles.cardTitle }, t.diagHealth),
+          h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '6px' } },
+            diagHealthRows.map(([label, value]) => h('div', {
+              key: label,
+              style: { display: 'flex', gap: '8px', fontSize: '12px', padding: '3px 0' },
+            },
+            h('span', { style: { color: colors.secondary, flex: '0 0 96px' } }, label),
+            h('span', { style: { ...styles.mono, overflowWrap: 'anywhere' } }, String(value)))))),
+        h('section', { style: styles.card },
+          h('h3', { style: styles.cardTitle }, t.diagUsage),
+          h('p', { style: styles.hint }, t.diagUsageHint),
+          diagUsage.length === 0
+            ? h(Empty, { text: t.diagNoUsage })
+            : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+              diagUsage.slice(0, 60).map((row) => h('div', {
+                key: `${row.scope}:${row.session}:${row.doc_id}`,
+                style: { display: 'flex', alignItems: 'center', gap: '7px', padding: '4px 0', borderTop: `1px solid ${colors.border}`, fontSize: '12px' },
+              },
+              h('span', { style: { ...styles.mono, flex: '0 0 88px', color: colors.secondary } }, row.count === 0 ? t.diagDead : `${t.diagHits} ${row.count}`),
+              h('span', { style: { ...styles.mono, flex: '0 0 54px' } }, Number(row.weight).toFixed(2)),
+              h('span', { style: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: row.text }, row.text),
+              h('button', {
+                type: 'button', className: 'aim-btn', style: { ...styles.button, padding: '1px 7px', fontSize: '11px' },
+                onClick: () => openRecord('knowledge', row.doc_id, row.scope, row.session),
+              }, t.diagOpenFile))))),
+        h('section', { style: styles.card },
+          h('h3', { style: styles.cardTitle }, t.diagConversations),
+          h('div', { style: { display: 'flex', gap: '6px', marginBottom: '6px' } },
+            h('button', { type: 'button', className: 'aim-btn', style: styles.button, disabled: bulkBusy !== '' || selectedConversations.size === 0, onClick: () => bulkConversations('open') }, t.diagBulkOpen),
+            h('button', { type: 'button', className: 'aim-btn', style: styles.button, disabled: bulkBusy !== '' || selectedConversations.size === 0, onClick: () => bulkConversations('close') }, t.diagBulkClose),
+            h('span', { style: { ...styles.hint, marginLeft: 'auto' } }, `${selectedConversations.size}/${diagConversations.length}`)),
+          diagConversations.length === 0
+            ? h(Empty, { text: t.diagNoConversations })
+            : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '3px' } },
+              diagConversations.map((row) => h('label', {
+                key: row.key,
+                style: { display: 'flex', alignItems: 'center', gap: '7px', padding: '3px 0', borderTop: `1px solid ${colors.border}`, fontSize: '12px' },
+              },
+              h('input', {
+                type: 'checkbox',
+                checked: selectedConversations.has(row.key),
+                onChange: (event) => setSelectedConversations((prev) => {
+                  const next = new Set(prev);
+                  if (event.target.checked) next.add(row.key); else next.delete(row.key);
+                  return next;
+                }),
+              }),
+              h('span', { style: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, row.label || row.session_id || row.key),
+              h('span', { style: { ...styles.mono, color: colors.secondary } }, `${row.public ? 'open' : 'closed'} · ${formatBytes(row.bytes)}`))))),
+        h('section', { style: styles.card },
+          h('h3', { style: styles.cardTitle }, t.diagAudit),
+          diagAudit.length === 0
+            ? h(Empty, { text: t.diagNoAudit })
+            : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '3px' } },
+              diagAudit.slice(0, 60).map((row, index) => h('div', {
+                key: `${row.at}:${index}`,
+                style: { display: 'flex', gap: '7px', fontSize: '12px', padding: '3px 0', borderTop: `1px solid ${colors.border}` },
+              },
+              h('span', { style: { ...styles.mono, flex: '0 0 132px', color: colors.secondary } }, formatTime(row.at)),
+              h('span', { style: { flex: '0 0 150px' } }, row.action),
+              h('span', { style: { ...styles.mono, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: row.detail }, row.detail))))),
+        h('section', { style: styles.card },
+          h('h3', { style: styles.cardTitle }, t.diagCompare),
+          h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+            h('select', { style: styles.input, value: snapshotCompare.left, onChange: (event) => setSnapshotCompare((prev) => ({ ...prev, left: event.target.value, result: null })) },
+              h('option', { value: '' }, t.diagCompareLeft),
+              (data?.snapshots ?? []).map((row) => h('option', { key: row.snapshot_id, value: row.snapshot_id }, row.snapshot_id))),
+            h('select', { style: styles.input, value: snapshotCompare.right, onChange: (event) => setSnapshotCompare((prev) => ({ ...prev, right: event.target.value, result: null })) },
+              h('option', { value: '' }, t.diagCompareRight),
+              (data?.snapshots ?? []).map((row) => h('option', { key: row.snapshot_id, value: row.snapshot_id }, row.snapshot_id))),
+            h('button', {
+              type: 'button', className: 'aim-btn', style: styles.button,
+              disabled: snapshotCompare.left === '' || snapshotCompare.right === '',
+              onClick: async () => {
+                try {
+                  const result = await callApi('/snapshot/compare', {
+                    method: 'POST',
+                    body: { root: selectedRoot, scope: 'session', session: panelSession, left: snapshotCompare.left, right: snapshotCompare.right },
+                  });
+                  setSnapshotCompare((prev) => ({ ...prev, result, error: '' }));
+                } catch (compareError) {
+                  setSnapshotCompare((prev) => ({ ...prev, result: null, error: String(compareError?.message ?? compareError) }));
+                }
+              },
+            }, t.diagCompareRun)),
+          snapshotCompare.error ? h('p', { style: { color: colors.error } }, snapshotCompare.error) : null,
+          snapshotCompare.result
+            ? h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '8px' } },
+              h('pre', { style: styles.pre }, JSON.stringify(snapshotCompare.result.left?.state ?? {}, null, 2)),
+              h('pre', { style: styles.pre }, JSON.stringify(snapshotCompare.result.right?.state ?? {}, null, 2)))
+            : null));
+
       return h('div', { className: 'aim-shell', style: styles.shell },
         h('aside', { className: 'aim-sidebar', style: styles.sidebar },
           h('div', { style: styles.brand },
@@ -2370,7 +3681,8 @@ window.__ModuleLoader__.load({
             ...tabs.map((item) => navItem(item, view === 'layer' && tab === item.id, () => goLayer(item.id)))),
           h('div', { className: 'aim-nav-group', style: styles.navGroup },
             h('div', { className: 'aim-nav-group-title', style: styles.navGroupTitle }, t.navSystem),
-            navItem({ id: 'settings', label: t.navSettings }, isSettings, () => goSettings())),
+            navItem({ id: 'settings', label: t.navSettings }, isSettings, () => goSettings()),
+            navItem({ id: 'diagnostics', label: t.navDiagnostics }, isDiagnostics, () => goDiagnostics())),
           h('div', { style: styles.sidebarFooter },
             h('p', { style: { ...styles.hint, fontSize: '10.5px' } }, t.sidebarFooter))),
         h('div', { className: 'aim-app-main', style: styles.appMain },
@@ -2380,10 +3692,10 @@ window.__ModuleLoader__.load({
           h('div', null,
             h('h2', { style: styles.title }, isSettings
               ? t.settingsTitle
-              : (isOverview ? t.overviewTitle : (activeLayer?.label ?? t.title))),
+              : (isDiagnostics ? t.diagTitle : (isOverview ? t.overviewTitle : (activeLayer?.label ?? t.title)))),
             h('p', { style: styles.subtitle }, isSettings
               ? t.settingsSubtitle
-              : (isOverview ? t.overviewSubtitle : t.subtitle))),
+              : (isDiagnostics ? t.diagSubtitle : (isOverview ? t.overviewSubtitle : t.subtitle)))),
           h('div', { style: styles.actions },
             isSettings ? h('button', {
               type: 'button',
@@ -2485,6 +3797,19 @@ window.__ModuleLoader__.load({
               borderColor: notice.kind === 'err' ? colors.error : colors.success,
             },
           }, notice.text)
+          : null,
+
+        toolText !== ''
+          ? h('section', { style: styles.card },
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+              h('h3', { style: { ...styles.cardTitle, margin: 0 } }, toolTitle || t.searchResult),
+              h('button', {
+                type: 'button',
+                className: 'aim-btn',
+                style: { ...styles.button, marginLeft: 'auto' },
+                onClick: closeTool,
+              }, t.closePanel)),
+            h('pre', { style: styles.pre }, toolText))
           : null,
 
         gitignoreWarning !== ''
@@ -2611,6 +3936,8 @@ window.__ModuleLoader__.load({
             h(Tile, { label: t.counts.contexts, value: counts.contexts }))
           : null,
 
+        isDiagnostics ? diagPage : null,
+
         isOverview ? overview : null,
 
         view === 'layer'
@@ -2698,6 +4025,15 @@ window.__ModuleLoader__.load({
                 }, localModelBusy === model.id
                   ? t.localModelStarting
                   : (model.runnable ? t.localModelStart : t.localModelUse))
+                : null,
+              (data?.localEngines ?? []).some((engine) => engine.id === model.id)
+                ? h('button', {
+                  type: 'button',
+                  className: 'aim-btn',
+                  style: { ...styles.button, padding: '2px 8px', fontSize: '11.5px' },
+                  disabled: localModelBusy === model.id,
+                  onClick: () => stopLocalEngine(model),
+                }, t.localModelStop)
                 : null)))),
           ((data?.localEngines ?? []).filter((engine) => engine.error).length > 0
             ? h('div', { style: { marginTop: '8px' } },
@@ -2721,6 +4057,35 @@ window.__ModuleLoader__.load({
               }, engine.error)))
             : null),
           h('p', { style: styles.hint }, t.localModelFuture))),
+          h('div', {
+            style: {
+              margin: '10px 0', padding: '8px 10px', border: `1px solid ${colors.border}`,
+              borderRadius: '8px', background: colors.bg2,
+            },
+          },
+          h('div', { style: { fontWeight: 600, fontSize: '12.5px' } }, t.askTitle),
+          h('p', { style: styles.hint }, t.askHint),
+          h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', margin: '6px 0' } },
+            h('button', { type: 'button', className: 'aim-btn', style: styles.button, disabled: askBusy, onClick: () => runAskAction('models') }, t.askModels),
+            h('button', { type: 'button', className: 'aim-btn', style: styles.button, disabled: askBusy, onClick: () => runAskAction('probe') }, t.askProbe),
+            h('button', { type: 'button', className: 'aim-btn', style: styles.button, disabled: askBusy, onClick: () => runAskAction('chat') }, t.askChat),
+            h('button', { type: 'button', className: 'aim-btn', style: styles.button, disabled: askBusy, onClick: () => runAskAction('embed') }, t.askEmbed),
+            h('button', { type: 'button', className: 'aim-btn', style: styles.button, disabled: askBusy, onClick: () => runAskAction('rerank') }, t.askRerank)),
+          h('input', {
+            style: styles.input,
+            placeholder: t.askTextPlaceholder,
+            value: askText,
+            onChange: (event) => setAskText(event.target.value),
+          }),
+          h('textarea', {
+            style: { ...styles.input, marginTop: '5px', minHeight: '48px' },
+            placeholder: t.askDocsPlaceholder,
+            value: askDocs,
+            onChange: (event) => setAskDocs(event.target.value),
+          }),
+          askResult !== ''
+            ? h('pre', { style: { ...styles.pre, maxHeight: '260px', marginTop: '6px' } }, askResult)
+            : null),
           h('div', { style: styles.grid2 },
             h('label', { style: styles.label },
               t.externalPreset,
@@ -3019,8 +4384,107 @@ window.__ModuleLoader__.load({
                 ? networkStatus.error
                 : `${t.networkStatus}: ${networkStatus.initialized ? (networkStatus.branch || 'git') : t.networkNoRepo}`
                   + (networkStatus.dirty > 0 ? `｜${t.networkDirty.replace('{n}', String(networkStatus.dirty))}` : `｜${t.networkClean}`)
+                  + (networkStatus.ahead > 0 ? `｜${t.networkAhead} ${networkStatus.ahead}` : '')
+                  + (networkStatus.behind > 0 ? `｜${t.networkBehind} ${networkStatus.behind}` : '')
                   + (networkStatus.lastCommit ? `｜${networkStatus.lastCommit.hash} ${networkStatus.lastCommit.subject}` : ''))
             : null) : null,
+
+        isSettings && settingsSection === 'advanced'
+          ? h('section', { style: styles.card },
+          h('h3', { style: styles.cardTitle }, t.settingsAdvanced),
+          h('p', { style: styles.hint }, t.advancedHint),
+          h('div', { style: styles.grid2 },
+            h('label', { style: styles.label },
+              t.maxContextChars,
+              h('input', { style: styles.input, type: 'number', min: 1000, max: 200000, value: formMaxContext, onChange: (event) => setFormMaxContext(event.target.value) })),
+            h('label', { style: styles.label },
+              t.defaultTopK,
+              h('input', { style: styles.input, type: 'number', min: 1, max: 50, value: formTopK, onChange: (event) => setFormTopK(event.target.value) })),
+            h('label', { style: styles.label },
+              t.maxContentChars,
+              h('input', { style: styles.input, type: 'number', min: 1000, max: 200000, value: formMaxContent, onChange: (event) => setFormMaxContent(event.target.value) })),
+            h('label', { style: styles.label },
+              t.maxSnapshotBytes,
+              h('input', { style: styles.input, type: 'number', min: 1024, max: 1000000000, step: 1024, value: formMaxSnapshotBytes, onChange: (event) => setFormMaxSnapshotBytes(event.target.value) })),
+            h('label', { style: styles.label },
+              t.maxClearTurns,
+              h('input', { style: styles.input, type: 'number', min: 1, max: 50, value: formMaxClearTurns, onChange: (event) => setFormMaxClearTurns(event.target.value) })),
+            h('label', { style: styles.label },
+              t.minClearChars,
+              h('input', { style: styles.input, type: 'number', min: 0, max: 20000, value: formMinClearChars, onChange: (event) => setFormMinClearChars(event.target.value) })),
+            h('label', { style: styles.label },
+              t.maxClearChars,
+              h('input', { style: styles.input, type: 'number', min: 1000, max: 1000000, value: formMaxClearChars, onChange: (event) => setFormMaxClearChars(event.target.value) })),
+            h('label', { style: styles.label },
+              t.autoKnowledgeLimit,
+              h('input', { style: styles.input, type: 'number', min: 1, max: 100, value: formAutoKnowledgeLimit, onChange: (event) => setFormAutoKnowledgeLimit(event.target.value) }))),
+          h('div', { style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.reviewHighRiskOnly),
+            h('button', {
+              type: 'button', role: 'switch', 'aria-checked': formReviewHighRiskOnly,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formReviewHighRiskOnly ? styles.switchOptionOn : {}) },
+              onClick: () => setFormReviewHighRiskOnly(true),
+            }, t.switchOn),
+            h('button', {
+              type: 'button', role: 'switch', 'aria-checked': !formReviewHighRiskOnly,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(!formReviewHighRiskOnly ? styles.switchOptionOn : {}) },
+              onClick: () => setFormReviewHighRiskOnly(false),
+            }, t.switchOff)),
+          h('div', { style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.autoKnowledge),
+            h('button', {
+              type: 'button', role: 'switch', 'aria-checked': formAutoKnowledge,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formAutoKnowledge ? styles.switchOptionOn : {}) },
+              onClick: () => setFormAutoKnowledge(true),
+            }, t.switchOn),
+            h('button', {
+              type: 'button', role: 'switch', 'aria-checked': !formAutoKnowledge,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(!formAutoKnowledge ? styles.switchOptionOn : {}) },
+              onClick: () => setFormAutoKnowledge(false),
+            }, t.switchOff)),
+          h('div', { style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.requestAnchor),
+            h('button', {
+              type: 'button', role: 'switch', 'aria-checked': formRequestAnchor,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formRequestAnchor ? styles.switchOptionOn : {}) },
+              onClick: () => setFormRequestAnchor(true),
+            }, t.switchOn),
+            h('button', {
+              type: 'button', role: 'switch', 'aria-checked': !formRequestAnchor,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(!formRequestAnchor ? styles.switchOptionOn : {}) },
+              onClick: () => setFormRequestAnchor(false),
+            }, t.switchOff)),
+          h('h4', { style: { ...styles.cardTitle, marginTop: '14px' } }, t.retentionTitle),
+          h('div', { style: styles.grid2 },
+            h('label', { style: styles.label },
+              t.stagingRetentionDays,
+              h('input', { style: styles.input, type: 'number', min: 0, max: 3650, value: formStagingRetention, onChange: (event) => setFormStagingRetention(event.target.value) })),
+            h('label', { style: styles.label },
+              t.contextRetentionDays,
+              h('input', { style: styles.input, type: 'number', min: 0, max: 3650, value: formContextRetention, onChange: (event) => setFormContextRetention(event.target.value) })),
+            h('label', { style: styles.label },
+              t.decisionRetentionDays,
+              h('input', { style: styles.input, type: 'number', min: 0, max: 3650, value: formDecisionRetention, onChange: (event) => setFormDecisionRetention(event.target.value) }))),
+          h('p', { style: styles.hint }, t.retentionNever),
+          h('p', { style: styles.hint },
+            `${t.storageUsed}: ${formatBytes(data?.storage?.totalBytes ?? 0)}｜`
+              + `${t.storageContexts}: ${counts.contexts ?? 0} 个 / ${formatBytes(data?.storage?.bytes?.contexts ?? 0)}｜`
+              + `${t.tabDecisions}: ${counts.decisions ?? 0} 个 / ${formatBytes(data?.storage?.bytes?.decisions ?? 0)}`),
+          h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' } },
+            h('button', {
+              type: 'button', className: 'aim-btn', style: styles.button,
+              disabled: retentionBusy, onClick: runRetentionCleanup,
+            }, retentionBusy ? t.retentionCleaning : t.retentionCleanup),
+            h('button', {
+              type: 'button', className: 'aim-btn', style: styles.primary,
+              disabled: saving, onClick: saveConfig,
+            }, saving ? t.saving : t.save))) : null,
 
         isSettings && settingsSection === 'general'
           ? h('section', { style: styles.card },
@@ -3268,6 +4732,50 @@ window.__ModuleLoader__.load({
                 value: formDir,
                 onChange: (event) => setFormDir(event.target.value),
               }))),
+          h('div', {
+            style: {
+              borderTop: '1px solid rgba(127,127,127,0.22)',
+              marginTop: '14px',
+              paddingTop: '12px',
+            },
+          },
+          h('h4', { style: { ...styles.cardTitle, margin: '0 0 6px' } }, t.mcpTitle),
+          h('div', { style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.mcpEnabledLabel),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': formMcpEnabled,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formMcpEnabled ? styles.switchOptionOn : {}) },
+              onClick: () => setFormMcpEnabled(true),
+            }, t.switchOn),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': !formMcpEnabled,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(!formMcpEnabled ? styles.switchOptionOn : {}) },
+              onClick: () => setFormMcpEnabled(false),
+            }, t.switchOff)),
+          h('p', { style: styles.hint }, t.mcpHint),
+          h('label', { style: styles.label },
+            t.mcpUrlLabel,
+            h('input', {
+              style: styles.input,
+              readOnly: true,
+              value: mcpUrl,
+              onFocus: (event) => event.target.select(),
+            })),
+          h('label', { style: styles.label },
+            t.mcpTokenLabel,
+            h('input', {
+              style: styles.input,
+              type: 'password',
+              value: formMcpToken,
+              placeholder: mcpHasToken ? t.mcpTokenSaved : t.mcpTokenNone,
+              onChange: (event) => setFormMcpToken(event.target.value),
+            }))),
           h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' } },
             h('button', {
               type: 'button',
