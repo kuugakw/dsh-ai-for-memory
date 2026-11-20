@@ -2648,7 +2648,8 @@ test('a live llama-server from the previous plugin process is adopted', async ()
     assert.equal(readoptedRow.stale, true);
 
     // Stopping an adopted engine must terminate the surviving process too.
-    await stopLocalEngine('Embedding/fake');
+    const stopped = await stopLocalEngine('Embedding/fake');
+    assert.equal(stopped.ok, true, stopped.error);
     for (let attempt = 0; attempt < 100 && child.exitCode === null; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
@@ -4026,7 +4027,11 @@ test('git sync never adopts or excludes files from a parent project repository',
       cwd: memory,
       encoding: 'utf8',
     }).trim();
-    assert.equal(path.resolve(top), path.resolve(memory));
+    const canon = (value) => {
+      const resolved = fs.realpathSync.native(value);
+      return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    };
+    assert.equal(canon(top), canon(memory));
     assert.match(fs.readFileSync(parentExclude, 'utf8'), /project-owned exclude/);
     assert.match(fs.readFileSync(parentExclude, 'utf8'), /memory\//);
     const parentStatus = execFileSync('git', ['status', '--porcelain'], {
