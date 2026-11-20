@@ -21,7 +21,7 @@
   - `model`：模型写入或提炼的内容，默认未确认；来源缺失或拼错统一变成 `unknown`，也归入这一档；
 - `verified`：是否已经过用户确认。
 
-工具写入的知识默认是模型自述；面板点「确认这条」后，`verified` 变为 `true`，正文、`doc_id` 和证据链都不变，但 `source` 会改为可追溯的 `user-confirmed`、`provenance` 改为 `user`，否则来源缺失的文档每次读取都会被重新判回未确认，确认按钮看起来像没生效。即使工具调用时传 `source=user`，它也只是“模型转述用户的话”，不会自动获得 `verified`。
+工具写入的知识默认是模型自述；面板点「确认这条」后，`verified` 变为 `true`，正文、`doc_id` 和证据链都不变，但 `source` 会改为可追溯的 `user-confirmed`、`provenance` 改为 `user`，并写入独立的 `confirmed: true` 字段，否则来源缺失的文档每次读取都会被重新判回未确认，确认按钮看起来像没生效。即使工具调用时传 `source=user`，它也只是“模型转述用户的话”，不会自动获得 `verified`。`confirmed` 是人的明确表态，来源推断只能影响未确认文档的可信度，不能反过来否决它。
 
 ### 拆分片段
 

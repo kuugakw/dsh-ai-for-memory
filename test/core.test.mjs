@@ -1567,10 +1567,12 @@ test('verification clears a model claim and incidents are compact unverified pro
     const untraceable = store.remember({ text: '没有写来源的模型结论' }, { confirm: true });
     assert.equal(untraceable.source, 'unknown');
     assert.equal(untraceable.verified, false);
+    assert.equal(untraceable.confirmed, false);
     const fixed = store.verifyKnowledge(untraceable.doc_id);
     assert.equal(fixed.verified, true);
     const reloaded = new MemoryStore(root).documents().find((doc) => doc.doc_id === untraceable.doc_id);
     assert.equal(reloaded.verified, true);
+    assert.equal(reloaded.confirmed, true);
     assert.equal(reloaded.source, 'user-confirmed');
     assert.equal(reloaded.provenance, 'user');
     // Export → re-import must not erase the confirmation either.
