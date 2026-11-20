@@ -2651,10 +2651,10 @@ test('a live llama-server from the previous plugin process is adopted', async ()
     const stopped = await stopLocalEngine('Embedding/fake');
     assert.equal(stopped.ok, true, stopped.error);
     assert.equal(stopped.stopped, true, JSON.stringify(stopped));
-    for (let attempt = 0; attempt < 100 && child.exitCode === null; attempt += 1) {
+    for (let attempt = 0; attempt < 100 && child.exitCode === null && child.signalCode === null; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    assert.notEqual(child.exitCode, null, 'adopted process was not terminated');
+    assert.ok(child.exitCode !== null || child.signalCode !== null, 'adopted process was not terminated');
     assert.equal(fs.readdirSync(lockDir).filter((name) => name.endsWith('.json')).length, 0);
   } finally {
     if (child && child.exitCode === null) child.kill();
