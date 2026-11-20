@@ -2650,6 +2650,7 @@ test('a live llama-server from the previous plugin process is adopted', async ()
     // Stopping an adopted engine must terminate the surviving process too.
     const stopped = await stopLocalEngine('Embedding/fake');
     assert.equal(stopped.ok, true, stopped.error);
+    assert.equal(stopped.stopped, true, JSON.stringify(stopped));
     for (let attempt = 0; attempt < 100 && child.exitCode === null; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
