@@ -1,13 +1,22 @@
-# AI for Memory — 给项目一个不会忘事的记忆层
+# AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![Status](https://img.shields.io/badge/status-stable%200.1-brightgreen.svg)]()
 [![Version](https://img.shields.io/badge/version-0.1.0-lightgrey.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.1.0 首个项目级正式版（first stable release）。** 这一版把六层记忆、五个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。
+> **0.1.0 本插件的第一个正式版。** AI for Memory 是面向 DSH 的项目级记忆插件：这一版把六层记忆、五个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。
+>
 > 升级前请备份记忆目录。
 
 **快速入口：** [安装](docs/installation.md) · [工具参考](docs/tools.md) · [面板](docs/panel.md) · [本地模型/推理引擎](docs/models.md) · [上下文与自动行为](docs/context.md) · [检索与 RAG](docs/search.md) · [知识库](docs/knowledge.md) · [配置](docs/configuration.md) · [隐私](docs/security.md) · [常见问题](docs/faq.md) · [开发](docs/development.md) · [更新记录](CHANGELOG.md)
+
+---
+
+## 定位
+
+AI for Memory 是面向 DSH 的**项目级记忆插件**。它关注项目工作流中的事实、约定、错误修复、决策和对话上下文，而不是做一个通用的聊天记录收藏夹。
+
+记忆类插件已有不少实现；本项目的重点是把项目记忆放在可审查、可恢复、可迁移的本地数据层上：JSON 是底座，模型写入默认标为未确认，上下文清理前先存档。
 
 ---
 

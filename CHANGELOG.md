@@ -4,6 +4,10 @@
 
 ## 0.1.0（2026-11-20）
 
+### 版本概览
+
+AI for Memory 是面向 DSH 的项目级记忆插件；`0.1.0` 是本插件的第一个正式版。这一版把六层记忆、五个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，所有记忆默认保存在本地。
+
 ### 新增
 
 - **本地 llama.cpp 推理引擎**：读取 `models/Embedding|Rerank/*/model.json`，发现 GGUF，自动启动 `llama-server`，支持 BGE-M3 的 `--embeddings --pooling cls` 和 BGE Reranker v2 m3 的 `--reranking`。
@@ -17,10 +21,6 @@
 - 测试命令改为显式 `node --test test/core.test.mjs`，README 与 `npm test` 一致。
 - 面板导航切换后旧按钮焦点框残留；导航与设置分组按钮显式清理非选中边框。
 - 面板 API 的本地引擎路由修正 same-origin 检查。
-
-### 首个正式版概览
-
-首个项目级正式版（first stable release）。这一版把六层记忆、五个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，所有记忆默认保存在本地。
 
 ### 六层记忆
 
