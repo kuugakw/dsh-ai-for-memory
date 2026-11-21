@@ -2589,6 +2589,16 @@ window.__ModuleLoader__.load({
           if (payload?.ok !== true) {
             setNotice({ kind: 'err', text: `${t.localModelStartFailed}: ${clipPreview(payload?.error ?? '', 500)}` });
           } else {
+            const endpoint = payload.endpoint ?? {};
+            const baseUrl = endpoint.baseUrl ?? '';
+            const modelName = endpoint.model || model.model;
+            if (llamaModelKind(model) === 'embedding') {
+              setFormEmbedBase(baseUrl);
+              setFormEmbedModel(modelName);
+            } else if (llamaModelKind(model) === 'rerank') {
+              setFormRerankBase(baseUrl);
+              setFormRerankModel(modelName);
+            }
             setNotice({ kind: 'ok', text: t.localModelStarted });
           }
           await load('');
