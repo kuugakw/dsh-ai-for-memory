@@ -51,7 +51,7 @@ import { buildContextSnapshot, collectTurns, formatContextMarkdown, formatRestor
 import { handleMcpMessage, MCP_PATH, mcpToolNames } from '../lib/mcp.js';
 import { packageVersion } from '../lib/version.js';
 import { ensureMcpToken, mcpTokenPath } from '../lib/mcp-token.js';
-import { contentTokens, selectTurnsByTopic, topicSimilarity } from '../lib/similarity.js';
+import { contentTokens, lexicalOverlap, selectTurnsByTopic, topicSimilarity } from '../lib/similarity.js';
 import {
   AUTO_SNAPSHOT_PREFIX, isAutoSnapshot, planSnapshotPrune, snapshotText,
 } from '../lib/snapshot.js';
@@ -271,6 +271,29 @@ test('the retrieval cache key uses revision, not the text length', () => {
   assert.equal(search(after, '超时', { mode: 'bm25' }).length, 0);
 });
 
+test('hybrid keeps the keyword channel when every BM25 score ties', () => {
+  // Same query term, same term frequency, same document length: BM25 cannot
+  // separate these three documents.
+  const docs = [
+    { doc_id: 'a', category: 'ui_facts', text: 'alpha beta gamma', updated_at: '2026-01-01T00:00:00Z' },
+    { doc_id: 'b', category: 'ui_facts', text: 'alpha delta epsilon', updated_at: '2026-01-02T00:00:00Z' },
+    { doc_id: 'c', category: 'ui_facts', text: 'alpha zeta eta', updated_at: '2026-01-03T00:00:00Z' },
+  ];
+  const hybrid = search(docs, 'alpha', { mode: 'hybrid' });
+  assert.equal(hybrid.length, 3);
+  const bm25 = hybrid.map((hit) => hit.bm25_score);
+  assert.ok(bm25.every((score) => score > 0));
+  assert.equal(new Set(bm25.map((score) => score.toFixed(9))).size, 1, 'BM25 must actually tie');
+  // Hybrid is rank fusion, not min-max weighting, so `max === min` cannot zero
+  // the keyword channel. Every hit keeps a rank and a keyword contribution on
+  // top of what a pure-vector RRF would give it.
+  for (const hit of hybrid) {
+    assert.ok(Number.isInteger(hit.bm25_rank), `no bm25 rank for ${hit.doc_id}`);
+    assert.ok(hit.score > 0.4 / (RRF_K + hit.vector_rank), `keyword channel vanished for ${hit.doc_id}`);
+  }
+  assert.deepEqual(hybrid.map((hit) => hit.doc_id), ['a', 'b', 'c']);
+});
+
 test('Chinese snippets center on multi-character query terms, not the first single char', () => {
   const text = `${'无关开头。'.repeat(100)}网关超时，必须重试三次。`;
   const snippet = snippetOf(text, '网关超时', 100);
@@ -339,6 +362,15 @@ test('decision review gates on reversibility, not on reason length', () => {
   const low = evaluateDecision({ decision: '关闭设置页', risk: 'low' });
   assert.equal(low.outcome, 'approved');
   assert.equal(low.reviewed, false);
+
+  // A caller that mislabels a destructive action as low still cannot get it
+  // auto-approved when it marks the action irreversible: the declared flags
+  // must agree. (A caller that lies on both fields is still believed — that is
+  // the documented trust boundary.)
+  const mislabeled = evaluateDecision({ decision: '删除生产库', risk: 'low', irreversible: true });
+  assert.equal(mislabeled.outcome, 'rejected');
+  assert.equal(mislabeled.reviewed, true);
+  assert.equal(mislabeled.weights.gate, 'reversibility');
 
   const rejected = evaluateDecision({
     decision: '删除全部文件',
@@ -1021,6 +1053,13 @@ test('knowledge normalizes categories, ids and duplicates', () => {
   assert.equal(untrusted.provenance, 'model');
   assert.equal(untrusted.verified, false);
   assert.equal(normalizeProvenance(undefined, 'context'), 'user');
+  // An explicit "user" only wins for a trusted source. Otherwise a model could
+  // declare its own claim a user fact and escape the unverified penalty.
+  assert.equal(normalizeProvenance('user', 'context'), 'user');
+  assert.equal(normalizeProvenance('user', 'user-confirmed'), 'user');
+  assert.equal(normalizeProvenance('user', 'mcp'), 'model');
+  assert.equal(normalizeProvenance('user', 'staging'), 'model');
+  assert.equal(normalizeProvenance('user', 'unknown'), 'model');
 
   // The id is derived from the text, so the same fact always lands on one file.
   assert.equal(knowledgeKey('部署前必须跑测试'), knowledgeKey('  部署前必须跑测试  '));
@@ -1672,14 +1711,27 @@ test('knowledge tools write, learn in batch and preview promotion', async () => 
     assert.match(batch, /已写入知识 2 条/);
     assert.match(batch, /新增 2/);
 
+    // A model cannot launder a claim by declaring it a user fact: the tool
+    // forces provenance=model/verified=false, and provenance 'user' is only
+    // trusted from context/user-confirmed sources.
+    const forged = await memory.execute({
+      action: 'remember',
+      text: '模型声称这是用户原话',
+      category: 'workflow_rules',
+      source: 'context',
+      provenance: 'user',
+      verified: true,
+    }, exec);
+    assert.match(forged, /知识已写入/);
+
     // The only caller of aim_memory is the model. Even source=user/reasoning is
     // a model transcription, so tool writes must start unverified.
     const written = new MemoryScopes(memoryRoot).sessionStoreFor('session-k', {}).store.documents();
-    assert.equal(written.length, 3);
+    assert.equal(written.length, 4);
     assert.ok(written.every((doc) => doc.provenance === 'model' && doc.verified === false));
 
     const st = await memory.execute({ action: 'status' }, exec);
-    assert.match(st, /知识库：3 篇/);
+    assert.match(st, /知识库：4 篇/);
     assert.match(st, /知识来源：/);
     assert.match(st, /待提炼：约/);
 
@@ -1692,7 +1744,7 @@ test('knowledge tools write, learn in batch and preview promotion', async () => 
     const forgotten = await memory.execute({ action: 'forget', doc_id: 'k_missing' }, exec);
     assert.match(forgotten, /未删除/);
     const listed = await memory.execute({ action: 'status' }, exec);
-    assert.match(listed, /知识库：3 篇/);
+    assert.match(listed, /知识库：4 篇/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -2144,9 +2196,41 @@ test('topic similarity separates related turns from unrelated ones', () => {
   assert.equal(topicSimilarity('', '任何内容'), 0);
   assert.equal(topicSimilarity('只有空白的判断', '   '), 0);
 
+  // Adversarial English drift. Before content tokens and stopwords, these two
+  // unrelated sentences shared "the/and/with/so" and scored ≈0.38 — well above
+  // the 0.05 keep/clear threshold.
+  const englishDrift = topicSimilarity(
+    'The deploy script pushes the image to the registry and rolls out the new version, so the service can be restarted with the new configuration.',
+    'The dinner plan is to book a table at the restaurant and invite the neighbours, so the evening can be spent with the new friends.',
+  );
+  assert.ok(englishDrift < 0.05, `englishDrift=${englishDrift}`);
+  const englishRelated = topicSimilarity(
+    'The memory plugin clears old conversation turns by topic similarity.',
+    'Context clearing keeps turns that share the current topic.',
+  );
+  assert.ok(englishRelated > 0.15, `englishRelated=${englishRelated}`);
+
+  // Short unrelated turns carry no shared content vocabulary at all.
+  assert.equal(topicSimilarity('今天天气不错', '数据库连接池'), 0);
+  assert.equal(topicSimilarity('deploy the app', 'eat dinner'), 0);
+  // One shared word among ten is not a shared topic.
+  assert.ok(topicSimilarity('timeout handling', 'timeout budget') < 0.05);
+
+  // Latin function words never count as content tokens.
+  assert.equal(contentTokens('the and with from this that').size, 0);
+  assert.equal(lexicalOverlap('the and with', 'the and with'), 0);
   // Single Han characters are function words, so they never count as content.
   assert.equal(contentTokens('的了是在').has('的'), false);
   assert.equal(contentTokens('上下文清理').has('清理'), true);
+
+  // Known limitation, pinned on purpose: two texts that reuse the same
+  // sentence template still share many content bigrams ("需要/现在/因为/情况").
+  // They stay on-topic; the error direction is keeping context, not deleting it.
+  const sharedTemplate = topicSimilarity(
+    '我需要先确认这个方案没有问题，然后再决定是不是继续往下做，因为现在的情况还不太清楚。',
+    '我需要先查一下天气怎么样，然后再决定是不是出门，因为现在的情况还不太确定。',
+  );
+  assert.ok(sharedTemplate > 0.5, `sharedTemplate=${sharedTemplate}`);
 });
 
 test('similarity selection keeps on-topic turns and their recent neighbours', () => {
@@ -2169,6 +2253,20 @@ test('similarity selection keeps on-topic turns and their recent neighbours', ()
   // A higher threshold clears more, and keepRecent still protects the tail.
   const strict = selectTurnsByTopic(turns, { threshold: 0.8, keepRecent: 2 });
   assert.deepEqual(strict.keep.map((turn) => turn.turn), [3, 4]);
+});
+
+test('English topic drift is cleared instead of kept by function words', () => {
+  const turns = [
+    { turn: 1, text: 'The deploy script pushes the image to the registry and rolls out the new version.' },
+    { turn: 2, text: 'The dinner plan is to book a table at the restaurant and invite the neighbours.' },
+    { turn: 3, text: 'The memory plugin clears old conversation turns by topic similarity.' },
+    { turn: 4, text: 'Context clearing keeps turns that share the current topic.' },
+  ];
+  const selection = selectTurnsByTopic(turns, { threshold: 0.05, keepRecent: 2 });
+  // Before function words were dropped, turns 1 and 2 scored ≈0.38 against the
+  // anchors and survived; English conversations could never drift.
+  assert.deepEqual(selection.keep.map((turn) => turn.turn), [3, 4]);
+  assert.deepEqual(selection.clear.map((turn) => turn.turn), [1, 2]);
 });
 
 /** Four turns where the first two left the topic the last two talk about. */

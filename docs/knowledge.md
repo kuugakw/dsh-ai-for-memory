@@ -17,7 +17,7 @@
 - `source`：`user`、`user-confirmed`、`web`、`reasoning`、`staging`、`archive`、`context`、`decision`、`incident`、`unknown`；
 - `provenance`：
   - `authored`：显式导入 / 迁移且来源可追溯的已确认数据；
-  - `user`：从上下文用户原话提炼；
+  - `user`：从上下文用户原话提炼；显式传 `provenance: user` 时也只信任 `source=context` / `user-confirmed`，其余来源（包括 `mcp`、`staging`）一律按 `model` 处理，避免模型自行声明成用户事实；
   - `model`：模型写入或提炼的内容，默认未确认；来源缺失或拼错统一变成 `unknown`，也归入这一档；
 - `verified`：是否已经过用户确认。
 

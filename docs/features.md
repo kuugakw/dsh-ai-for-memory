@@ -168,12 +168,13 @@ verified: false
 
 对高风险或不可逆操作做正反合审查。
 
-- `risk=low` 直接放行；
+- `risk=low` 直接放行（但调用方自己标了 `irreversible=true` 时不再放行）；
 - `risk=high` 不再按理由字数放行；
-- `irreversible=true` 直接拒绝；
+- `irreversible=true` 直接拒绝（任何风险等级）；
 - `irreversible=false` 必须给出 `recoverable_via`；
 - 缺字段返回 `needs_more_info`；
-- 结果写入 `decisions`，包含正题、反题、结论、风险、可逆性和恢复路径。
+- 结果写入 `decisions`，包含正题、反题、结论、风险、可逆性和恢复路径；
+- `risk` 是调用方自己的标注，审查门只能校验结构化字段是否自洽；把不可逆操作同时标成 `low` 和 `irreversible=false` 属于威胁模型边界（审查记录仍保留声明的 risk 与 auto 闸门）。
 
 ### 4.5 `aim_ask`
 

@@ -1963,7 +1963,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         risk: {
           type: 'string',
           enum: [...RISKS],
-          description: '风险等级，默认 low（低风险直接放行，不浪费审查）。',
+          description: '风险等级，默认 low（低风险直接放行，不浪费审查）。按操作实际影响标注；'
+            + '标 low 不会让 irreversible=true 绕过审查。',
         },
         scope: {
           type: 'string',
