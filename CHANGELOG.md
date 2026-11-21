@@ -2,6 +2,23 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 0.3.1（2026-11-21）
+
+### 本地模型增强
+
+- **运行中的本地模型自动接管 Embedding/Rerank**：配置为空或仍是旧 loopback 端口时，RAG、`aim_search`、`aim_ask`、归档/提炼等调用自动使用当前运行中的 Qwen3-Embedding / Jina-Rerank；显式云端地址优先，不会被覆盖。
+- **RAG 自动挂载**：两个本地引擎都就绪且未配置独立外部端点时，自动挂载 RAG；索引身份使用 `local:<model>`，llama-server 重启换临时端口不再让索引失效。
+- **Rerank 真正参与 RAG**：Rerank 启动显式加 `--pooling rank`；RAG 在 Rerank 不可用时拒绝“只靠 Embedding”的结果并回退 BM25；检索输出明确标注 `Embedding + Rerank`，小 logits 用科学计数法显示。
+- **`ctx-size` 可调**：本地模型默认从 8192 降到 2048，面板每个模型可单独修改并写回 `model.json`；自动选端口遇到 `EADDRINUSE` 时换端口重试最多 3 次，显式端口仍直接报错。
+- **模型页**：Embedding / Rerank 分栏，llama.cpp 调参页支持 ctx-size、port、pooling（含 `rank`）、启动超时、binary、额外参数。
+
+### 会话恢复与诊断
+
+- **会话日志修复改为异步**：`zstdDecompress` 异步解压，按 `mtime+size` 缓存；总览默认只读文件头，深度体检需显式点击，避免打开页面冻结 DSH 事件循环。
+- **Node 能力显式化**：`/state` 和诊断页返回 `sessionRepairAvailable`；Node 20 上明确标记会话修复不可用，而不是点下去才报错。
+- **校验器可追溯**：深度体检显示使用 DSH 内置校验器还是本地回退，并给出回退原因；截断修复先预演，确认按钮明确写出“将丢弃 N 条事件”。
+- 会话日志深度体检限制最近 20 份；compact 启动前保留备份和写后复验。
+
 ## 0.3.0（2026-11-21）
 
 ### 新增

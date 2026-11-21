@@ -3469,7 +3469,7 @@ export function apply(ctx, config) {
       getService,
       runMcpTool,
       listMcpRoots,
-      version: '0.3.0',
+      version: '0.3.1',
       mcpToken: mcpAccess.token,
       mcpTokenFile: mcpAccess.file,
     });
