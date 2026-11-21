@@ -1257,15 +1257,27 @@ test('remember merges the same fact and keeps provenance', () => {
     assert.equal(aliased.doc_id, first.doc_id);
     assert.equal(store.documents().length, 1);
 
-    // The same custom id with different text must not overwrite the old fact.
+    // The same custom id with different text is an explicit overwrite target:
+    // it needs confirmation, and confirm=true replaces that document's body.
+    const blockedCollision = store.remember({
+      doc_id: first.doc_id,
+      text: '另一条完全不同的知识，不能覆盖旧事实',
+      category: 'project_facts',
+    });
+    assert.equal(blockedCollision.needs_confirm, true);
+    assert.equal(blockedCollision.conflicts[0].doc_id, first.doc_id);
+    assert.equal(store.documents().length, 1);
+    assert.equal(store.documents()[0].text, 'DSH 的压缩阈值默认是 0.8');
+
     const collided = store.remember({
       doc_id: first.doc_id,
       text: '另一条完全不同的知识，不能覆盖旧事实',
       category: 'project_facts',
     }, { confirm: true });
-    assert.notEqual(collided.doc_id, first.doc_id);
-    assert.equal(store.documents().length, 2);
-    assert.equal(store.documents().find((doc) => doc.doc_id === first.doc_id).text, 'DSH 的压缩阈值默认是 0.8');
+    assert.equal(collided.doc_id, first.doc_id);
+    assert.equal(store.documents().length, 1);
+    assert.equal(store.documents()[0].text, '另一条完全不同的知识，不能覆盖旧事实');
+    assert.equal(collided.changes.at(-1).previous_text, 'DSH 的压缩阈值默认是 0.8');
     assert.equal(collided.schema_version, 1);
 
     // A web fact is classified as external sourcing even without a category.
@@ -1352,7 +1364,7 @@ test('a changed value is an update, not a silent merge', () => {
   }
 });
 
-test('promote never rewrites a confirmed fact and queues material updates', () => {
+test('promote reports material updates without queueing them', () => {
   const root = tempRoot();
   try {
     const store = new MemoryStore(root);
@@ -1391,20 +1403,17 @@ test('promote never rewrites a confirmed fact and queues material updates', () =
     assert.equal(mined.pending.length, 1);
     assert.equal(mined.added.length, 0);
     assert.equal(store.documents()[0].text, originalText);
-    assert.equal(store.pendingPromotions().length, 1);
-    assert.equal(store.pendingPromotions()[0].update_of, first.doc_id);
-    assert.equal(store.pendingPromotions()[0].text, changedText);
+    // Nothing is queued: the caller gets the proposal and the user decides.
+    assert.equal(store.pendingPromotions().length, 0);
     const ui = buildUiState(store);
-    assert.equal(ui.knowledgePendingUpdates.length, 1);
-    assert.equal(ui.knowledgePendingUpdates[0].update_of, first.doc_id);
-    assert.equal(ui.knowledgePendingUpdates[0].text, changedText);
+    assert.equal(ui.knowledgePendingUpdates.length, 0);
 
-    // Re-running dedupes the same proposal and keeps it pending for review.
+    // Re-running reports the same proposal; still nothing is queued.
     const again = store.promoteKnowledge();
     assert.equal(again.pending.length, 1);
-    assert.equal(store.pendingPromotions().length, 1);
+    assert.equal(store.pendingPromotions().length, 0);
 
-    // Only an explicit confirmation applies it, and resolves the review item.
+    // Only an explicit confirmation applies it, and it overwrites the body.
     const confirmed = store.remember({
       text: changedText,
       category: 'project_facts',
@@ -1415,6 +1424,55 @@ test('promote never rewrites a confirmed fact and queues material updates', () =
     assert.equal(confirmed.doc_id, first.doc_id);
     assert.equal(confirmed.text, changedText);
     assert.ok(confirmed.revision > originalRevision);
+    assert.equal(store.pendingPromotions().length, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('an explicit doc_id needs confirmation and confirm=true overwrites the body', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    const baseText = '外部模型地址默认是 http://127.0.0.1:8080';
+    const rewriteText = '外部模型地址默认改成 https://api.example.com/v1，并且必须带鉴权头';
+    const base = store.remember({
+      text: baseText,
+      category: 'project_facts',
+      source: 'user',
+      provenance: 'user',
+      verified: true,
+    }, { confirm: true });
+
+    // Naming an existing document with a different sentence is a rewrite
+    // proposal: no silent overwrite, no second document, no queue.
+    const blocked = store.remember({
+      doc_id: base.doc_id,
+      text: rewriteText,
+      category: 'project_facts',
+      source: 'user',
+    });
+    assert.equal(blocked.needs_confirm, true);
+    assert.equal(blocked.kind, 'update');
+    assert.equal(blocked.conflicts[0].doc_id, base.doc_id);
+    assert.equal(store.documents().length, 1);
+    assert.equal(store.documents()[0].text, baseText);
+    assert.equal(store.pendingPromotions().length, 0);
+
+    // confirm=true replaces the body, keeps the id and audits the old sentence.
+    const rewritten = store.remember({
+      doc_id: base.doc_id,
+      text: rewriteText,
+      category: 'project_facts',
+      source: 'user',
+    }, { confirm: true });
+    assert.equal(rewritten.doc_id, base.doc_id);
+    assert.equal(rewritten.text, rewriteText);
+    assert.ok(rewritten.revision > base.revision);
+    assert.equal(rewritten.changes.at(-1).previous_text, baseText);
+    assert.equal(rewritten.verified, true);
+    assert.equal(store.documents().length, 1);
+    assert.equal(store.documents()[0].text, rewriteText);
     assert.equal(store.pendingPromotions().length, 0);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

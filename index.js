@@ -544,7 +544,8 @@ function formatLayers(status) {
   }
   lines.push(`待提炼：约 ${status.knowledge.pending ?? 0} 条（promote 预览/写入，learn 直接写知识）`);
   if ((status.knowledge.pendingUpdates ?? 0) > 0) {
-    lines.push(`待确认知识更新：${status.knowledge.pendingUpdates} 条（提炼想改写已有事实，未写入；面板知识库页可查看）`);
+    lines.push(`历史待确认知识更新：${status.knowledge.pendingUpdates} 条`
+      + '（旧版本提炼入队、未写入；面板知识库页可接受或忽略。新提炼不再入队）');
   }
   lines.push(`决策记录：${status.decisions.total} 条`
     + (status.decisions.total > 0
@@ -1023,9 +1024,10 @@ function formatConflict(result) {
   }
   lines.push('请向用户确认三件事：以哪条为准、是否覆盖旧条目（给旧条目 doc_id）、是否只是补充；');
   if (isUpdate) {
-    lines.push('用户确认后用 confirm=true 重新调用；确认后会写入新正文，并在 changes 中保留上一版审计。');
+    lines.push('用户确认后用 confirm=true 重新调用；会写入新正文，并在 changes 中保留上一版审计。');
   } else {
-    lines.push('用户同意后再用 confirm=true 重新调用（同意覆盖时同时传旧条目的 doc_id）。用户不同意就不要写入。');
+    lines.push('用户同意后再用 confirm=true 重新调用；同意覆盖就同时传旧条目的 doc_id，'
+      + '会覆盖该条正文并保留 changes 审计。用户不同意就不要写入。');
   }
   return lines.join('\n');
 }
@@ -1052,11 +1054,12 @@ function formatPromotion(result) {
   }
   const pending = Array.isArray(result.pending) ? result.pending : [];
   if (pending.length > 0) {
-    lines.push(`⚠ ${pending.length} 条提炼结果想改写已有事实，本次没有写入；已放入待确认队列：`);
+    lines.push(`⚠ ${pending.length} 条提炼结果想改写已有事实，本次没有写入，也没有入队：`);
     for (const row of pending.slice(0, 5)) {
       lines.push(`- 目标 ${row.update_of ?? row.doc_id}：${clip(row.text ?? '', 140)}`);
     }
-    lines.push('请逐条核对；确认后用 aim_memory remember + confirm=true 写入，或告诉我不采用哪条。');
+    lines.push('请逐条核对；用户同意后用 aim_memory remember + confirm=true 写入，'
+      + '传目标 doc_id 会覆盖该条正文并保留 changes 审计；不同意就不写。');
   }
   const preserved = (result.merged ?? []).filter((row) => row.preserved === true).length;
   if (preserved > 0) {
@@ -1182,9 +1185,9 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         + '每条知识只写一句可复用的结论，必须带分类，并尽量给出处（url 或 source）。'
         + '默认写入当前对话自己的独立记忆；scope=shared 时写入所有对话共用的共享层。'
         + '冲突规则：新知识与已有知识、或与你自己的认知不一致时，先询问用户，得到同意后再带 confirm=true 写入；'
-        + '不带 confirm 的写入若与已有知识相近但不同，会返回 needs_confirm 并列出冲突条目，此时必须先问用户，不要擅自覆盖。'
+        + '冲突不会入队：不带 confirm 的写入若与已有知识相近但不同，会返回 needs_confirm 并列出冲突条目，必须先问用户，不要擅自覆盖。'
         + '注意：只改数字（端口/阈值/版本）、URL 或开关（开启/关闭）的“更新”即使措辞高度相似也会返回 kind=update，必须先确认；'
-        + '确认后写入原 doc_id 并保留 changes 审计，不要把它当普通重复直接合并。'
+        + '确认后传原 doc_id + confirm=true 会覆盖该条正文，并在 changes 中保留上一版审计，不要把它当普通重复直接合并。'
         + '需要检索时用 aim_search（默认跨对话）。不要写入密钥、令牌或用户没有说过的事实。'
         + 'remember/learn/incident 的调用方是模型，写入内容默认标为模型自述（provenance=model、verified=false、检索降权），'
         + '用户可在面板对单条点「确认这条」，确认后保留原 doc_id 与证据链并清除黄标；不要假装已确认。'
@@ -1203,7 +1206,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             + 'snapshot=保存 state 快照（name 必填）；restore=按 snapshot_id 恢复；list=列出快照；'
             + 'remember=写入一条知识（text 必填，doc_id 可省）；learn=批量写知识（items 必填）；'
             + 'promote=从过程记录/归档/上下文提炼知识（仅 verify=pass 的模型记录 + 用户原话；dry_run 可预览；'
-            + '不改写已有正文，数值/端点/开关变化进入待确认队列）；'
+            + '不改写已有正文，数值/端点/开关变化只在结果里列出，不写入、不入队）；'
             + 'forget=删除一条错误知识（doc_id 必填）；'
             + 'index=为当前范围的知识库建立/更新 RAG 索引（需要 Embedding + Rerank 两个模型都配置好）；'
             + 'export=把知识库全量导出（可选一种或多种：knowledge=JSON/Markdown、sql=SQLite 数据库、rag=向量索引）；'
@@ -1261,8 +1264,9 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         },
         doc_id: {
           type: 'string',
-          description: 'remember 用：知识文档 id，可省略——默认按正文生成稳定 id。自定义 id 只影响命名，'
-            + '去重仍按正文；同一 id 被不同正文占用时会退回正文 id，不覆盖旧事实。',
+          description: 'remember 用：知识文档 id，可省略——默认按正文生成稳定 id。传已有条目的 doc_id 时，'
+            + '它是‘要改写的目标’：不带 confirm 返回更新确认，带 confirm=true 用新正文覆盖该条（旧正文留在 changes 审计）；'
+            + '不传时按正文去重。',
         },
         dest: {
           type: 'string',
@@ -1353,7 +1357,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           type: 'boolean',
           description:
             'remember/learn 用：默认 false。与已有知识相近但内容不同时，写入会被拦下并返回冲突，'
-            + '此时必须先向用户确认；用户同意后再带 confirm=true 重试，同意"以新为准"就再传旧条目的 doc_id。',
+            + '此时必须先向用户确认；用户同意后再带 confirm=true 重试。要覆盖旧条目正文就同时传旧条目的 doc_id（保留 changes 审计）。',
         },
         dry_run: {
           type: 'boolean',
@@ -1623,15 +1627,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
                 { preserveText: true },
               );
               if (doc?.needs_confirm) {
-                store.recordPendingPromotion({
-                  ...(doc.pending ?? {}),
-                  source: 'external-model',
-                  source_ref: `external-model:${doc.pending?.doc_id ?? ''}`,
-                  provenance: 'model',
-                  verified: false,
-                  reason: doc.kind ?? 'update',
-                  conflicts: Array.isArray(doc.conflicts) ? doc.conflicts : [],
-                });
+                // Never queued: the caller reports it, the user decides, and a
+                // confirmed remember with the old doc_id overwrites the body.
                 pending += 1;
                 continue;
               }
@@ -1647,7 +1644,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
                 + `${pending > 0 ? `，${pending} 条改写已有事实的提议未写入、待确认` : ''}。`,
               ...ids.slice(0, 8).map((id) => `  - ${id}`),
               '⚠ 这些条目来自外部模型对过程记录的再表述，已标为「模型自述（未确认）」并在检索时降权；不要当作项目事实。',
-              '说明：外部模型提炼不会覆盖已有正文；数值/端点/开关变化会进入待确认队列，面板知识库页可见。',
+              '说明：外部模型提炼不会覆盖已有正文；数值/端点/开关变化只在结果里列出，不写入、不入队；确认后用 remember + confirm=true（传旧条目 doc_id 可覆盖正文）。',
             ].join('\n');
           }
           const result = store.promoteKnowledge({
