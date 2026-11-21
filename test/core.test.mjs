@@ -2782,6 +2782,8 @@ test('local engine resolves GGUF files and builds llama.cpp arguments', () => {
     assert.equal(rerank.ok, true);
     assert.equal(rerank.model.kind, 'rerank');
     assert.ok(buildServerArgs(rerank.model, 19002).includes('--reranking'));
+    const rerankArgs = buildServerArgs(rerank.model, 19002);
+    assert.deepEqual(rerankArgs.slice(rerankArgs.indexOf('--pooling'), rerankArgs.indexOf('--pooling') + 2), ['--pooling', 'rank']);
 
     const missing = resolveModel({ modelsRoot: models, modelId: 'Embedding/missing' });
     assert.equal(missing.ok, false);

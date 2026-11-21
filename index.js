@@ -903,7 +903,7 @@ export async function searchWithRag(config, sources, query, options = {}) {
     return {
       ok: true,
       empty: true,
-      text: `RRF 融合（RAG ${ragRows.length} 条 + 本地 BM25 ${localRows.length} 条）没有命中「${query}」。\n${covers}`,
+      text: `RRF 融合（RAG ${ragRows.length} 条（Embedding + Rerank）+ 本地 BM25 ${localRows.length} 条）没有命中「${query}」。\n${covers}`,
     };
   }
   const topK = Number.isInteger(options.topK) && options.topK > 0 ? options.topK : config.defaultTopK;
@@ -917,13 +917,15 @@ export async function searchWithRag(config, sources, query, options = {}) {
     ));
     callerStore.recordKnowledgeUsage(ownedHits.map((hit) => hit.doc_id));
   }
-  const channelSummary = `RAG ${ragRows.length} 条 + 本地 BM25 ${localRows.length} 条 → RRF(k=${RRF_K})`;
+  const channelSummary = `RAG ${ragRows.length} 条（Embedding + Rerank）+ 本地 BM25 ${localRows.length} 条 → RRF(k=${RRF_K})`;
   return {
     ok: true,
     empty: false,
+    rag_via: reranked.via,
     text: `检索方式：RRF 融合（${channelSummary}）｜${covers}\n`
       + formatHits(query, disclosed, 'rrf', folded, detail)
-      + '\n（RAG 索引会按语义去重；被索引去重掉的旧文档仍由本地 BM25 通道带回，不再出现“知识库里有、RAG 里没有”的两套结论。'
+      + '\n（RAG 通道先用 Embedding 召回，再经 Rerank 重排；Rerank 不可用时不会把只靠 Embedding 的结果当作 RAG。'
+      + '索引会按语义去重；被索引去重掉的旧文档仍由本地 BM25 通道带回，不再出现“知识库里有、RAG 里没有”的两套结论。'
       + 'RAG#/BM25# 是通道内先按使用率、确认状态和置信度重排后的名次；RRF 只融合名次，最终分不再乘先验。'
       + '关闭「RAG 挂载」则只走本地 BM25。）',
   };
@@ -2334,10 +2336,14 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             topN: Number.isInteger(args?.top_n) ? args.top_n : documents.length,
           });
           if (!result.ok) return `rerank 失败：${result.error}`;
-          const rows = result.results.map((row, index) => (
-            `${index + 1}. 分数 ${row.score.toFixed(4)}｜文档 #${row.index}：`
-            + clip(String(documents[row.index] ?? ''), 120)
-          ));
+          const rows = result.results.map((row, index) => {
+            const score = Number(row.score);
+            const shown = Number.isFinite(score) && score !== 0 && Math.abs(score) < 0.001
+              ? score.toExponential(3)
+              : (Number.isFinite(score) ? score.toFixed(4) : String(row.score));
+            return `${index + 1}. 分数 ${shown}｜文档 #${row.index}：`
+              + clip(String(documents[row.index] ?? ''), 120);
+          });
           return [`rerank 排序（query：${clip(String(args?.query ?? ''), 80)}）：`, ...rows, describeEndpoint(endpoint)].join('\n');
         }
 

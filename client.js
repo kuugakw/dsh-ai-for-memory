@@ -5146,7 +5146,7 @@ window.__ModuleLoader__.load({
                     onChange: (event) => setLlamaPooling(event.target.value),
                   },
                   h('option', { value: '' }, '—'),
-                  ['cls', 'mean', 'last', 'none'].map((value) => h('option', { key: value, value }, value)))),
+                  ['cls', 'mean', 'last', 'none', 'rank'].map((value) => h('option', { key: value, value }, value)))),
                 h('label', { style: styles.label }, t.llamaTimeout,
                   h('input', {
                     style: styles.input, type: 'number', min: 1000, max: 600000, step: 1000,
