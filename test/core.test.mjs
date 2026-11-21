@@ -2186,8 +2186,14 @@ test('config validator bounds auto settings', () => {
   assert.equal(defaults.similarityThreshold, 0.05);
   assert.equal(defaults.minClearChars, 200);
   assert.equal(defaults.externalBaseUrl, '');
+  assert.equal(defaults.engineLifecycle, 'manual');
   const validator = Config['~standard'].validate;
   assert.equal(validator({ autoEnabled: true, autoEveryRounds: 3 }).value.autoEnabled, true);
+  assert.equal(validator({ engineLifecycle: 'turn' }).value.engineLifecycle, 'turn');
+  assert.equal(validator({ engineLifecycle: 'always' }).value.engineLifecycle, 'always');
+  assert.ok(validator({ engineLifecycle: 'auto' }).issues);
+  assert.ok(validator({ engineLifecycle: true }).issues);
+  assert.equal(normalizeConfig({ engineLifecycle: 'nope' }).engineLifecycle, 'manual');
   assert.equal(validator({ defaultPublic: false }).value.defaultPublic, false);
   assert.equal(validator({ keepRecentTurns: 3 }).value.keepRecentTurns, 3);
   assert.equal(validator({ similarityThreshold: 0.12 }).value.similarityThreshold, 0.12);

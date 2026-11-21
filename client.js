@@ -295,6 +295,16 @@ window.__ModuleLoader__.load({
         llamaRunning: '运行中',
         llamaNotRunning: '未运行',
         llamaAutoPort: '自动',
+        engineLifecycle: '本地引擎运行方式',
+        engineLifecycleManual: '常闭',
+        engineLifecycleAlways: '常开',
+        engineLifecycleTurn: '每轮开关',
+        engineLifecycleManualHint: '只在你点击「启动/停止」时改变；插件不会自动启动或停止任何本地模型。',
+        engineLifecycleAlwaysHint: '插件加载时启动所有可运行的本地模型，并在每轮开始前确保它们在运行；不会在轮末停止。',
+        engineLifecycleTurnHint: '检测到可运行的模型时，每轮第一个模型请求前启动，轮末停止；只停由这个模式启动的实例，手动启动的保持不动。',
+        engineLifecycleDetected: '已检测到可运行的本地模型，该模式会在保存后生效。',
+        engineLifecycleNone: '未检测到可运行的本地模型；该模式会在模型就绪后自动生效。',
+        engineLifecycleSaveNote: '切换后点上方「保存设置」生效。',
         localModelStale: '模型配置已变更，旧引擎不再复用；请先停止引擎，再重新启动。',
         localModelDiagnostics: '启动失败诊断（llama-server stderr）',
         localModelApplied: '已填入模型地址；确认后点「保存设置」。',
@@ -829,6 +839,16 @@ window.__ModuleLoader__.load({
         llamaRunning: 'running',
         llamaNotRunning: 'not running',
         llamaAutoPort: 'auto',
+        engineLifecycle: 'Local engine lifecycle',
+        engineLifecycleManual: 'Always off',
+        engineLifecycleAlways: 'Always on',
+        engineLifecycleTurn: 'Per turn',
+        engineLifecycleManualHint: 'Engines only change when you press Start/Stop; the plugin never starts or stops one by itself.',
+        engineLifecycleAlwaysHint: 'Start every runnable local model at plugin load, and make sure it stays up at the start of each turn. Never stopped at turn end.',
+        engineLifecycleTurnHint: 'When a runnable model is detected, start it before the first model request of a turn and stop the engines this mode started at turn end. Engines started by hand are left running.',
+        engineLifecycleDetected: 'A runnable local model was detected; the mode applies after saving.',
+        engineLifecycleNone: 'No runnable local model detected yet; the mode will take effect once one is ready.',
+        engineLifecycleSaveNote: 'Click "Save settings" above after switching.',
         localModelStale: 'The model configuration changed, so the old engine was not reused. Stop it and start again.',
         localModelDiagnostics: 'Startup diagnostics (llama-server stderr)',
         localModelApplied: 'Model address filled; click "Save settings" to apply.',
@@ -1687,6 +1707,7 @@ window.__ModuleLoader__.load({
       const [formRoot, setFormRoot] = React.useState('');
       const [formDir, setFormDir] = React.useState('.ai-for-memory');
       const [formMode, setFormMode] = React.useState('manual');
+      const [formEngineLifecycle, setFormEngineLifecycle] = React.useState('manual');
       const [formRounds, setFormRounds] = React.useState(5);
       // Automatic snapshots: independent of automatic tidying, on by default,
       // every N turns, capped at M entries (near-duplicates pruned by similarity).
@@ -1832,6 +1853,7 @@ window.__ModuleLoader__.load({
           if (typeof payload.directoryName === 'string') setFormDir(payload.directoryName);
           if (typeof payload.autoEnabled === 'boolean') setFormMode(payload.autoEnabled ? 'auto' : 'manual');
           else if (payload.mode === 'manual' || payload.mode === 'auto') setFormMode(payload.mode);
+          if (['manual', 'always', 'turn'].includes(payload.engineLifecycle)) setFormEngineLifecycle(payload.engineLifecycle);
           if (Number.isInteger(payload.autoEveryRounds)) setFormRounds(payload.autoEveryRounds);
           if (typeof payload.autoSnapshot === 'boolean') setFormAutoSnapshot(payload.autoSnapshot);
           if (Number.isInteger(payload.autoSnapshotEvery)) setFormSnapshotEvery(payload.autoSnapshotEvery);
@@ -2098,6 +2120,7 @@ window.__ModuleLoader__.load({
           directoryName: formDir.trim(),
           autoEnabled: formMode === 'auto',
           autoEveryRounds: Number(formRounds) || 5,
+          engineLifecycle: formEngineLifecycle,
           autoSnapshot: formAutoSnapshot,
           autoSnapshotEvery: Number(formSnapshotEvery) || 5,
           autoSnapshotMax: Number(formSnapshotMax) || 10,
@@ -2150,6 +2173,7 @@ window.__ModuleLoader__.load({
           && payload.directoryName === body.directoryName
           && payload.autoEnabled === body.autoEnabled
           && payload.autoEveryRounds === body.autoEveryRounds
+          && payload.engineLifecycle === body.engineLifecycle
           && payload.autoSnapshot === body.autoSnapshot
           && payload.autoSnapshotEvery === body.autoSnapshotEvery
           && payload.autoSnapshotMax === body.autoSnapshotMax
@@ -4596,7 +4620,8 @@ window.__ModuleLoader__.load({
           },
         }, item.label))) : null,
 
-        isSettings && (settingsSection === 'general' || settingsSection === 'models')
+        isSettings && (settingsSection === 'general' || settingsSection === 'models'
+          || settingsSection === 'llama')
           ? h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center' } },
             h('button', {
               type: 'button',
@@ -5169,6 +5194,28 @@ window.__ModuleLoader__.load({
           ? h('section', { style: styles.card },
             h('h3', { style: styles.cardTitle }, t.llamaTuneTitle),
             h('p', { style: styles.hint }, t.llamaTuneHint),
+            h('div', { style: { margin: '2px 0 10px' } },
+              h('div', { style: { ...styles.label, marginBottom: '4px' } }, t.engineLifecycle),
+              h('div', { style: { display: 'flex', gap: '16px', flexWrap: 'wrap' } },
+                [['manual', t.engineLifecycleManual], ['always', t.engineLifecycleAlways],
+                  ['turn', t.engineLifecycleTurn]].map(([value, label]) => h('label', {
+                  key: value,
+                  style: { display: 'inline-flex', gap: '5px', alignItems: 'center', fontSize: '12.5px' },
+                },
+                h('input', {
+                  type: 'radio',
+                  name: 'aimEngineLifecycle',
+                  value,
+                  checked: formEngineLifecycle === value,
+                  onChange: () => setFormEngineLifecycle(value),
+                }), label))),
+              h('p', { style: { ...styles.hint, margin: '4px 0 0' } },
+                formEngineLifecycle === 'manual' ? t.engineLifecycleManualHint
+                  : formEngineLifecycle === 'always' ? t.engineLifecycleAlwaysHint
+                    : t.engineLifecycleTurnHint),
+              h('p', { style: { ...styles.hint, margin: '2px 0 0' } },
+                llamaModels.length > 0 ? t.engineLifecycleDetected : t.engineLifecycleNone),
+              h('p', { style: { ...styles.hint, margin: '2px 0 0' } }, t.engineLifecycleSaveNote)),
             h('label', { style: styles.label },
               t.llamaSelectModel,
               h('select', {

@@ -22,7 +22,7 @@
 |---|---|
 | 常规与上下文 | 记忆目录、目录名、自动整理、自动快照、RAG 挂载、MCP 出口、上下文清理、SQL 镜像、默认开放 |
 | 模型与检索 | 外部模型、本地模型目录、Embedding/Rerank 两栏模型、连接测试 |
-| llama.cpp | 选择模型并调 ctx-size、端口、pooling、启动超时、binary、extraArgs，保存后启动/停止 |
+| llama.cpp | 本地引擎运行方式（常闭 / 常开 / 每轮开关）、选择模型并调 ctx-size、端口、pooling、启动超时、binary、extraArgs，保存后启动/停止 |
 | 网络同步 | Git 同步开关、角色、remote、同步内容、初始化/提交/推送/拉取/探测 |
 | 当前对话 | 对话名称、是否对其他对话开放；只对当前选中的对话生效 |
 
@@ -80,4 +80,4 @@
 
 模型页的本地引擎行现在同时提供「启动引擎并填入」和「停止引擎」；外部模型调试区可直接执行 `models` / `probe` / `chat` / `embed` / `rerank`。
 
-模型页顶部固定为 **Embedding 模型** 和 **Rerank 模型** 两栏，Loose 根目录 GGUF 也会按类型归入对应栏；每栏可直接看运行状态、改 ctx-size、启动/停止。独立「llama.cpp」设置页提供完整调参（ctx-size、端口、pooling、启动超时、binary、extraArgs），保存写回 `model.json` 或根目录 `.model-meta.json`，再点启动生效。
+模型页顶部固定为 **Embedding 模型** 和 **Rerank 模型** 两栏，Loose 根目录 GGUF 也会按类型归入对应栏；每栏可直接看运行状态、改 ctx-size、启动/停止。独立「llama.cpp」设置页提供本地引擎运行方式（常闭 / 常开 / 每轮开关）与完整调参（ctx-size、端口、pooling、启动超时、binary、extraArgs），保存写回 `model.json` 或根目录 `.model-meta.json`，再点启动生效。

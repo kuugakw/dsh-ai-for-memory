@@ -46,6 +46,7 @@
 | `reviewHighRiskOnly` | `true` | `true`=只审查 high，medium 直接放行；设为 `false` 才审查 medium |
 | `autoEnabled` | `false` | 自动整理总开关 |
 | `autoEveryRounds` | 5 | 每几轮自动整理 |
+| `engineLifecycle` | `manual` | 本地引擎运行方式：`manual` 常闭（面板手动启停）、`always` 常开、`turn` 每轮开始启动、轮末停止 |
 | `contextUsagePercent` | 70 | 上下文占用达到多少百分比触发全量重置 |
 | `autoKnowledge` | `true` | 自动整理时顺带提炼知识 |
 | `autoKnowledgeLimit` | 10 | 每次自动提炼上限 |

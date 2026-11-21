@@ -27,7 +27,10 @@ import { evaluateDecision } from './lib/decision.js';
 import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
 import { defaultRegistryDir, listRootRows, rememberRoot } from './lib/registry.js';
 import { installApi } from './lib/api.js';
-import { restoreLocalEngines } from './lib/local-engine.js';
+import { listLocalModelsCached } from './lib/model-catalog.js';
+import {
+  localEngineStatus, restoreLocalEngines, startLocalEngine, stopLocalEngine,
+} from './lib/local-engine.js';
 import { ensureMcpToken } from './lib/mcp-token.js';
 import { summarizeTurnActivity } from './lib/turn-activity.js';
 import { packageVersion } from './lib/version.js';
@@ -158,6 +161,12 @@ const DEFAULTS = Object.freeze({
   // names, failures and the local files touched. The decision layer then also
   // answers "what was executed", not only "which risky choices were reviewed".
   autoDecisionLog: true,
+  // Local llama.cpp engine lifecycle:
+  //   'manual' — start/stop only from the panel or API (nothing automatic);
+  //   'always' — keep runnable local models running (load + before each turn);
+  //   'turn'   — start them at the first model request of a turn and stop the
+  //              engines this mode started when that turn ends.
+  engineLifecycle: 'manual',
   // Retention. Staging only loses a file after every record in it is archived;
   // context/decision retention is opt-in because those layers are restorable
   // or auditable data, not mirrors of archive/.
@@ -256,6 +265,14 @@ export const Config = Object.freeze({
           value[key] = backend;
           continue;
         }
+        if (key === 'engineLifecycle') {
+          if (!['manual', 'always', 'turn'].includes(input[key])) {
+            issues.push({ message: 'engineLifecycle 必须是 manual、always 或 turn', path: [key] });
+            continue;
+          }
+          value[key] = input[key];
+          continue;
+        }
         value[key] = input[key];
       }
       if (typeof value.mcpToken === 'string' && value.mcpToken.length > 500) {
@@ -277,6 +294,7 @@ export function normalizeConfig(raw) {
   // `sql` is a friendly alias; anything unknown falls back to the file backend.
   value.knowledgeBackend = canonicalKnowledgeBackend(value.knowledgeBackend);
   if (!['json', 'sqlite'].includes(value.knowledgeBackend)) value.knowledgeBackend = 'json';
+  if (!['manual', 'always', 'turn'].includes(value.engineLifecycle)) value.engineLifecycle = 'manual';
   return value;
 }
 
@@ -2684,6 +2702,85 @@ export function installContextManagement(ctx, config, deps, runtime) {
   const pressureResets = runtime?.pressureResets ?? new Map();
   const getService = deps.getService ?? (() => undefined);
 
+  // ---- local engine lifecycle ---------------------------------------------
+  // The three modes are deliberately narrow: they only ever touch runnable
+  // llama.cpp models that the catalog discovered on disk. A missing GGUF
+  // binary, an unreachable service or a model without `llama-server` support
+  // produces one warning and a 60s cooldown instead of a start attempt every
+  // turn.
+  const ENGINE_START_COOLDOWN_MS = 60000;
+  const engineStartFailures = new Map();
+  const engineTurnStarted = new Set();
+  // Main-session turns currently running. A per-turn stop waits until this is
+  // empty so one conversation ending cannot kill an engine another one uses.
+  const activeTurns = new Set();
+
+  const runnableEngineModelIds = () => {
+    let catalog;
+    try {
+      catalog = listLocalModelsCached();
+    } catch {
+      return [];
+    }
+    const ids = [];
+    for (const category of catalog?.categories ?? []) {
+      for (const model of category?.models ?? []) {
+        if (model?.runnable !== true) continue;
+        const kind = String(model.kind ?? '').toLowerCase();
+        if (kind !== 'embedding' && kind !== 'rerank') continue;
+        if (model.engine !== '' && model.engine !== 'llama.cpp') continue;
+        ids.push(model.id);
+      }
+    }
+    return ids;
+  };
+
+  const ensureLocalEngines = (mode) => {
+    if (mode !== 'always' && mode !== 'turn') return;
+    const ids = runnableEngineModelIds();
+    if (ids.length === 0) return;
+    const statuses = new Map(localEngineStatus().map((engine) => [engine.id, engine]));
+    for (const id of ids) {
+      const status = statuses.get(id);
+      if (status?.ready === true || status?.starting === true) continue;
+      if ((engineStartFailures.get(id) ?? 0) > Date.now()) continue;
+      // Record before the async start: if the turn ends while the model is
+      // still loading, the turn-end stop must know it owns that process.
+      if (mode === 'turn') engineTurnStarted.add(id);
+      void startLocalEngine({ modelId: id }).then((result) => {
+        if (result?.ok === true) {
+          engineStartFailures.delete(id);
+          // An adopted process (left over from before this plugin load) is not
+          // owned by this turn; never stop it just because a turn ended.
+          if (result.engine?.adopted === true) engineTurnStarted.delete(id);
+          return;
+        }
+        engineStartFailures.set(id, Date.now() + ENGINE_START_COOLDOWN_MS);
+        // eslint-disable-next-line no-console
+        console.warn(`[ai-for-memory] 本地引擎自动启动失败：${id}：${result?.error ?? '未知错误'}`);
+      }).catch((error) => {
+        engineStartFailures.set(id, Date.now() + ENGINE_START_COOLDOWN_MS);
+        // eslint-disable-next-line no-console
+        console.warn(`[ai-for-memory] 本地引擎自动启动失败：${id}：${error?.message ?? error}`);
+      });
+    }
+  };
+
+  const stopTurnLocalEngines = async () => {
+    const ids = [...engineTurnStarted];
+    engineTurnStarted.clear();
+    for (const id of ids) {
+      try {
+        await stopLocalEngine(id);
+        // eslint-disable-next-line no-console
+        console.log(`[ai-for-memory] 每轮模式：已停止本地引擎 ${id}`);
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn(`[ai-for-memory] 每轮模式停止本地引擎失败：${id}：${error?.message ?? error}`);
+      }
+    }
+  };
+
   const HARNESS_USER_RE = /^(Time sampled while preparing turn|This is an automatically generated checkpoint|Current runtime context|Current working directory|Current DSH file policy|Current DSH implementation checkout|Browser time zone|Elapsed since|Updated Tool Schemas)/i;
 
   const textOfUserEvent = (event) => {
@@ -3498,6 +3595,10 @@ export function installContextManagement(ctx, config, deps, runtime) {
     if (!session || !session.id) return proceed();
     const id = String(session.id);
     const request = pending.get(id);
+    // `turn` and `always` modes start runnable local models before the first
+    // model request of a turn; the start is fire-and-forget so a slow model
+    // load never delays the request (evidence/RAG falls back until it is up).
+    if (!Boolean(session.header?.parentSession)) ensureLocalEngines(config.engineLifecycle);
     if (!request || typeof request !== 'object' || request.mode !== 'immediate') {
       await maybePressureReset(session, payload);
       await maybeAnchorRequest(session, payload);
@@ -3522,9 +3623,26 @@ export function installContextManagement(ctx, config, deps, runtime) {
   };
 
   const onSessionEvent = (session, event) => {
-    if (!session || !event || event.type !== 'turn/end') return;
+    if (!session || !event) return;
     const id = String(session.id);
     const isSubagent = Boolean(session.header?.parentSession);
+    if (event.type === 'turn/start') {
+      if (!isSubagent) {
+        activeTurns.add(id);
+        ensureLocalEngines(config.engineLifecycle);
+      }
+      return;
+    }
+    if (event.type !== 'turn/end') return;
+    if (!isSubagent) activeTurns.delete(id);
+
+    // `turn`: stop exactly the engines this mode started for this turn. A model
+    // the user started by hand (or one adopted from a previous DSH process) is
+    // not in `engineTurnStarted`, so switching modes never kills a manual run.
+    // The stop is deferred while another main conversation is still running.
+    if (!isSubagent && config.engineLifecycle === 'turn' && activeTurns.size === 0) {
+      void stopTurnLocalEngines();
+    }
 
     // Conversations are the unit of independence, so activity is recorded for
     // every one of them; the panel uses it to default to "the conversation in use".
@@ -3718,11 +3836,19 @@ export function installContextManagement(ctx, config, deps, runtime) {
     counters.delete(id);
     pending.delete(id);
     anchorState.delete(id);
+    // A disposed session will never emit its turn/end; drop it so a per-turn
+    // stop is not blocked forever by a stale active-turn entry.
+    activeTurns.delete(id);
   }));
   ctx.effect(() => ctx.on('session/created', (session) => {
     if (!session || Boolean(session.header?.parentSession)) return;
     rememberConversation(session, { initLayers: true });
   }));
+
+  // `always`: bring the runnable local models up at plugin load. A manual
+  // "stop" in the panel still wins until the next turn's pre-step re-ensures
+  // them; the panel start/stop buttons are never gated by this mode.
+  if (config.engineLifecycle === 'always') ensureLocalEngines('always');
 }
 
 /**
