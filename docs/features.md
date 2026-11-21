@@ -264,6 +264,8 @@ DSH 把每个对话写成 `session.v4.jsonl.zstd`。其中一条事件结构不�
 - 可选提炼知识；
 - 再按话题相似度清理。
 
+完整机制（相似度打分、存档与恢复、调参、能力边界）见 [上下文清理机制](context-clearing.md)。
+
 ### 5.3 上下文占用阈值
 
 当实测上下文占用达到 `contextUsagePercent` 时，走**硬重置**：
@@ -799,6 +801,7 @@ aim_repair action=repair session=<id> apply=true
 - [工具参考](tools.md)
 - [面板导览](panel.md)
 - [上下文与自动行为](context.md)
+- [上下文清理机制](context-clearing.md)
 - [检索与 RAG](search.md)
 - [知识库](knowledge.md)
 - [本地模型/推理引擎](models.md)

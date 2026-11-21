@@ -9,7 +9,7 @@
 >
 > 升级前请备份记忆目录。
 
-**快速入口：** [安装](docs/installation.md) · [功能全览](docs/features.md) · [工具参考](docs/tools.md) · [面板](docs/panel.md) · [本地模型/推理引擎](docs/models.md) · [上下文与自动行为](docs/context.md) · [检索与 RAG](docs/search.md) · [知识库](docs/knowledge.md) · [配置](docs/configuration.md) · [隐私](docs/security.md) · [常见问题](docs/faq.md) · [开发](docs/development.md) · [更新记录](CHANGELOG.md)
+**快速入口：** [安装](docs/installation.md) · [功能全览](docs/features.md) · [工具参考](docs/tools.md) · [面板](docs/panel.md) · [本地模型/推理引擎](docs/models.md) · [上下文与自动行为](docs/context.md) · [上下文清理机制](docs/context-clearing.md) · [检索与 RAG](docs/search.md) · [知识库](docs/knowledge.md) · [配置](docs/configuration.md) · [隐私](docs/security.md) · [常见问题](docs/faq.md) · [开发](docs/development.md) · [更新记录](CHANGELOG.md)
 
 ---
 
@@ -164,7 +164,7 @@ aim_memory action=status
 - **请求锚点**：只在每轮第一步、系统检查点到达、且本步没有新的真实用户请求时，提醒模型上一轮真实请求；后续工具步骤不注入，已被清出的请求也不会被重新写回；一旦有新请求，锚点不注入。
 - **便条与真实输入分开**：插件写入的便条仍是模型可见的 `user/message`，但 `source.kind = ai-for-memory`、`source.form = notice`，并用 `source.summary` 标注；真实用户输入的 `source.kind = user`。
 
-完整规则、保留策略和恢复预算见 [上下文与自动行为](docs/context.md)。恢复按 `restoreMaxChars` 从尾部取最近的轮次/事件段；单个工具结果恢复时最多渲染 8 KiB，超出会标记截断，原始事件仍保留在存档里。
+完整规则、保留策略和恢复预算见 [上下文与自动行为](docs/context.md)；触发条件、相似度打分与调参见 [上下文清理机制](docs/context-clearing.md)。恢复按 `restoreMaxChars` 从尾部取最近的轮次/事件段；单个工具结果恢复时最多渲染 8 KiB，超出会标记截断，原始事件仍保留在存档里。
 
 ---
 
