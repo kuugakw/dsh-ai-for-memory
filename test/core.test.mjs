@@ -36,7 +36,7 @@ import { knowledgeDatabasePath, sqliteAvailable } from '../lib/knowledge-sqlite.
 import {
   formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
 } from '../lib/knowledge-query.js';
-import { RRF_K, reciprocalRankFusion, search, tokenize } from '../lib/retrieval.js';
+import { applyDisclosure, RRF_K, reciprocalRankFusion, search, snippetOf, tokenize } from '../lib/retrieval.js';
 import { CATEGORIES, hourKey, listJsonlFiles } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
@@ -229,6 +229,31 @@ test('knowledge search defaults to snippets and full text is explicit', () => {
   const full = search(docs, '超时处理', { mode: 'hybrid', topK: 1, detail: 'full' });
   assert.equal(full[0].text, long);
   assert.equal(full[0].text_truncated, false);
+});
+
+test('Chinese snippets center on multi-character query terms, not the first single char', () => {
+  const text = `${'无关开头。'.repeat(100)}网关超时，必须重试三次。`;
+  const snippet = snippetOf(text, '网关超时', 100);
+  assert.ok(snippet.startsWith('…'));
+  assert.match(snippet, /网关超时/);
+  assert.doesNotMatch(snippet, /^无关开头/);
+});
+
+test('applyDisclosure is idempotent on a search summary', () => {
+  const long = `超时处理步骤：${'先重试再记录错误。'.repeat(80)}`;
+  const summary = search([{ doc_id: 'long', category: 'errors_fixes', text: long }], '超时处理', {
+    mode: 'hybrid', topK: 1,
+  });
+  const again = applyDisclosure(summary, '超时处理');
+  assert.equal(again[0].text, summary[0].text);
+  assert.equal(again[0].text_chars, long.length);
+  assert.equal(again[0].text_truncated, true);
+  const full = search([{ doc_id: 'long', category: 'errors_fixes', text: long }], '超时处理', {
+    mode: 'hybrid', topK: 1, detail: 'full',
+  });
+  const disclosed = applyDisclosure(full, '超时处理');
+  assert.equal(disclosed[0].text_chars, long.length);
+  assert.equal(disclosed[0].text_truncated, true);
 });
 
 test('knowledge search supports bm25, vector and hybrid', () => {
@@ -2777,6 +2802,21 @@ test('local engine resolves GGUF files and builds llama.cpp arguments', () => {
     assert.ok(embedArgs.includes('--embeddings'));
     assert.deepEqual(embedArgs.slice(embedArgs.indexOf('--pooling'), embedArgs.indexOf('--pooling') + 2), ['--pooling', 'cls']);
     assert.ok(embedArgs.includes('--port'));
+
+    // An explicit kind in model.json wins over the folder name; otherwise a
+    // panel "mark as Rerank" would silently start an embedding server.
+    fs.writeFileSync(path.join(embedDir, 'model.json'), JSON.stringify({
+      name: 'BGE-M3', model: 'bge-m3', pooling: 'cls', kind: 'Rerank',
+    }));
+    const marked = resolveModel({ modelsRoot: models, modelId: 'Embedding/bge-m3' });
+    assert.equal(marked.ok, true);
+    assert.equal(marked.model.kind, 'rerank');
+    const markedArgs = buildServerArgs(marked.model, 19003);
+    assert.ok(markedArgs.includes('--reranking'));
+    assert.deepEqual(markedArgs.slice(markedArgs.indexOf('--pooling'), markedArgs.indexOf('--pooling') + 2), ['--pooling', 'rank']);
+    fs.writeFileSync(path.join(embedDir, 'model.json'), JSON.stringify({
+      name: 'BGE-M3', model: 'bge-m3', pooling: 'cls',
+    }));
 
     const rerank = resolveModel({ modelsRoot: models, modelId: 'Rerank/bge-reranker-v2-m3' });
     assert.equal(rerank.ok, true);
