@@ -29,6 +29,7 @@ import { defaultRegistryDir, listRootRows, rememberRoot } from './lib/registry.j
 import { installApi } from './lib/api.js';
 import { restoreLocalEngines, stopAllLocalEngines } from './lib/local-engine.js';
 import { ensureMcpToken } from './lib/mcp-token.js';
+import { packageVersion } from './lib/version.js';
 import { collectTurnDigest } from './lib/auto.js';
 import {
   buildContextSnapshot, collectTurns, formatRestoreContext, snapshotOfTurns,
@@ -158,9 +159,9 @@ const DEFAULTS = Object.freeze({
   // for token-strict setups.
   requestAnchor: true,
   // MCP egress over the DSH Web server's loopback listener. It exposes a small
-  // read/write memory surface to other MCP clients; the route itself is still
-  // protected by the same loopback/Host guard as the panel. Set a token when the
-  // DSH listener is reachable through a local reverse proxy.
+  // read/write memory surface to other MCP clients. Authentication is optional
+  // and OFF by default: acceptable only because DSH binds 127.0.0.1. Set a token
+  // before exposing the listener through any local reverse proxy.
   mcpEnabled: true,
   mcpToken: '',
 });
@@ -3480,7 +3481,7 @@ export function apply(ctx, config) {
       getService,
       runMcpTool,
       listMcpRoots,
-      version: '0.3.1',
+      version: packageVersion(),
       mcpToken: mcpAccess.token,
       mcpTokenFile: mcpAccess.file,
     });

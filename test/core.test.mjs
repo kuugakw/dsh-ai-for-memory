@@ -48,6 +48,7 @@ import {
 import { collectTurnDigest } from '../lib/auto.js';
 import { buildContextSnapshot, collectTurns, formatContextMarkdown, formatRestoreContext, snapshotOfTurns } from '../lib/context.js';
 import { handleMcpMessage, MCP_PATH, mcpToolNames } from '../lib/mcp.js';
+import { packageVersion } from '../lib/version.js';
 import { ensureMcpToken, mcpTokenPath } from '../lib/mcp-token.js';
 import { contentTokens, selectTurnsByTopic, topicSimilarity } from '../lib/similarity.js';
 import {
@@ -2238,6 +2239,12 @@ test('MCP egress lists and routes root-scoped memory tools', async () => {
     assert.equal(init.result.protocolVersion, '2025-06-18');
     assert.equal(init.result.serverInfo.name, 'ai-for-memory');
     assert.equal(init.result.serverInfo.version, '0.3.0');
+    // Without an injected version, MCP falls back to package.json, not a
+    // hand-maintained string.
+    const initDefault = await handleMcpMessage({
+      jsonrpc: '2.0', id: 11, method: 'initialize', params: { protocolVersion: '2025-06-18' },
+    }, { ...deps, version: undefined });
+    assert.equal(initDefault.result.serverInfo.version, packageVersion());
 
     const listed = await handleMcpMessage({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, deps);
     assert.ok(listed.result.tools.some((tool) => tool.name === 'aim_context_list'));
