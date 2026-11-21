@@ -58,6 +58,14 @@ import { USAGE_BOOST, boostScore, weightLabel } from './lib/usage.js';
 import {
   formatSqlResult, routeKnowledgeQuery, runSqlQuery,
 } from './lib/knowledge-query.js';
+import { dshSessionsDir } from './lib/dsh-workspace.js';
+import {
+  formatRepairReport,
+  formatScanReport,
+  repairSessionLog,
+  resolveSessionLogTarget,
+  scanSessionLogs,
+} from './lib/session-repair.js';
 
 export const name = 'dsh-ai-for-memory';
 
@@ -2355,6 +2363,66 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         ].join('\n');
       },
     },
+    {
+      name: 'aim_repair',
+      description:
+        'DSH 会话日志体检与修复。DSH 把每个对话写成 session.v<N>.jsonl.zstd（多段 zstd 帧），'
+        + '其中一条事件结构不合规就会让整个对话打不开（stored log is corrupt / SessionFormatError），'
+        + '而 DSH 自身没有删除或修复接口。'
+        + 'scan=列出 <DSH_HOME>/sessions 下的会话日志，报告物理/逻辑大小、事件数、是否结构损坏、是否异常膨胀；'
+        + 'repair=修复一份日志：先备份原文件，再优先把旧版插件写入的游离 developer 便条改写成等价的 user 便条'
+        + '（保留全部历史），否则截断到第一处损坏之前并用 DSH 自带的合成收尾事件补全回合；'
+        + 'compact=对结构有效但物理体积异常膨胀的日志重排 zstd 帧（事件一个不改）；'
+        + '默认只预演，apply=true 才写回。修完要重新打开该对话才会重新加载。'
+        + '不要修复当前正在进行的对话。',
+      parameters: {
+        action: {
+          type: 'string',
+          required: true,
+          enum: ['scan', 'repair', 'compact'],
+          description: 'scan=体检会话日志（deep=true 时解压校验）；repair=修复一份（session 必填）；compact=只重排帧缩小物理体积。',
+        },
+        session: {
+          type: 'string',
+          description: 'repair/compact 用：会话 id（session-<uuid>、裸 uuid 或唯一前缀）或 .zstd 日志的绝对路径。',
+        },
+        deep: {
+          type: 'boolean',
+          description: 'scan 用：true 时解压并校验事件结构（能发现 developer/message 错位这类损坏，但大日志较慢）。',
+        },
+        strategy: {
+          type: 'string',
+          enum: ['auto', 'salvage', 'truncate'],
+          description: 'repair 用：auto=先改写便条、失败再截断（默认）；salvage=只改写；truncate=直接截断。',
+        },
+        apply: {
+          type: 'boolean',
+          description: 'repair/compact 用：true 才真正写回；默认 false 只返回预演结果。',
+        },
+      },
+      async execute(args, exec) {
+        const sessionsDir = dshSessionsDir();
+        const action = typeof args?.action === 'string' ? args.action : 'scan';
+        if (action === 'scan') {
+          const scan = await scanSessionLogs(sessionsDir, { deep: args?.deep === true });
+          return formatScanReport(scan, { limit: 40 });
+        }
+        if (action !== 'repair' && action !== 'compact') throw new Error(`未知 action：${String(action)}`);
+        const target = resolveSessionLogTarget(sessionsDir, args?.session);
+        const live = sessionOf(exec);
+        if (args?.apply === true && live !== ''
+          && target.id.replace(/^session-/, '') === live.replace(/^session-/, '')) {
+          return '拒绝对当前正在进行的对话执行写回：它仍被 DSH 打开，改写会破坏正在追加的日志。'
+            + '请先切换到其他对话，或在面板里修复后重新打开它。';
+        }
+        const report = await repairSessionLog(target.file, {
+          strategy: typeof args?.strategy === 'string' ? args.strategy : 'auto',
+          compact: action === 'compact',
+          apply: args?.apply === true,
+        });
+        return formatRepairReport(report);
+      },
+    },
   ];
 }
 
@@ -3364,7 +3432,7 @@ export function apply(ctx, config) {
       getService,
       runMcpTool,
       listMcpRoots,
-      version: '0.2.0',
+      version: '0.3.0',
     });
   } catch (error) {
     // eslint-disable-next-line no-console

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import net from 'node:net';
+import zlib from 'node:zlib';
 import { execFileSync, spawn } from 'node:child_process';
 
 import { MemoryStore } from '../lib/store.js';
@@ -44,7 +45,7 @@ import {
   parseGitRemote, probeHost,
 } from '../lib/git-sync.js';
 import { collectTurnDigest } from '../lib/auto.js';
-import { buildContextSnapshot, collectTurns, formatRestoreContext, snapshotOfTurns } from '../lib/context.js';
+import { buildContextSnapshot, collectTurns, formatContextMarkdown, formatRestoreContext, snapshotOfTurns } from '../lib/context.js';
 import { handleMcpMessage, MCP_PATH, mcpToolNames } from '../lib/mcp.js';
 import { contentTokens, selectTurnsByTopic, topicSimilarity } from '../lib/similarity.js';
 import {
@@ -60,6 +61,10 @@ import {
 } from '../lib/knowledge.js';
 import { listRootRows, readRoots, rememberRoot, resolveRegisteredRoot } from '../lib/registry.js';
 import { appendAudit, readAudit } from '../lib/audit.js';
+import {
+  decodeSeqRanges, encodeSeqRanges, encodeZstdLog, findSessionLogs, formatRepairReport,
+  formatScanReport, repairSessionLog, resolveSessionLogTarget, scanSessionLogs, validateSessionEvents,
+} from '../lib/session-repair.js';
 import { isTrustedRequest } from '../lib/api.js';
 import { apply, compileParameterSchema, Config, createTools, installContextManagement, memoryContext, normalizeConfig, searchWithRag, workspaceOf } from '../index.js';
 
@@ -320,7 +325,7 @@ test('tools are registered and executable against the session workspace', async 
       get: () => undefined,
     };
     apply(ctx, {});
-    assert.deepEqual(registered.map((tool) => tool.name), ['aim_memory', 'aim_search', 'aim_decide', 'aim_context', 'aim_ask']);
+    assert.deepEqual(registered.map((tool) => tool.name), ['aim_memory', 'aim_search', 'aim_decide', 'aim_context', 'aim_ask', 'aim_repair']);
     for (const tool of registered) {
       assert.equal(tool.parameters.type, 'object');
       assert.ok(tool.output.render);
@@ -2228,6 +2233,26 @@ test('audit log is append-only, bounded and newest first', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('context archives render a readable Markdown escape hatch', () => {
+  const markdown = formatContextMarkdown({
+    context_id: 'context_test',
+    label: 'before-clear',
+    created_at: '2026-11-21T00:00:00.000Z',
+    turn_from: 1,
+    turn_to: 2,
+    chars: 42,
+    turns: [
+      { turn: 1, user: '真实请求：修会话', assistant: '收到' },
+      { turn: 2, user: '', notices: ['【上下文清理】旧轮次'], assistant: '完成' },
+    ],
+  });
+  assert.match(markdown, /^# Context archive context_test/);
+  assert.match(markdown, /真实请求：修会话/);
+  assert.match(markdown, /\*\*Assistant\*\*/);
+  assert.match(markdown, /> Notice/);
+  assert.match(markdown, /完成/);
 });
 
 test('raw context restore keeps the newest segments when the budget is small', () => {
@@ -4876,4 +4901,211 @@ test('panel API rejects DNS-rebinding hosts and cross-site origins', () => {
 
   // The desktop custom scheme is not reachable from a web page.
   assert.equal(isTrustedRequest(request({ host: 'dsh-app', origin: 'dsh-app://dsh' })), true);
+});
+
+// ---- DSH session log health and repair ----------------------------------
+
+const zstdAvailable = typeof zlib.zstdCompressSync === 'function' && typeof zlib.zstdDecompressSync === 'function';
+
+/** Write one synthetic DSH artifact under a fake workspace bucket. */
+function writeSyntheticSessionLog(dir, events, headerExtra = {}) {
+  const header = {
+    type: 'session',
+    version: 4,
+    id: 'session-synthetic',
+    createdAt: 1795173530790,
+    cwd: 'C:\\work',
+    isSeeded: false,
+    delegationDepth: 0,
+    ...headerExtra,
+  };
+  const lines = [`${JSON.stringify(header)}\n`].concat(events.map((event) => `${JSON.stringify(event)}\n`));
+  const chunks = [lines[0]];
+  for (let index = 1; index < lines.length; index += 2) chunks.push(lines.slice(index, index + 2).join(''));
+  const sessionDir = path.join(dir, '--C-work--', 'session-synthetic');
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const file = path.join(sessionDir, 'session.v4.jsonl.zstd');
+  fs.writeFileSync(file, encodeZstdLog(chunks));
+  return { file, sessionDir };
+}
+
+/** A balanced turn whose only defect is a `developer/message` outside an open step. */
+function eventsWithMisplacedNotice(sourceKind = 'ai-for-memory') {
+  return [
+    { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+    { type: 'step/start', seq: 1, time: 1, data: { turn: 1, step: 1 } },
+    {
+      type: 'user/message', seq: 2, time: 1, surfaceOp: 'append',
+      data: { id: 'u1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'hi' }] },
+    },
+    {
+      type: 'assistant/message', seq: 3, time: 1, surfaceOp: 'append',
+      data: {
+        turn: 1, step: 1,
+        message: { id: 'a1', role: 'assistant', source: { kind: 'model' }, content: [{ type: 'text', text: 'ok' }] },
+      },
+    },
+    { type: 'step/end', seq: 4, time: 1, data: { turn: 1, step: 1 } },
+    {
+      type: 'developer/message', seq: 5, time: 1, surfaceOp: 'append',
+      data: {
+        turn: 1, step: 2,
+        message: {
+          id: 'd1', role: 'developer', source: { kind: sourceKind },
+          content: [{ type: 'text', text: 'notice' }],
+        },
+      },
+    },
+    { type: 'step/start', seq: 6, time: 1, data: { turn: 1, step: 2 } },
+    { type: 'step/end', seq: 7, time: 1, data: { turn: 1, step: 2 } },
+    { type: 'turn/end', seq: 8, time: 1, data: { turn: 1, reason: { kind: 'completed' } } },
+  ];
+}
+
+test('session repair: the lifecycle replay finds a developer note outside an open step', () => {
+  const events = eventsWithMisplacedNotice();
+  const result = validateSessionEvents({ version: 4, isSeeded: false }, events);
+  assert.equal(result.ok, false);
+  assert.equal(result.index, 5);
+  assert.match(result.error, /developer\/message/);
+
+  // Moving the same event inside the step that follows makes the log valid.
+  const moved = events.slice();
+  moved.splice(6, 0, moved.splice(5, 1)[0]);
+  moved.forEach((event, index) => { event.seq = index; });
+  moved[6] = { ...moved[6], data: { ...moved[6].data, step: 2 } };
+  assert.equal(validateSessionEvents({ version: 4, isSeeded: false }, moved).ok, true);
+});
+
+test('session repair: an ai-for-memory developer note is salvaged as a user notice', async (t) => {
+  if (!zstdAvailable) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
+  const root = tempRoot();
+  try {
+    const { file } = writeSyntheticSessionLog(root, eventsWithMisplacedNotice());
+
+    const scan = await scanSessionLogs(root, { deep: true });
+    assert.equal(scan.logs.length, 1);
+    assert.equal(scan.logs[0].status, 'corrupt');
+    assert.match(formatScanReport(scan), /结构损坏/);
+
+    const dry = await repairSessionLog(file, { apply: false });
+    assert.equal(dry.ok, true);
+    assert.equal(dry.dryRun, true);
+    assert.equal(dry.strategy, 'salvage');
+    assert.equal(dry.badIndex, 5);
+    assert.equal(dry.dropped, 0);
+    assert.equal(dry.repaired, false);
+
+    const applied = await repairSessionLog(file, { apply: true });
+    assert.equal(applied.repaired, true);
+    assert.equal(applied.strategy, 'salvage');
+    assert.equal(applied.after.events, 9);
+    assert.ok(applied.backupPath !== '');
+    assert.ok(fs.existsSync(applied.backupPath));
+    assert.match(formatRepairReport(applied), /保留全部 9 个事件/);
+
+    const after = await repairSessionLog(file, { apply: false });
+    assert.equal(after.valid, true);
+    assert.equal(after.repaired, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('session repair: an unrecognized orphan event is truncated and closed', async (t) => {
+  if (!zstdAvailable) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
+  const root = tempRoot();
+  try {
+    const { file } = writeSyntheticSessionLog(root, eventsWithMisplacedNotice('harness'));
+    const applied = await repairSessionLog(file, { apply: true });
+    assert.equal(applied.repaired, true);
+    assert.equal(applied.strategy, 'truncate');
+    assert.equal(applied.after.events, 6);
+    assert.equal(applied.dropped, 3);
+    const log = fs.readFileSync(file);
+    assert.ok(log.length > 0);
+    const verified = await repairSessionLog(file, { apply: false });
+    assert.equal(verified.valid, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('session repair: sourceEventSeqs storage ranges round-trip', () => {
+  assert.deepEqual(encodeSeqRanges([1, 2, 3, 7]), [[1, 3], 7]);
+  assert.deepEqual(encodeSeqRanges([5]), [5]);
+  assert.deepEqual(decodeSeqRanges([[1, 3], 7]), [1, 2, 3, 7]);
+  assert.deepEqual(decodeSeqRanges([]), []);
+});
+
+test('session repair: find/resolve a synthetic artifact by id, prefix and path', async (t) => {
+  if (!zstdAvailable) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
+  const root = tempRoot();
+  try {
+    const { file } = writeSyntheticSessionLog(root, eventsWithMisplacedNotice());
+    const logs = findSessionLogs(root);
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].id, 'session-synthetic');
+    assert.equal(resolveSessionLogTarget(root, 'session-synthetic').file, file);
+    assert.equal(resolveSessionLogTarget(root, 'synthetic').file, file);
+    assert.equal(resolveSessionLogTarget(root, file).file, file);
+    assert.throws(() => resolveSessionLogTarget(root, 'missing'), /没有找到会话/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('session repair: compact re-frames a valid log without changing events', async (t) => {
+  if (!zstdAvailable) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
+  const root = tempRoot();
+  try {
+    // 40 balanced turns written as one frame per event: the physical artifact is
+    // deliberately wasteful, exactly like a long DSH conversation.
+    const events = [];
+    let seq = 0;
+    for (let turn = 1; turn <= 40; turn += 1) {
+      events.push({ type: 'turn/start', seq: seq++, time: turn, data: { turn } });
+      events.push({ type: 'step/start', seq: seq++, time: turn, data: { turn, step: 1 } });
+      events.push({
+        type: 'user/message', seq: seq++, time: turn, surfaceOp: 'append',
+        data: {
+          id: `u${turn}`, role: 'user', source: { kind: 'user' },
+          content: [{ type: 'text', text: `request ${turn} `.repeat(20) }],
+        },
+      });
+      events.push({ type: 'step/end', seq: seq++, time: turn, data: { turn, step: 1 } });
+      events.push({ type: 'turn/end', seq: seq++, time: turn, data: { turn, reason: { kind: 'completed' } } });
+    }
+    const header = {
+      type: 'session', version: 4, id: 'session-synthetic', createdAt: 1,
+      cwd: 'C:\\work', isSeeded: false, delegationDepth: 0,
+    };
+    const lines = [`${JSON.stringify(header)}\n`].concat(events.map((event) => `${JSON.stringify(event)}\n`));
+    const sessionDir = path.join(root, '--C-work--', 'session-synthetic');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const file = path.join(sessionDir, 'session.v4.jsonl.zstd');
+    fs.writeFileSync(file, encodeZstdLog(lines));
+    const originalBytes = fs.statSync(file).size;
+
+    const valid = await repairSessionLog(file, { apply: false });
+    assert.equal(valid.valid, true);
+
+    const dry = await repairSessionLog(file, { compact: true, apply: false });
+    assert.equal(dry.repaired, false);
+    assert.equal(dry.strategy, 'compact');
+    assert.ok(dry.after.physicalBytes < originalBytes);
+
+    const applied = await repairSessionLog(file, { compact: true, apply: true });
+    assert.equal(applied.repaired, true);
+    assert.equal(applied.strategy, 'compact');
+    assert.equal(applied.after.events, events.length);
+    assert.ok(fs.statSync(file).size < originalBytes);
+    assert.ok(fs.existsSync(applied.backupPath));
+
+    const recheck = await repairSessionLog(file, { apply: false });
+    assert.equal(recheck.valid, true);
+    assert.equal(recheck.before.events, events.length);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

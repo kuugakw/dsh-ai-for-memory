@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
         navLayers: '记忆数据',
         navSystem: '系统',
         navSettings: '设置',
-        navDiagnostics: '诊断',
+        navDiagnostics: '诊断与修复',
         diagTitle: '诊断与用量',
         diagSubtitle: '运行时健康、知识命中权重、对话占用和面板操作审计。',
         diagRefresh: '重新检查',
@@ -63,6 +63,32 @@ window.__ModuleLoader__.load({
         diagUnavailable: '不可用',
         diagNoSnapshotCompare: '至少需要两个快照。',
         diagNoConversations: '还没有对话记忆。',
+        diagSessionLogs: '会话日志体检与修复',
+        diagSessionLogsHint: 'DSH 的历史对话只要有一条事件结构损坏，整个对话就打不开（stored log is corrupt）。这里直接读 DSH 的 sessions 目录：快速扫描只读文件头，深度体检会解压并校验每个事件。修复前自动备份原文件；当前正在进行的对话不允许就地修复。',
+        diagSessionLogScan: '快速扫描',
+        diagSessionLogDeep: '深度体检',
+        diagSessionLogRepair: '修复',
+        diagSessionLogCompact: '重排帧',
+        diagSessionLogRepairConfirm: '确认修复',
+        diagSessionLogBusy: '处理中…',
+        diagSessionLogNoLogs: '没有找到会话日志。',
+        diagSessionLogOk: '正常',
+        diagSessionLogCorrupt: '结构损坏',
+        diagSessionLogTorn: '帧未闭合',
+        diagSessionLogUnreadable: '无法读取',
+        diagSessionLogUnsupported: '版本不支持',
+        diagSessionLogUnknown: '未体检',
+        sessionLogTitle: '会话日志修复',
+        sessionLogHint: '历史对话打不开（stored log is corrupt）时，在这里体检并修复。修复前自动备份原文件；当前正在进行的对话不会被改写，修完重新打开该对话即可。',
+        sessionLogSummary: '共 {n} 份，异常 {m} 份',
+        sessionLogShallowSummary: '共 {n} 份，尚未深度体检',
+        sessionLogShallowHint: '浅扫描只读了文件头；点「深度体检」解压并逐条校验，才能确认有没有损坏。',
+        sessionLogAllOk: '全部正常，没有需要处理的日志。',
+        sessionLogDanger: '上次会话可能未正常关闭，建议先恢复上下文存档；不要直接继续写入旧对话。',
+        sessionLogShallowWarning: '当前只读了文件头，无法确认帧序是否闭合；请点「深度体检」。',
+        sessionLogOversizedWarning: '日志结构正常，但体积/事件数异常偏大；可以「重排帧」缩小，不需要截断历史。',
+        sessionLogIdle: '点击「快速扫描」检查会话日志；「深度体检」会解压并逐条校验事件。',
+        sessionLogOpenDiagnostics: '在诊断页查看全部',
         overviewTitle: '记忆总览',
         overviewSubtitle: '当前工作区的记忆规模、运行状态和最近活动。',
         overviewHealth: '运行状态',
@@ -168,8 +194,9 @@ window.__ModuleLoader__.load({
         contextRestored: '上下文已恢复注入，将在下一步生效',
         contextRestoreFailed: '恢复上下文失败',
         snapshotRestoreTitle: '快照状态',
-        snapshotRestore: '查看状态',
+        snapshotRestore: '恢复',
         snapshotRestoreFailed: '读取快照失败',
+        contextExportMarkdown: '导出 Markdown',
         quickActions: '立即操作',
         memoryTextPlaceholder: '一段过程记录 / 一条事实 / 事故经过…',
         memoryNamePlaceholder: '快照名或事故标题（可选）',
@@ -491,7 +518,7 @@ window.__ModuleLoader__.load({
         navLayers: 'Memory data',
         navSystem: 'System',
         navSettings: 'Settings',
-        navDiagnostics: 'Diagnostics',
+        navDiagnostics: 'Diagnostics & repair',
         diagTitle: 'Diagnostics and usage',
         diagSubtitle: 'Runtime health, knowledge hit weights, conversation disk use and panel audit.',
         diagRefresh: 'Check again',
@@ -526,6 +553,32 @@ window.__ModuleLoader__.load({
         diagUnavailable: 'unavailable',
         diagNoSnapshotCompare: 'At least two snapshots are required.',
         diagNoConversations: 'No conversation memory yet.',
+        diagSessionLogs: 'Session logs: check and repair',
+        diagSessionLogsHint: 'One structurally invalid event makes DSH refuse the whole conversation ("stored log is corrupt"). This reads DSH\'s own sessions directory: a quick scan decodes only the header frame, a deep check decompresses and validates every event. A repair backs up the original first and refuses the live conversation.',
+        diagSessionLogScan: 'Quick scan',
+        diagSessionLogDeep: 'Deep check',
+        diagSessionLogRepair: 'Repair',
+        diagSessionLogCompact: 'Re-frame',
+        diagSessionLogRepairConfirm: 'Confirm repair',
+        diagSessionLogBusy: 'Working…',
+        diagSessionLogNoLogs: 'No session log found.',
+        diagSessionLogOk: 'ok',
+        diagSessionLogCorrupt: 'corrupt',
+        diagSessionLogTorn: 'open frame',
+        diagSessionLogUnreadable: 'unreadable',
+        diagSessionLogUnsupported: 'unsupported',
+        diagSessionLogUnknown: 'not checked',
+        sessionLogTitle: 'Session log repair',
+        sessionLogHint: 'When a past conversation will not open ("stored log is corrupt"), check and repair it here. The original is backed up first; the live conversation is never rewritten — reopen the repaired conversation afterwards.',
+        sessionLogSummary: '{m} of {n} need attention',
+        sessionLogShallowSummary: '{n} logs · not deep-checked',
+        sessionLogShallowHint: 'A quick scan reads headers only. Run "Deep check" to decompress and validate every event.',
+        sessionLogAllOk: 'All normal — nothing to repair.',
+        sessionLogDanger: 'The last session may not have closed cleanly. Restore a context archive before writing into it again.',
+        sessionLogShallowWarning: 'Only file headers were read; frame closure is not verified. Run "Deep check".',
+        sessionLogOversizedWarning: 'The log is structurally valid but unusually large. "Re-frame" can shrink it without truncating history.',
+        sessionLogIdle: 'Click "Quick scan" to check session logs; "Deep check" decompresses and validates every event.',
+        sessionLogOpenDiagnostics: 'Open full list in Diagnostics',
         overviewTitle: 'Memory overview',
         overviewSubtitle: 'Size, runtime health and recent activity for the selected workspace.',
         overviewHealth: 'Runtime status',
@@ -631,8 +684,9 @@ window.__ModuleLoader__.load({
         contextRestored: 'Context restored and injected; it applies on the next step',
         contextRestoreFailed: 'Failed to restore context',
         snapshotRestoreTitle: 'Snapshot state',
-        snapshotRestore: 'View state',
+        snapshotRestore: 'Restore',
         snapshotRestoreFailed: 'Failed to read snapshot',
+        contextExportMarkdown: 'Export Markdown',
         quickActions: 'Quick actions',
         memoryTextPlaceholder: 'A process record / fact / incident description…',
         memoryNamePlaceholder: 'Snapshot name or incident title (optional)',
@@ -1418,6 +1472,9 @@ window.__ModuleLoader__.load({
         },
           h('span', { style: styles.logChevron, 'aria-hidden': true }, open ? '▾' : '▸'),
           h('span', { style: styles.logHeadMain }, props.head)),
+        props.actions
+          ? h('span', { key: 'row-actions', style: { display: 'flex', alignItems: 'center', gap: '4px' } }, props.actions)
+          : null,
         open
           ? h('div', { style: styles.logBody }, props.children)
           : (props.preview ? h('p', { style: styles.logPreview }, clipPreview(props.preview)) : null));
@@ -1515,6 +1572,10 @@ window.__ModuleLoader__.load({
       const [diagnosticsBusy, setDiagnosticsBusy] = React.useState(false);
       const [selectedConversations, setSelectedConversations] = React.useState(() => new Set());
       const [bulkBusy, setBulkBusy] = React.useState('');
+      const [sessionLogScan, setSessionLogScan] = React.useState(null);
+      const [sessionLogBusy, setSessionLogBusy] = React.useState('');
+      const [sessionLogArmed, setSessionLogArmed] = React.useState('');
+      const [sessionLogResult, setSessionLogResult] = React.useState('');
       const [snapshotCompare, setSnapshotCompare] = React.useState({ left: '', right: '', result: null, error: '' });
       // Knowledge filters and multi-select. Filters operate on the rows already
       // returned by /state; the total/returned metadata is shown so a capped
@@ -2446,7 +2507,11 @@ window.__ModuleLoader__.load({
         try {
           const payload = await callApi('/snapshot/restore', {
             method: 'POST',
-            body: { root: selectedRoot, session: panelSession, snapshot_id: row.snapshot_id },
+            body: {
+              root: selectedRoot,
+              session: row.session_id || row.session_key || panelSession,
+              snapshot_id: row.snapshot_id,
+            },
           });
           showTool(t.snapshotRestoreTitle, payload.text ?? '');
         } catch (restoreError) {
@@ -2625,8 +2690,25 @@ window.__ModuleLoader__.load({
           .finally(() => {
             if (!cancelled) setDiagnosticsBusy(false);
           });
+        // Session logs live outside the memory root, so they are scanned on the
+        // same visit but independently: a shallow scan only decodes headers.
+        void callApi('/session-logs?deep=0')
+          .then((payload) => { if (!cancelled) setSessionLogScan(payload ?? null); })
+          .catch(() => {});
         return () => { cancelled = true; };
       }, [isDiagnostics, selectedRoot]);
+      // The overview card runs a deep check on the newest few logs, including
+      // the live conversation; a shallow header read cannot prove the frame
+      // sequence is closed. The diagnostics page can still scan everything.
+      React.useEffect(() => {
+        let cancelled = false;
+        void callApi('/session-logs?deep=1&limit=3')
+          .then((payload) => {
+            if (!cancelled) setSessionLogScan((prev) => prev ?? (payload ?? null));
+          })
+          .catch(() => {});
+        return () => { cancelled = true; };
+      }, []);
       React.useEffect(() => {
         if (!isSettings || settingsSection !== 'network' || selectedRoot === '') return undefined;
         let cancelled = false;
@@ -2801,66 +2883,151 @@ window.__ModuleLoader__.load({
           }));
       } else if (tab === 'snapshots') {
         const rows = data?.snapshots ?? [];
-        content = rows.length === 0
-          ? h(Empty, { text: t.emptySnapshots })
-          : h('div', { style: styles.list },
-            ...rows.slice(0, listLimit).map((row) => {
-              const key = keyOf(row.session_key, row.snapshot_id);
-              return h(LogRow, {
-                key,
-                rowKey: key,
-                open: rowOpen(key),
-                onToggle: toggleRow,
-                head: [
-                  h('span', { key: 'id', style: { fontWeight: 600 } }, row.snapshot_id),
-                  showSession && row.session_label
-                    ? h('span', { key: 'session', style: badgeStyle('pending') }, row.session_label)
-                    : null,
-                  h('span', { key: 'size', style: styles.meta }, `${t.size}: ${formatBytes(row.state_size)}`),
-                  h('span', { key: 'time', style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.timestamp)),
-                ],
-                preview: row.state_text,
-                children: [
-                  h('pre', { key: 'state', style: styles.pre }, row.state_text),
-                  h('div', { key: 'files', style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+        const comparePanel = h('div', { style: { ...styles.card, marginBottom: '8px' } },
+          h('div', { style: styles.actions },
+            h('select', {
+              style: styles.input,
+              value: snapshotCompare.left,
+              onChange: (event) => setSnapshotCompare((prev) => ({ ...prev, left: event.target.value, result: null })),
+            },
+            h('option', { value: '' }, t.diagCompareLeft),
+            rows.map((row) => h('option', { key: row.snapshot_id, value: row.snapshot_id }, row.snapshot_id))),
+            h('select', {
+              style: styles.input,
+              value: snapshotCompare.right,
+              onChange: (event) => setSnapshotCompare((prev) => ({ ...prev, right: event.target.value, result: null })),
+            },
+            h('option', { value: '' }, t.diagCompareRight),
+            rows.map((row) => h('option', { key: row.snapshot_id, value: row.snapshot_id }, row.snapshot_id))),
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              disabled: snapshotCompare.left === '' || snapshotCompare.right === '',
+              onClick: async () => {
+                try {
+                  const result = await callApi('/snapshot/compare', {
+                    method: 'POST',
+                    body: {
+                      root: selectedRoot,
+                      scope: 'session',
+                      session: rows.find((item) => item.snapshot_id === snapshotCompare.left)?.session_id
+                        || rows.find((item) => item.snapshot_id === snapshotCompare.left)?.session_key
+                        || panelSession,
+                      left: snapshotCompare.left,
+                      right: snapshotCompare.right,
+                    },
+                  });
+                  setSnapshotCompare((prev) => ({ ...prev, result, error: '' }));
+                } catch (compareError) {
+                  setSnapshotCompare((prev) => ({
+                    ...prev,
+                    result: null,
+                    error: String(compareError?.message ?? compareError),
+                  }));
+                }
+              },
+            }, t.diagCompareRun)),
+          snapshotCompare.error ? h('p', { style: { color: colors.error } }, snapshotCompare.error) : null,
+          snapshotCompare.result
+            ? h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' } },
+              h('pre', { style: { ...styles.pre, maxHeight: '220px' } }, JSON.stringify(snapshotCompare.result.left?.state ?? {}, null, 2)),
+              h('pre', { style: { ...styles.pre, maxHeight: '220px' } }, JSON.stringify(snapshotCompare.result.right?.state ?? {}, null, 2)))
+            : null);
+        content = h('div', null,
+          rows.length > 1 ? comparePanel : null,
+          rows.length === 0
+            ? h(Empty, { text: t.emptySnapshots })
+            : h('div', { style: styles.list },
+              ...rows.slice(0, listLimit).map((row) => {
+                const key = keyOf(row.session_key, row.snapshot_id);
+                return h(LogRow, {
+                  key,
+                  rowKey: key,
+                  open: rowOpen(key),
+                  onToggle: toggleRow,
+                  actions: h('span', { style: { display: 'flex', gap: '4px' } },
                     h('button', {
                       type: 'button',
                       className: 'aim-btn',
-                      style: styles.button,
+                      style: { ...styles.primary, padding: '2px 8px', fontSize: '11.5px' },
+                      disabled: toolBusy === `snapshot:${row.snapshot_id}`,
                       onClick: (event) => {
                         event.stopPropagation();
-                        void callApi('/reveal', {
-                          method: 'POST',
-                          body: { root: selectedRoot, scope: 'session', session: row.session_key || panelSession, kind: 'snapshot', id: row.snapshot_id },
-                        }).catch((openError) => setNotice({ kind: 'err', text: String(openError?.message ?? openError) }));
+                        void restoreSnapshotRow(row);
                       },
-                    }, t.diagOpenFile),
-                    h('a', {
-                      href: `/ai-for-memory/api/record/download?${new URLSearchParams({
-                        root: selectedRoot, scope: 'session', session: row.session_key || panelSession,
-                        kind: 'snapshot', id: row.snapshot_id,
-                      }).toString()}`,
-                      target: '_blank',
-                      rel: 'noreferrer',
+                    }, toolBusy === `snapshot:${row.snapshot_id}` ? '…' : t.snapshotRestore),
+                    h('button', {
+                      type: 'button',
                       className: 'aim-btn',
-                      style: { ...styles.button, textDecoration: 'none' },
-                      onClick: (event) => event.stopPropagation(),
-                    }, t.diagDownload)),
-                  h('button', {
-                    key: 'restore',
-                    type: 'button',
-                    className: 'aim-btn',
-                    style: styles.primary,
-                    disabled: toolBusy === `snapshot:${row.snapshot_id}`,
-                    onClick: (event) => {
-                      event.stopPropagation();
-                      void restoreSnapshotRow(row);
-                    },
-                  }, toolBusy === `snapshot:${row.snapshot_id}` ? '…' : t.snapshotRestore),
-                ],
-              });
-            }),
-            rows.length > listLimit ? moreRow('more-snapshots', rows.length) : null);
+                      style: { ...styles.button, padding: '2px 8px', fontSize: '11.5px' },
+                      onClick: (event) => {
+                        event.stopPropagation();
+                        setSnapshotCompare((prev) => ({ ...prev, left: prev.left || row.snapshot_id, right: prev.right || '', result: null }));
+                      },
+                    }, t.diagCompare)),
+                  head: [
+                    h('span', { key: 'id', style: { fontWeight: 600 } }, row.snapshot_id),
+                    row.label ? h('span', { key: 'label', style: badgeStyle('pending') }, row.label) : null,
+                    showSession && row.session_label
+                      ? h('span', { key: 'session', style: badgeStyle('pending') }, row.session_label)
+                      : null,
+                    h('span', { key: 'size', style: styles.meta }, `${t.size}: ${formatBytes(row.state_size)}`),
+                    h('span', { key: 'time', style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.timestamp)),
+                  ],
+                  preview: row.state_text,
+                  children: [
+                    h('pre', { key: 'state', style: styles.pre }, row.state_text),
+                    h('div', { key: 'files', style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+                      h('button', {
+                        type: 'button',
+                        className: 'aim-btn',
+                        style: styles.button,
+                        onClick: (event) => {
+                          event.stopPropagation();
+                          void callApi('/reveal', {
+                            method: 'POST',
+                            body: { root: selectedRoot, scope: 'session', session: row.session_key || panelSession, kind: 'snapshot', id: row.snapshot_id },
+                          }).catch((openError) => setNotice({ kind: 'err', text: String(openError?.message ?? openError) }));
+                        },
+                      }, t.diagOpenFile),
+                      h('a', {
+                        href: `/ai-for-memory/api/record/download?${new URLSearchParams({
+                          root: selectedRoot, scope: 'session', session: row.session_key || panelSession,
+                          kind: 'snapshot', id: row.snapshot_id,
+                        }).toString()}`,
+                        target: '_blank',
+                        rel: 'noreferrer',
+                        className: 'aim-btn',
+                        style: { ...styles.button, textDecoration: 'none' },
+                        onClick: (event) => event.stopPropagation(),
+                      }, t.diagDownload)),
+                    h('div', { key: 'actions', style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+                      h('button', {
+                        key: 'restore',
+                        type: 'button',
+                        className: 'aim-btn',
+                        style: styles.primary,
+                        disabled: toolBusy === `snapshot:${row.snapshot_id}`,
+                        onClick: (event) => {
+                          event.stopPropagation();
+                          void restoreSnapshotRow(row);
+                        },
+                      }, toolBusy === `snapshot:${row.snapshot_id}` ? '…' : t.snapshotRestore),
+                      h('button', {
+                        key: 'compare-set',
+                        type: 'button',
+                        className: 'aim-btn',
+                        style: styles.button,
+                        onClick: (event) => {
+                          event.stopPropagation();
+                          setSnapshotCompare((prev) => ({ ...prev, left: row.snapshot_id, right: prev.right || '', result: null }));
+                        },
+                      }, t.diagCompare)),
+                  ],
+                });
+              }),
+              rows.length > listLimit ? moreRow('more-snapshots', rows.length) : null));
       } else if (tab === 'knowledge') {
         const pending = Number(data?.knowledgePending ?? 0);
         content = h('div', { style: styles.list },
@@ -3306,12 +3473,23 @@ window.__ModuleLoader__.load({
           : h('div', { style: styles.list },
             ...rows.slice(0, listLimit).map((row) => {
               const key = keyOf(row.session_key, row.context_id);
+              const rowScope = row.session_scope === 'shared' ? 'shared' : 'session';
               const meta = `第 ${row.turn_from}-${row.turn_to} 轮｜${row.turn_count} 轮｜${row.chars} 字符`;
               return h(LogRow, {
                 key,
                 rowKey: key,
                 open: rowOpen(key),
                 onToggle: toggleRow,
+                actions: h('button', {
+                  type: 'button',
+                  className: 'aim-btn',
+                  style: { ...styles.primary, padding: '2px 8px', fontSize: '11.5px' },
+                  disabled: toolBusy === `context:${row.context_id}`,
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    void restoreContextRow(row);
+                  },
+                }, toolBusy === `context:${row.context_id}` ? '…' : t.contextRestore),
                 head: [
                   h('span', { key: 'id', style: { fontWeight: 600 } }, row.context_id),
                   h('span', { key: 'label', style: badgeStyle('pending') }, row.label),
@@ -3339,13 +3517,13 @@ window.__ModuleLoader__.load({
                         event.stopPropagation();
                         void callApi('/reveal', {
                           method: 'POST',
-                          body: { root: selectedRoot, scope: 'session', session: row.session_key || panelSession, kind: 'context', id: row.context_id },
+                          body: { root: selectedRoot, scope: rowScope, session: row.session_key || panelSession, kind: 'context', id: row.context_id },
                         }).catch((openError) => setNotice({ kind: 'err', text: String(openError?.message ?? openError) }));
                       },
                     }, t.diagOpenFile),
                     h('a', {
                       href: `/ai-for-memory/api/record/download?${new URLSearchParams({
-                        root: selectedRoot, scope: 'session', session: row.session_key || panelSession,
+                        root: selectedRoot, scope: rowScope, session: row.session_key || panelSession,
                         kind: 'context', id: row.context_id,
                       }).toString()}`,
                       target: '_blank',
@@ -3353,7 +3531,18 @@ window.__ModuleLoader__.load({
                       className: 'aim-btn',
                       style: { ...styles.button, textDecoration: 'none' },
                       onClick: (event) => event.stopPropagation(),
-                    }, t.diagDownload)),
+                    }, t.diagDownload),
+                    h('a', {
+                      href: `/ai-for-memory/api/record/download?${new URLSearchParams({
+                        root: selectedRoot, scope: rowScope, session: row.session_key || panelSession,
+                        kind: 'context', id: row.context_id, format: 'markdown',
+                      }).toString()}`,
+                      target: '_blank',
+                      rel: 'noreferrer',
+                      className: 'aim-btn',
+                      style: { ...styles.button, textDecoration: 'none' },
+                      onClick: (event) => event.stopPropagation(),
+                    }, t.contextExportMarkdown)),
                   h('button', {
                     key: 'restore',
                     type: 'button',
@@ -3388,6 +3577,166 @@ window.__ModuleLoader__.load({
         [t.overviewContextUsage, data?.contextMeasuredText ?? '未知（还没有测量数据）'],
         [t.overviewClear, t.overviewClearValue.replace('{n}', String(data?.contextUsagePercent ?? 70))],
       ];
+      const loadSessionLogs = async (deep) => {
+        setSessionLogBusy(deep ? 'deep' : 'scan');
+        setSessionLogResult('');
+        try {
+          const payload = await callApi(`/session-logs?deep=${deep ? '1' : '0'}`);
+          setSessionLogScan(payload ?? null);
+        } catch (scanError) {
+          setNotice({ kind: 'err', text: String(scanError?.message ?? scanError) });
+        } finally {
+          setSessionLogBusy('');
+        }
+      };
+      const runSessionLogRepair = async (file, compact = false) => {
+        setSessionLogArmed('');
+        setSessionLogBusy('repair');
+        setSessionLogResult('');
+        try {
+          const payload = await callApi('/session-logs/repair', {
+            method: 'POST',
+            body: { session: file, compact, apply: true },
+          });
+          setSessionLogResult(String(payload?.text ?? t.diagSessionLogOk));
+          await loadSessionLogs(true);
+        } catch (repairError) {
+          setSessionLogResult(String(repairError?.message ?? repairError));
+        } finally {
+          setSessionLogBusy('');
+        }
+      };
+      const sessionLogRow = (row) => {
+        const torn = Array.isArray(row.anomalies) && row.anomalies.includes('torn-tail');
+        const statusText = torn ? t.diagSessionLogTorn
+          : row.status === 'ok' ? t.diagSessionLogOk
+            : row.status === 'corrupt' ? t.diagSessionLogCorrupt
+              : row.status === 'unreadable' ? t.diagSessionLogUnreadable
+                : row.status === 'unsupported' ? t.diagSessionLogUnsupported
+                  : t.diagSessionLogUnknown;
+        const broken = row.status === 'corrupt' || row.status === 'unreadable' || torn;
+        const oversized = row.status === 'ok' && Array.isArray(row.anomalies) && row.anomalies.includes('oversized');
+        const actionable = broken || oversized;
+        const armed = sessionLogArmed === row.file;
+        const sizeText = row.logicalBytes === null || row.logicalBytes === undefined
+          ? formatBytes(row.physicalBytes)
+          : `${formatBytes(row.logicalBytes)} / ${formatBytes(row.physicalBytes)}`;
+        return h('div', {
+          key: row.file,
+          style: {
+            display: 'flex', alignItems: 'center', gap: '7px', padding: '3px 0',
+            borderTop: `1px solid ${colors.border}`, fontSize: '12px',
+          },
+        },
+        h('span', {
+          style: { ...styles.mono, flex: '1 1 180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+          title: row.file,
+        }, row.id),
+        h('span', { style: { flex: '0 0 62px', color: broken ? colors.error : colors.secondary } }, statusText),
+        h('span', { style: { ...styles.mono, flex: '0 0 132px', color: colors.secondary } }, sizeText),
+        h('span', { style: { ...styles.mono, flex: '0 0 58px', color: colors.secondary } },
+          row.events === null || row.events === undefined ? '—' : String(row.events)),
+        h('button', {
+          type: 'button',
+          className: 'aim-btn',
+          style: { ...styles.button, padding: '1px 7px', fontSize: '11px', marginLeft: 'auto' },
+          disabled: sessionLogBusy !== '' || !actionable,
+          onClick: () => {
+            if (sessionLogArmed === row.file) void runSessionLogRepair(row.file, oversized && !broken);
+            else setSessionLogArmed(row.file);
+          },
+        }, armed ? t.diagSessionLogRepairConfirm : (oversized && !broken ? t.diagSessionLogCompact : t.diagSessionLogRepair)));
+      };
+      /**
+       * One card shared by the overview (compact: only problems) and the
+       * diagnostics page (full list). Repair is a two-step button because it
+       * rewrites a file on disk.
+       */
+      const sessionLogCard = (compact) => {
+        const scan = sessionLogScan;
+        const logs = Array.isArray(scan?.logs) ? scan.logs : [];
+        const shallow = scan !== null && scan?.deep !== true;
+        const actionable = logs.filter((row) => row.status === 'corrupt' || row.status === 'unreadable'
+          || (Array.isArray(row.anomalies) && row.anomalies.includes('torn-tail'))
+          || (row.status === 'ok' && Array.isArray(row.anomalies) && row.anomalies.includes('oversized')));
+        const brokenRows = logs.filter((row) => row.status === 'corrupt' || row.status === 'unreadable'
+          || (Array.isArray(row.anomalies) && row.anomalies.includes('torn-tail')));
+        const oversizedRows = logs.filter((row) => row.status === 'ok'
+          && Array.isArray(row.anomalies) && row.anomalies.includes('oversized'));
+        const danger = !shallow && brokenRows.length > 0;
+        const oversized = !danger && !shallow && oversizedRows.length > 0;
+        const visible = compact ? actionable : logs;
+        const summary = !scan
+          ? '—'
+          : shallow
+            ? t.sessionLogShallowSummary.replace('{n}', String(logs.length))
+            : t.sessionLogSummary.replace('{n}', String(logs.length)).replace('{m}', String(actionable.length));
+        return h('section', {
+          style: {
+            ...styles.card,
+            ...(danger ? { borderColor: colors.error, background: 'rgba(216,57,49,.06)' } : {}),
+          },
+        },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
+            h('h3', { style: { ...styles.cardTitle, color: danger ? colors.error : undefined } },
+              compact ? t.sessionLogTitle : t.diagSessionLogs),
+            h('span', { style: { ...styles.hint, marginLeft: 'auto', color: danger ? colors.error : undefined } }, summary)),
+          h('p', { style: styles.hint }, compact ? t.sessionLogHint : t.diagSessionLogsHint),
+          danger
+            ? h('p', { style: { color: colors.error, fontWeight: 600, margin: '4px 0' } }, t.sessionLogDanger)
+            : (shallow
+              ? h('p', { style: { color: colors.warning ?? '#b45309', fontWeight: 600, margin: '4px 0' } },
+                t.sessionLogShallowWarning)
+              : (oversized
+                ? h('p', { style: { color: colors.warning ?? '#b45309', fontWeight: 600, margin: '4px 0' } },
+                  t.sessionLogOversizedWarning)
+                : null)),
+          h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', margin: '6px 0' } },
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              disabled: sessionLogBusy !== '',
+              onClick: () => loadSessionLogs(false),
+            }, sessionLogBusy === 'scan' ? t.diagSessionLogBusy : t.diagSessionLogScan),
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              disabled: sessionLogBusy !== '',
+              onClick: () => loadSessionLogs(true),
+            }, sessionLogBusy === 'deep' ? t.diagSessionLogBusy : t.diagSessionLogDeep),
+            compact
+              ? h('button', {
+                type: 'button',
+                className: 'aim-btn',
+                style: { ...styles.button, marginLeft: 'auto' },
+                onClick: () => {
+                  goDiagnostics();
+                  void loadSessionLogs(false);
+                },
+              }, t.sessionLogOpenDiagnostics)
+              : null),
+          sessionLogResult !== ''
+            ? h('pre', {
+              style: { ...styles.pre, maxHeight: '200px', overflow: 'auto', whiteSpace: 'pre-wrap', marginBottom: '6px' },
+            }, sessionLogResult)
+            : null,
+          !scan
+            ? h(Empty, { text: t.sessionLogIdle })
+            : visible.length === 0
+              ? h('p', {
+                style: {
+                  ...styles.hint,
+                  color: compact && !shallow ? colors.success : colors.secondary,
+                  margin: 0,
+                },
+              }, compact
+                ? (shallow ? t.sessionLogShallowHint : t.sessionLogAllOk)
+                : t.diagSessionLogNoLogs)
+              : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '3px' } },
+                visible.map((row) => sessionLogRow(row))));
+      };
       const recentStaging = (data?.staging ?? []).slice(0, 5);
       const mcpUrl = `${typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:PORT'}`
         + `${data?.mcpPath ?? '/ai-for-memory/mcp'}`;
@@ -3413,7 +3762,16 @@ window.__ModuleLoader__.load({
             className: 'aim-btn',
             style: styles.button,
             onClick: searchFromOverview,
-          }, t.overviewSearch)),
+          }, t.overviewSearch),
+          h('button', {
+            type: 'button',
+            className: 'aim-btn',
+            style: styles.button,
+            onClick: () => {
+              goDiagnostics();
+              void loadSessionLogs(true);
+            },
+          }, t.sessionLogTitle)),
         h('div', { style: styles.hero },
           h(PanelIcon, { size: 30 }),
           h('div', { style: { minWidth: 0, flex: '1 1 360px' } },
@@ -3453,6 +3811,7 @@ window.__ModuleLoader__.load({
               },
               h('span', { style: { color: colors.secondary, flex: '0 0 92px' } }, label),
               h('span', { style: { ...styles.mono, overflowWrap: 'anywhere', flex: 1 } }, String(value))))))),
+        sessionLogCard(true),
         h('div', { className: 'aim-overview-grid', style: styles.overviewGrid },
           h('section', { style: styles.card },
             h('div', { style: { display: 'flex', alignItems: 'center' } },
@@ -3582,6 +3941,7 @@ window.__ModuleLoader__.load({
             },
             h('span', { style: { color: colors.secondary, flex: '0 0 96px' } }, label),
             h('span', { style: { ...styles.mono, overflowWrap: 'anywhere' } }, String(value)))))),
+        sessionLogCard(false),
         h('section', { style: styles.card },
           h('h3', { style: styles.cardTitle }, t.diagUsage),
           h('p', { style: styles.hint }, t.diagUsageHint),

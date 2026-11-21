@@ -50,7 +50,8 @@ node --test test/core.test.mjs
 主要代码：
 
 ```text
-index.js                  # 插件入口和五个工具
+index.js                  # 插件入口和六个工具
+lib/session-repair.js     # DSH 会话日志体检与修复（zstd 多帧、格式校验、备份/原子写回）
 client.js                 # Web 面板
 lib/store.js              # 文件存储和六层数据
 lib/scopes.js             # 对话隔离、共享层、工作区分组

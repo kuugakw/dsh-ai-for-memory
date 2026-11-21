@@ -2,7 +2,7 @@
 
 > 返回 [主 README](../README.md)。
 
-## 五个工具
+## 六个工具
 
 ### `aim_memory`：记忆管理
 
@@ -147,5 +147,33 @@ JSON 导出保留 `provenance`、`verified`、`changes`、`confidence`、`eviden
 | `probe` | 检查连通性；可顺带探测 Embedding / Rerank |
 
 `chat` 可以传 `sources`，结果会要求模型用 `[n]` 标注依据，并附调用记录和来源对照，便于追溯一次回答来自哪些材料。
+
+### `aim_repair`：会话日志体检与修复
+
+DSH 把每个对话写成 `~/.dsh/sessions/<工作区分桶>/<会话>/session.v<N>.jsonl.zstd`（多段 zstd 帧，逐批追加）。只要某一段完整帧里有一条事件违反当前会话格式，DSH 读取时就会整体拒绝，报 `stored session ... is corrupt` / `SessionFormatError`；DSH 自身没有删除或修复接口，于是这个对话再也打不开。
+
+| action | 主要参数 | 作用 |
+|---|---|---|
+| `scan` | 可选 `deep` | 列出所有会话日志：物理/逻辑大小、事件数、结构状态、异常膨胀标记。`deep=true` 会解压并逐个事件校验（大日志较慢） |
+| `repair` | `session` 必填；可选 `strategy`、`apply` | 修复一份日志。默认只预演；`apply=true` 才写回 |
+| `compact` | `session` 必填；可选 `apply` | 对结构有效的日志重排 zstd 帧（DSH 每次追加一批就写一个帧，长对话会积累上万个碎帧）；事件一个不改，只缩小物理体积 |
+
+`session` 接受 `session-<uuid>`、裸 uuid、唯一前缀，或 `.zstd` 的绝对路径。
+
+修复策略：
+
+- `salvage`（自动优先）：把旧版插件写入、却落在 step 之外的 `developer/message` 请求锚点/清理便条改写为等价的 `user/message` 便条，**保留全部历史事件**。当前版本已经改用 `user/message`，所以这些只是历史遗留的载体。
+- `truncate`（兜底）：截断到第一处结构损坏之前，并用 DSH 自带的合成收尾事件（未完成工具结果、`step/end`、`turn/end`）补全回合；会丢弃损坏点之后的事件，报告里写明丢了多少。
+
+安全约束：
+
+- 写回前先把原文件备份成 `session.v<N>.jsonl.zstd.bak-<时间戳>`，写回后立即复验，复验失败会自动还原。
+- 校验优先使用**当前安装的 DSH 包**（`restoreReleasedV4Artifact` + `KNOWN_SESSION_EVENT_TYPES`），解析不到时退回本地生命周期回放。
+- 拒绝修复**当前正在进行的对话**：它仍被 DSH 打开，写回会破坏正在追加的日志。修完要重新打开该对话才会重新加载。
+- 写入是临时文件 + 原子替换；目标被占用时直接报错，不会截断。
+
+关于大小：DSH 的会话日志是只追加的，逻辑大小（解压后）通常约等于物理大小的 3 倍。一个 150 MB / 5 万事件的日志说明对话非常长，而不是损坏；`scan` 会给这种日志打 `oversized` / `many-events` 标记，但只有结构损坏才需要修复。修复重写时按 200 个事件一批重新分帧，通常还能顺带缩掉一部分物理体积。
+
+读取和改写会话日志需要运行时的 zstd 支持（Node 22.15+ / 23.8+ 的 `node:zlib`）。更老的运行时会直接报告「当前 Node 不支持 zstd」，不会改动任何文件。
 
 ---

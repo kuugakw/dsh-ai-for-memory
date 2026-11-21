@@ -34,4 +34,8 @@ SQL 通道和 SQLite 镜像需要运行时的 `node:sqlite`。Node 20 可以运�
 
 不需要。保存会自动重载并刷新面板；如果还在重载，会显示提示并稍后自动刷新。
 
+**历史对话打不开，提示 `stored log is corrupt` / `SessionFormatError` 怎么办？**
+
+这是 DSH 自己的会话日志坏了，不是记忆目录的问题：一条事件不满足 v4 会话格式，DSH 就会拒绝整份 `session.v4.jsonl.zstd`。用 `aim_repair action=scan deep=true` 找到它，再 `aim_repair action=repair session=<id>` 预演、加 `apply=true` 写回；面板「诊断 → 会话日志体检与修复」也有同样的入口。修复前会自动备份，修完重新打开该对话即可。旧版插件写入的 `developer/message` 请求锚点会被改写成 `user/message` 便条，历史一条不丢。若日志结构正常但物理体积异常，用 `action=compact` 重排 zstd 帧（事件不变）。
+
 ---

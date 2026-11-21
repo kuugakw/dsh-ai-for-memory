@@ -34,7 +34,7 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 安装后应看到：
 
-- 工具：`aim_memory`、`aim_search`、`aim_context`、`aim_decide`、`aim_ask`；
+- 工具：`aim_memory`、`aim_search`、`aim_context`、`aim_decide`、`aim_ask`、`aim_repair`；
 - 侧栏入口「AI 记忆」；
 - 面板页面，包含六层浏览、外部模型和设置。
 
