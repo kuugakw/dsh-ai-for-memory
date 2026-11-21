@@ -4171,14 +4171,32 @@ test('readRagIndex reuses one parsed generation until the manifest changes', asy
       data: [{ embedding: [1, 0, 0] }],
     }), { status: 200 });
     assert.equal((await buildRagIndex(store, localExternal(), { fetchImpl: fake })).ok, true);
+    const manifestFile = ragManifestPath(root);
     const first = readRagIndex(root);
+    assert.equal(readRagIndex(root), first);
+    // The signature is the manifest content, not mtime: rewriting the same
+    // bytes with a newer mtime must keep the parsed generation cached. A
+    // time-based signature would re-parse (or, on a coarse filesystem clock,
+    // could even reuse a stale generation across two builds).
+    const same = fs.readFileSync(manifestFile, 'utf8');
+    fs.writeFileSync(manifestFile, same);
+    const later = new Date(Date.now() + 5000);
+    fs.utimesSync(manifestFile, later, later);
     assert.equal(readRagIndex(root), first);
     // A new build publishes a new manifest generation; the cache must follow.
     const rebuilt = await buildRagIndex(store, localExternal(), { fetchImpl: fake });
     assert.equal(rebuilt.ok, true);
+    // Even when the filesystem reports one mtime for both writes (the flake
+    // this test used to hit on coarse clocks), built_at is strictly increasing,
+    // so the generation identity still changes.
+    fs.utimesSync(manifestFile, later, later);
     const second = readRagIndex(root);
     assert.notEqual(second, first);
     assert.equal(second.docs.k_a.text, 'aaaa');
+    assert.notEqual(
+      JSON.parse(fs.readFileSync(manifestFile, 'utf8')).built_at,
+      JSON.parse(same).built_at,
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
