@@ -1,11 +1,11 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.3.2-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.3.2-lightgrey.svg)](package.json)
+[![Status](https://img.shields.io/badge/status-stable%200.4.0-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.4.0-lightgrey.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.3.2 是本地模型生命周期修复版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版让本地 `llama-server` 在插件停用/重载时保持运行、只在 DSH 退出时停止，并在检测到本地模型未启动时提醒启动。
+> **0.4.0 是本地模型生命周期与决策层更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版新增本地引擎「常闭 / 常开 / 每轮开关」三种运行方式（自动拉起前先探测已配置端点，可达就跳过），并把每轮工具活动与 `aim_decide` 风险审查拆成「常规 / 风险」两段。
 >
 > 升级前请备份记忆目录。
 
@@ -191,10 +191,12 @@ aim_memory action=status
 
 ## 更新内容
 
-当前版本 **0.3.2**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.4.0**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
+- **本地引擎运行方式**：设置页可选常闭 / 常开 / 每轮开关；自动拉起前先探测已配置的 Embedding/Rerank 端点，能连上就跳过，不重复起进程；
+- **决策层拆分**：每轮工具活动自动记成「常规」，`aim_decide` 的审查保留在「风险」，面板与 `aim_memory status` 分开计数；
 - **诊断/用量页**：运行环境、知识命中与权重、对话磁盘占用、批量开放/关闭和面板操作审计集中在一页；
 - 知识页支持**分类/来源/确认状态筛选**、**时间/置信度/命中次数/权重排序**、**批量确认**与**撤销确认**；
 - 知识、上下文和快照条目可直接**打开 JSON / 下载全文**；context 可**导出 Markdown**，快照可**恢复/并排对比**；
