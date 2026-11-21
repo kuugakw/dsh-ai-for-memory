@@ -54,6 +54,7 @@ import {
   buildRagIndex, embeddingIdentity, RAG_DEFAULTS, ragCandidates, ragModelStatus, ragStats, rerankCandidates,
 } from './lib/rag.js';
 import { writeExportArtifacts } from './lib/export.js';
+import { effectivePluginConfig } from './lib/model-routing.js';
 import { RRF_K, applyDisclosure, reciprocalRankFusion } from './lib/retrieval.js';
 import { USAGE_BOOST, boostScore, weightLabel } from './lib/usage.js';
 import {
@@ -751,7 +752,8 @@ function localRrfRows(sources, query, options = {}) {
 }
 
 export async function searchWithRag(config, sources, query, options = {}) {
-  const models = ragModelStatus(config);
+  const effective = effectivePluginConfig(config);
+  const models = ragModelStatus(effective);
   if (!models.ready) {
     return {
       ok: false,
@@ -759,7 +761,7 @@ export async function searchWithRag(config, sources, query, options = {}) {
         + '\n请在面板「外部模型」里分别填写 Embedding 模型与 Rerank 模型后再挂载；已回退本地检索。',
     };
   }
-  const endpoint = externalOpEndpointFrom(config, 30000);
+  const endpoint = externalOpEndpointFrom(effective, 30000);
   const identity = embeddingIdentity(endpoint);
   const embedded = await externalEmbed(endpoint, query);
   if (!embedded.ok) {
@@ -949,17 +951,18 @@ function gatherPromoteSource(store) {
 
 /** Build the external endpoint from the plugin config. */
 function externalEndpointOf(config) {
+  const effective = effectivePluginConfig(config);
   return normalizeExternal({
-    baseUrl: config.externalBaseUrl,
-    model: config.externalModel,
-    embedBaseUrl: config.externalEmbedBaseUrl,
-    embedModel: config.externalEmbedModel,
-    rerankBaseUrl: config.externalRerankBaseUrl,
-    rerankModel: config.externalRerankModel,
-    apiKey: config.externalApiKey,
-    embedApiKey: config.externalEmbedApiKey,
-    rerankApiKey: config.externalRerankApiKey,
-    timeoutMs: config.externalTimeoutMs,
+    baseUrl: effective.externalBaseUrl,
+    model: effective.externalModel,
+    embedBaseUrl: effective.externalEmbedBaseUrl,
+    embedModel: effective.externalEmbedModel,
+    rerankBaseUrl: effective.externalRerankBaseUrl,
+    rerankModel: effective.externalRerankModel,
+    apiKey: effective.externalApiKey,
+    embedApiKey: effective.externalEmbedApiKey,
+    rerankApiKey: effective.externalRerankApiKey,
+    timeoutMs: effective.externalTimeoutMs,
   });
 }
 
@@ -1637,12 +1640,13 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         }
 
         if (action === 'index') {
-          const models = ragModelStatus(config);
+          const effective = effectivePluginConfig(config);
+          const models = ragModelStatus(effective);
           if (!models.ready) {
             return `RAG 索引未建立：需要同时配置 Embedding 和 Rerank 两个模型，当前缺少：${models.missing.join('、')}。\n`
               + '请在面板「外部模型」中分别填写 Embedding 模型与 Rerank 模型后重试。';
           }
-          const endpoint = externalOpEndpointFrom(config, 60000);
+          const endpoint = externalOpEndpointFrom(effective, 60000);
           const built = await buildRagIndex(store, endpoint);
           if (!built.ok) {
             return `RAG 索引未建立（${source.label}）：${built.error}\n`

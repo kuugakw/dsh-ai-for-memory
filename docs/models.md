@@ -32,7 +32,7 @@ $DSH_HOME/ai-for-memory/models/
         └── model.json
 ```
 
-`model.json` 里的 `extraArgs`、`ctxSize`、`port`、`binary` 是机器相关配置，必须放在这个用户目录，不要放插件安装目录。用户目录中的同名模型优先于插件自带的 `models/`。
+`model.json` 里的 `extraArgs`、`ctxSize`、`port`、`binary` 是机器相关配置，必须放在这个用户目录，不要放插件安装目录。用户目录中的同名模型优先于插件自带的 `models/`。启动成功的本地 Embedding / Rerank 引擎会自动成为对应端点的回退：未配置外部 Embedding/Rerank 地址，或地址仍是旧的 loopback 端口时，检索、RAG、promote/archive 等调用会直接使用运行中的本地模型；显式配置的云端地址优先，不会被本地引擎覆盖。
 
 也可以把 `.gguf` 直接丢在 `models/` 根目录：面板会把它列在 **Loose** 分类下，按文件名推断类型（`embedding` / `bge-m3` / `jina-embeddings` → Embedding；`rerank` / `reranker` / `cross-encoder` → Rerank）。推断只用于提示，不是事实；识别不出来时面板会显示「未识别」，必须由用户点「标为 Embedding」或「标为 Rerank」。用户标记和根目录模型的 ctx/port 存在 `models/.model-meta.json`，不会改写 GGUF。
 
