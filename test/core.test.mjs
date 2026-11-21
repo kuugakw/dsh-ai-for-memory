@@ -2428,15 +2428,20 @@ test('usage pressure resets the whole window instead of keeping topic-similar tu
     handlers.get('session/event')(session, { type: 'turn/end', data: { turn: 4 } });
     await new Promise((resolve) => setTimeout(resolve, 40));
 
-    // Every completed turn, including the on-topic tail that a similarity
-    // clear would keep, is replaced by the hard-reset note.
+    // Every completed turn that is not one of the newest `keepRecentTurns` is
+    // replaced by the hard-reset note, even the on-topic ones a similarity
+    // clear would have kept.
     assert.ok(nodes.length < before);
     const keptText = nodes.map((seq) => log[seq])
       .flatMap((event) => event.data?.content ?? event.data?.message?.content ?? [])
       .map((block) => block.text ?? '')
       .join('\n');
     assert.doesNotMatch(keptText, /相似度高的留下/);
-    assert.doesNotMatch(keptText, /明白/);
+    // The newest completed turns stay verbatim: the model must still see what
+    // it was just asked and just answered, or the next turn is answered against
+    // the previous one.
+    assert.match(keptText, /继续按相似度清理上下文/);
+    assert.match(keptText, /明白/);
 
     const store = new MemoryScopes(path.join(root, 'memory')).sessionStoreFor('session-clear', {}).store;
     const contexts = store.listContexts();
@@ -2446,7 +2451,7 @@ test('usage pressure resets the whole window instead of keeping topic-similar tu
     assert.ok(archived.raw_events.some((event) => event.type === 'developer/message'));
     assert.ok(archived.raw_events.some((event) => event.type === 'tool/call'));
     assert.equal(store.readCompactionStatus().state, 'reset');
-    assert.equal(store.readCompactionStatus().kept, 0);
+    assert.equal(store.readCompactionStatus().kept, 2);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -5289,6 +5294,153 @@ test('session repair: compact re-frames a valid log without changing events', as
     const recheck = await repairSessionLog(file, { apply: false });
     assert.equal(recheck.valid, true);
     assert.equal(recheck.before.events, events.length);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('pressure reset clears a fragmented window in one contiguous replacement', async () => {
+  const root = tempRoot();
+  try {
+    const events = [];
+    for (let turn = 1; turn <= 5; turn += 1) {
+      events.push(
+        { type: 'turn/start', data: { turn } },
+        { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: `第 ${turn} 轮的问题` }] } },
+        { type: 'assistant/message', data: { message: { role: 'assistant', content: [{ type: 'text', text: `第 ${turn} 轮的回答` }] } } },
+        { type: 'turn/end', data: { turn } },
+      );
+    }
+    const { session, log, nodes } = fakeSession(events);
+    // An earlier partial clear left turn 2 non-contiguous: its user node is
+    // gone from the surface. Per-turn ranges can never clear it again, which is
+    // exactly how a "hard reset" used to degrade into clearing one turn.
+    const lost = nodes.find((seq) => log[seq].data?.content?.[0]?.text === '第 2 轮的问题');
+    nodes.splice(nodes.indexOf(lost), 1);
+
+    const handlers = new Map();
+    const ctx = {
+      effect: (fn) => fn(),
+      on: (event, handler) => { handlers.set(event, handler); return () => {}; },
+      get: (service) => {
+        if (service === 'agents') {
+          return { get: () => ({ whenIdle: async () => {}, runMaintenance: async (task) => task() }) };
+        }
+        if (service === 'tokenMeter') {
+          return { contextPressure: () => ({ pressureTokens: 90000, contextWindow: 100000 }) };
+        }
+        return undefined;
+      },
+    };
+    const config = normalizeConfig({
+      root: path.join(root, 'memory'),
+      autoEnabled: true,
+      autoEveryRounds: 100,
+      contextUsagePercent: 50,
+      keepRecentTurns: 1,
+    });
+    const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
+    installContextManagement(ctx, config, { registryDir: path.join(root, 'registry'), getService: ctx.get }, runtime);
+
+    const before = nodes.length;
+    handlers.get('session/event')(session, { type: 'turn/end', data: { turn: 5 } });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    const replacements = log.filter((event) => event.type === 'user/message'
+      && event.data?.source?.kind === 'ai-for-memory'
+      && event.surfaceOp && event.surfaceOp.op === 'replace');
+    assert.equal(replacements.length, 1, 'a hard reset must be one replacement');
+    const run = replacements[0];
+    assert.equal(log[run.surfaceOp.startSeq].data.content[0].text, '第 1 轮的问题');
+    // The newest completed turn survives verbatim; every older node, including
+    // the fragmented turn, is gone from the model-visible surface.
+    assert.equal(nodes.length, 3);
+    const keptText = nodes.map((seq) => log[seq])
+      .flatMap((event) => event.data?.content ?? event.data?.message?.content ?? [])
+      .map((block) => block.text ?? '')
+      .join('\n');
+    assert.match(keptText, /第 5 轮的问题/);
+    assert.match(keptText, /第 5 轮的回答/);
+    assert.doesNotMatch(keptText, /第 1 轮的问题/);
+    assert.doesNotMatch(keptText, /第 2 轮的回答/);
+    assert.ok(nodes.length < before);
+
+    const store = new MemoryScopes(path.join(root, 'memory')).sessionStoreFor('session-clear', {}).store;
+    const status = store.readCompactionStatus();
+    assert.equal(status.state, 'reset');
+    assert.equal(status.turns, 4);
+    assert.equal(status.kept, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('request anchor never fires on later steps of a turn', async () => {
+  const root = tempRoot();
+  try {
+    const handlers = new Map();
+    const ctx = {
+      effect: (fn) => fn(),
+      on: (event, handler) => { handlers.set(event, handler); return () => {}; },
+      get: () => undefined,
+    };
+    const config = normalizeConfig({ root: path.join(root, 'memory'), requestAnchor: true });
+    const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
+    installContextManagement(ctx, config, { registryDir: path.join(root, 'registry'), getService: ctx.get }, runtime);
+    const appended = [];
+    const session = {
+      id: 'session-anchor-step',
+      header: {},
+      ownEvents: () => [
+        { type: 'user/message', seq: 1, data: { role: 'user', content: [{ type: 'text', text: '真实请求：加网络层' }] } },
+        { type: 'user/message', seq: 2, data: { role: 'user', content: [{ type: 'text', text: 'Time sampled while preparing turn 1' }] } },
+      ],
+      surface: { nodes: [1, 2] },
+      append: (type, data, options) => { appended.push({ type, data, options }); },
+    };
+    const preStep = handlers.get('agent/pre-step');
+    // Step 2 carries tool results, so it has no user text; the anchor must not
+    // treat that as "a checkpoint arrived".
+    await preStep({ agent: { session }, step: 2, turn: 1, signal: new AbortController().signal }, () => {});
+    assert.equal(appended.length, 0);
+    // The first step is where a checkpoint can legitimately need the anchor.
+    await preStep({ agent: { session }, step: 1, turn: 1, signal: new AbortController().signal }, () => {});
+    assert.equal(appended.length, 1);
+    assert.match(appended[0].data.content[0].text, /真实请求：加网络层/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('request anchor never restates a request that already left the surface', async () => {
+  const root = tempRoot();
+  try {
+    const handlers = new Map();
+    const ctx = {
+      effect: (fn) => fn(),
+      on: (event, handler) => { handlers.set(event, handler); return () => {}; },
+      get: () => undefined,
+    };
+    const config = normalizeConfig({ root: path.join(root, 'memory'), requestAnchor: true });
+    const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
+    installContextManagement(ctx, config, { registryDir: path.join(root, 'registry'), getService: ctx.get }, runtime);
+    const appended = [];
+    const session = {
+      id: 'session-anchor-cleared',
+      header: {},
+      ownEvents: () => [
+        { type: 'user/message', seq: 1, data: { role: 'user', content: [{ type: 'text', text: '早就被清出的旧请求' }] } },
+        { type: 'user/message', seq: 2, data: { role: 'user', content: [{ type: 'text', text: 'Time sampled while preparing turn 9' }] } },
+      ],
+      // Seq 1 was cleared: the surface only holds the checkpoint.
+      surface: { nodes: [2] },
+      append: (type, data, options) => { appended.push({ type, data, options }); },
+    };
+    await handlers.get('agent/pre-step')(
+      { agent: { session }, step: 1, turn: 9, signal: new AbortController().signal },
+      () => {},
+    );
+    assert.equal(appended.length, 0);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

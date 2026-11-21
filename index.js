@@ -2490,6 +2490,74 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
  * is gone before the next model request. `turn/end` remains the fallback when
  * the turn does not issue another request. Subagents are skipped.
  */
+/**
+ * One contiguous surface prefix that a hard reset may replace, or `null`.
+ *
+ * A hard reset promises "archive everything, then start from the current
+ * request". Per-turn ranges cannot keep that promise: one earlier partial
+ * clear leaves turns whose node runs are no longer contiguous, `turnRange`
+ * refuses them forever, and the reset degrades into "clear the newest turn"
+ * on every pass — the window stays at the threshold while each pass only
+ * removes what the pass before it created. The prefix form has no such state:
+ * it starts right after the system prompt and ends at the first node of the
+ * block being kept, so it is contiguous by construction and never splits a
+ * turn (the kept block always starts at a turn boundary).
+ *
+ * @param {object} session live DSH session (needs `surface.nodes` and `eventAt`)
+ * @param {Array<object>} turns `collectTurns()` output, oldest first
+ * @param {number} keepRecent newest completed turns to keep verbatim
+ * @returns {{run: object, keptTurns: Array<object>}|null}
+ */
+export function planPrefixReset(session, turns, keepRecent) {
+  const nodes = session?.surface && Array.isArray(session.surface.nodes)
+    ? session.surface.nodes : null;
+  if (!nodes || nodes.length <= 1) return null;
+  const position = new Map();
+  nodes.forEach((seq, index) => position.set(seq, index));
+  const keepCount = Math.max(1, Number.isFinite(Number(keepRecent)) ? Number(keepRecent) : 1);
+  const list = Array.isArray(turns) ? turns : [];
+  const completed = list.filter((turn) => turn.inFlight !== true);
+  const inFlight = list.filter((turn) => turn.inFlight === true);
+  const keptTurns = [
+    ...completed.slice(Math.max(0, completed.length - keepCount)),
+    ...inFlight,
+  ];
+  // The kept block starts at the earliest still-visible node of any kept turn.
+  // A kept turn that is already fully shadowed has no node here and simply
+  // contributes nothing.
+  let keepIndex = nodes.length;
+  for (const turn of keptTurns) {
+    for (const seq of Array.isArray(turn.seqs) ? turn.seqs : []) {
+      const index = position.get(seq);
+      if (index !== undefined && index < keepIndex) keepIndex = index;
+    }
+  }
+  // Node 0 is the system prompt whenever it holds one, and a clear never
+  // shadows it; a session whose first node is already a message may clear
+  // from 0.
+  const head = typeof session.eventAt === 'function' ? session.eventAt(nodes[0]) : undefined;
+  const firstClearIndex = head && head.type === 'system/message' ? 1 : 0;
+  if (keepIndex <= firstClearIndex) return null;
+  const startSeq = nodes[firstClearIndex];
+  const endSeq = nodes[keepIndex - 1];
+  if (!Number.isInteger(startSeq) || !Number.isInteger(endSeq) || endSeq < startSeq) return null;
+  const cleared = list.filter((turn) => (Array.isArray(turn.seqs) ? turn.seqs : [])
+    .some((seq) => seq >= startSeq && seq <= endSeq));
+  return {
+    keptTurns,
+    run: {
+      turns: cleared,
+      seqs: nodes.slice(firstClearIndex, keepIndex),
+      startSeq,
+      endSeq,
+      startIdx: firstClearIndex,
+      endIdx: keepIndex - 1,
+      chars: cleared.reduce((sum, turn) => sum + Number(turn.chars ?? 0), 0),
+      similarity: 0,
+    },
+  };
+}
+
 export function installContextManagement(ctx, config, deps, runtime) {
   const counters = runtime?.counters ?? new Map();
   const pending = runtime?.pending ?? new Map();
@@ -2549,6 +2617,14 @@ export function installContextManagement(ctx, config, deps, runtime) {
   const maybeAnchorRequest = async (session, payload) => {
     if (config.requestAnchor === false || payload?.signal?.aborted) return;
     if (session?.header?.parentSession) return;
+    // Only the first step of a turn may carry the anchor. From the second step
+    // on, `payload.messages` holds tool results, so "no new user request" is
+    // true for a reason that has nothing to do with a checkpoint. Injecting a
+    // request note there put a second user-role task statement *inside* the
+    // running turn; after that every following step competed with it, and the
+    // model kept answering the request it named instead of the newest one.
+    const step = Number(payload?.step);
+    if (Number.isFinite(step) && step > 1) return;
     const events = typeof session.ownEvents === 'function' ? session.ownEvents() : [];
     // `payload.messages` is exactly what will enter this step. If it already
     // contains a real user request, never inject a stale anchor: a checkpoint
@@ -2573,6 +2649,12 @@ export function installContextManagement(ctx, config, deps, runtime) {
     }
     if (latestUser === null || realRequest === null) return;
     if (!isHarnessText(latestUser.text)) return;
+    // The anchor restates a request *as user input*, so only a request that is
+    // still visible may be restated. A cleared request must stay cleared:
+    // re-injecting it is the same "answer an older turn" failure through
+    // another door.
+    const nodes = session?.surface && Array.isArray(session.surface.nodes) ? session.surface.nodes : null;
+    if (nodes !== null && !nodes.includes(realRequest.seq)) return;
     const id = String(session.id);
     const previous = anchorState.get(id);
     if (previous && previous.requestSeq === realRequest.seq) return;
@@ -2857,12 +2939,23 @@ export function installContextManagement(ctx, config, deps, runtime) {
         anchorTurns: 2,
       });
       let clearTurns = selection.clear.filter((turn) => turn.inFlight !== true);
-      // Hard reset for an over-budget window: every completed turn is archived
-      // and replaced. Recent/topic selection is deliberately skipped; the
-      // current in-flight turn stays because its tool call/result pair is not
-      // committed yet.
+      let resetPlan = null;
       if (hardReset) {
-        clearTurns = turns.filter((turn) => turn.inFlight !== true);
+        // Hard reset is a single prefix replacement: the whole old window goes,
+        // only the newest completed turns and the in-flight turn stay. Without
+        // this, fragmented turns made every reset clear just one turn, so the
+        // measured usage never actually dropped.
+        resetPlan = planPrefixReset(session, turns, config.keepRecentTurns);
+        if (!resetPlan) {
+          record({
+            state: 'skipped',
+            reason: '没有可安全清理的旧轮次',
+            kept: turns.length,
+            cleared: 0,
+          });
+          return;
+        }
+        clearTurns = resetPlan.run.turns;
       } else if (pressureFallback) {
         const selectedChars = clearTurns.reduce((sum, turn) => sum + Number(turn.chars ?? 0), 0);
         const candidates = turns.filter((turn) => turn.inFlight !== true);
@@ -2871,7 +2964,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
           clearTurns = fallback;
         }
       }
-      if (clearTurns.length === 0) {
+      if (clearTurns.length === 0 && !resetPlan) {
         record({
           state: 'skipped',
           reason: '全部轮次都与当前话题相关',
@@ -2881,7 +2974,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
         });
         return;
       }
-      const runs = groupRuns(session, clearTurns);
+      const runs = resetPlan ? [resetPlan.run] : groupRuns(session, clearTurns);
       if (runs.length === 0) {
         record({ state: 'skipped', reason: '没有可安全清理的连续轮次', kept: selection.keep.length, cleared: 0 });
         return;
@@ -2892,12 +2985,12 @@ export function installContextManagement(ctx, config, deps, runtime) {
       const chosen = [];
       let chars = 0;
       let turnCount = 0;
-      if (hardReset) {
+      if (resetPlan) {
         // A hard reset is all-or-nothing: do not leave a tail of old turns just
         // because maxClearTurns/maxClearChars is smaller than the whole window.
-        chosen.push(...runs);
-        chars = runs.reduce((sum, run) => sum + run.chars, 0);
-        turnCount = runs.reduce((sum, run) => sum + run.turns.length, 0);
+        chosen.push(resetPlan.run);
+        chars = resetPlan.run.chars;
+        turnCount = resetPlan.run.turns.length;
       } else {
         for (const run of runs) {
           if (turnCount + run.turns.length > config.maxClearTurns) break;
@@ -2911,7 +3004,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
         record({ state: 'skipped', reason: '超出单次清理预算' });
         return;
       }
-      if (chars < config.minClearChars && !pressureFallback && !hardReset) {
+      if (chars < config.minClearChars && !pressureFallback && !resetPlan) {
         record({ state: 'skipped', reason: '可清理内容太少', chars, cleared: 0 });
         return;
       }
@@ -2935,13 +3028,18 @@ export function installContextManagement(ctx, config, deps, runtime) {
       // The step may have been cancelled while the summary was generated.
       // Never mutate the surface after an abort.
       if (signal?.aborted) return;
-      const latestUser = [...turns].reverse().find((turn) => turn.user)?.user ?? '';
+      const clearedNumbers = new Set(clearedTurns.map((turn) => turn.turn));
+      const newestVisibleUser = [...turns].reverse()
+        .find((turn) => !clearedNumbers.has(turn.turn) && turn.user)?.user ?? '';
+      const latestUser = newestVisibleUser
+        || ([...turns].reverse().find((turn) => turn.user)?.user ?? '');
       // At pre-step the exact incoming request in payload.messages is more
       // authoritative than the last event in ownEvents, which can still be the
       // previous turn when a checkpoint and a new request arrive together.
       const taskRequest = String(options.taskRequest ?? '').trim() || latestUser;
       const latestAssistant = [...turns].reverse()
-        .find((turn) => turn.inFlight !== true && turn.assistant)?.assistant ?? '';
+        .find((turn) => turn.inFlight !== true && !clearedNumbers.has(turn.turn) && turn.assistant)
+        ?.assistant ?? '';
       const taskBrief = hardReset && hardReload
         ? `【任务续接】当前请求：${clip(taskRequest, 360)}`
           + (latestAssistant === '' ? '' : `\n最近进展：${clip(latestAssistant, 420)}`)
@@ -2980,13 +3078,13 @@ export function installContextManagement(ctx, config, deps, runtime) {
         cleared: shadowed,
         turns: turnCount,
         chars,
-        kept: hardReset ? 0 : selection.keep.length,
+        kept: resetPlan ? resetPlan.keptTurns.length : selection.keep.length,
         context: saved.context_id,
         threshold: selection.threshold,
       });
       // eslint-disable-next-line no-console
       console.log(`[ai-for-memory] ${hardReset ? '已全量清出' : '已按话题相似度清出'} ${turnCount} 轮`
-        + `（保留 ${hardReset ? 0 : selection.keep.length} 轮），存档 ${saved.context_id}`);
+        + `（保留 ${resetPlan ? resetPlan.keptTurns.length : selection.keep.length} 轮），存档 ${saved.context_id}`);
       return shadowed > 0;
     };
 
