@@ -52,6 +52,7 @@ import {
 } from './lib/external-ops.js';
 import {
   buildRagIndex, embeddingIdentity, RAG_DEFAULTS, ragCandidates, ragModelStatus, ragStats, rerankCandidates,
+  sameEmbeddingSpace,
 } from './lib/rag.js';
 import { writeExportArtifacts } from './lib/export.js';
 import { effectivePluginConfig } from './lib/model-routing.js';
@@ -794,6 +795,7 @@ export async function searchWithRag(config, sources, query, options = {}) {
       category: options.category ?? null,
       model: identity.model,
       endpoint: identity.endpoint,
+      space: identity.space,
     });
     if (!result.ok) {
       if (result.reason === 'no-index') {
@@ -1652,7 +1654,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             return `RAG 索引未建立（${source.label}）：${built.error}\n`
               + '已索引的旧条目保持不变；确认外部嵌入服务可用后重试 aim_memory action=index。';
           }
-          const mount = config.ragMount ? '已挂载，aim_search 将优先用 RAG' : '未挂载（可在面板打开「RAG 挂载」）';
+          const mount = effective.ragMount ? '已挂载，aim_search 将优先用 RAG' : '未挂载（可在面板打开「RAG 挂载」）';
           const switchNote = built.changed
             ? '已按当前嵌入配置全量重建（旧索引可能来自其他地址/模型，与当前维度不兼容）。\n'
             : '';
@@ -1685,10 +1687,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             .map((row) => ({ ...row, counts: context.scopes.counts(row.key) }));
           const rag = ragStats(store.root);
           const currentEmbedding = embeddingIdentity(externalEndpointOf(config));
-          const ragStale = rag.built
-            && (rag.model !== currentEmbedding.model
-              || (rag.endpoint !== '' && rag.endpoint !== currentEmbedding.endpoint));
-          const ragLine = `RAG：${config.ragMount ? '已挂载到知识库检索' : '未挂载（面板可切换）'}｜`
+          const ragStale = rag.built && !sameEmbeddingSpace(rag, currentEmbedding);
+          const ragLine = `RAG：${effectivePluginConfig(config).ragMount ? '已挂载到知识库检索' : '未挂载（面板可切换）'}｜`
             + (rag.built
               ? `索引 ${rag.docs} 篇（知识库 ${rag.considered} 篇`
                 + `${rag.truncated > 0 ? `，超出上限 ${rag.truncated} 篇未索引` : ''}`
@@ -1893,8 +1893,9 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           fallbackNote = `SQL 通道未执行（${sqlResult.error ?? '无法翻译'}），已回退向量检索。\n`;
         }
         let picked;
-        if (config.ragMount === true) {
-          const rag = await searchWithRag(config, sources, query, {
+        const effectiveForSearch = effectivePluginConfig(config);
+        if (effectiveForSearch.ragMount === true) {
+          const rag = await searchWithRag(effectiveForSearch, sources, query, {
             topK,
             category: args?.category ?? null,
             store: callerStore,

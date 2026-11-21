@@ -25,7 +25,8 @@ import {
 } from '../lib/external-ops.js';
 import { evaluateDecision } from '../lib/decision.js';
 import {
-  buildRagIndex, cosine, ragCandidates, ragManifestPath, ragModelStatus, ragStats, readRagIndex, rerankCandidates,
+  buildRagIndex, cosine, embeddingIdentity, ragCandidates, ragManifestPath, ragModelStatus, ragStats, readRagIndex,
+  rerankCandidates, sameEmbeddingSpace,
 } from '../lib/rag.js';
 import {
   buildKnowledgeExport, exportArtifact, knowledgeExportPayload, normalizeExportFormat, normalizeExportTypeList,
@@ -4648,6 +4649,23 @@ test('云端服务可分别配置嵌入/重排的地址、模型与 API Key', as
     url: 'https://api.siliconflow.cn/v1/embeddings',
     auth: 'Bearer sk-embed',
   });
+});
+
+test('local embedding identity survives ephemeral port changes', () => {
+  const first = embeddingIdentity(normalizeExternal({
+    baseUrl: 'http://127.0.0.1:1001', model: 'bge-m3',
+  }));
+  const second = embeddingIdentity(normalizeExternal({
+    baseUrl: 'http://127.0.0.1:1002', model: 'bge-m3',
+  }));
+  assert.equal(first.space, 'local:bge-m3');
+  assert.equal(second.space, first.space);
+  assert.equal(sameEmbeddingSpace({ ...first, endpoint: first.endpoint }, second), true);
+  // A remote provider with the same model name is still another space.
+  const cloud = embeddingIdentity(normalizeExternal({
+    baseUrl: 'https://api.example.com/v1', model: 'bge-m3',
+  }));
+  assert.equal(sameEmbeddingSpace({ ...first, endpoint: first.endpoint }, cloud), false);
 });
 
 test('RAG rebuilds every vector when the embedding provider or model changes', async () => {
