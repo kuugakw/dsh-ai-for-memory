@@ -550,10 +550,16 @@ function formatLayers(status) {
     lines.push(`历史待确认知识更新：${status.knowledge.pendingUpdates} 条`
       + '（旧版本提炼入队、未写入；面板知识库页可接受或忽略。新提炼不再入队）');
   }
-  lines.push(`决策记录：${status.decisions.total} 条`
-    + (status.decisions.total > 0
-      ? `（${Object.entries(status.decisions.byOutcome).map(([outcome, count]) => `${outcome}=${count}`).join('，')}）`
-      : ''));
+  // One layer, two kinds: routine turn activity (observed) and reviewed risk
+  // decisions (aim_decide). Reporting them together was what made the layer
+  // look like an audit dump; report the split explicitly.
+  const observedDecisions = status.decisions.byOutcome.observed ?? 0;
+  const reviewedDecisions = Math.max(0, status.decisions.total - observedDecisions);
+  const reviewedOutcomes = Object.entries(status.decisions.byOutcome)
+    .filter(([outcome]) => outcome !== 'observed')
+    .map(([outcome, count]) => `${outcome}=${count}`).join('，');
+  lines.push(`决策记录：${status.decisions.total} 条（常规 ${observedDecisions}，风险审查 ${reviewedDecisions}`
+    + (reviewedOutcomes !== '' ? `｜${reviewedOutcomes}` : '') + '）');
   if (status.recent.length > 0) {
     lines.push('最近过程记录：');
     for (const row of status.recent) {

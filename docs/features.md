@@ -187,6 +187,8 @@ verified: false
 
 它是“做了什么”的执行审计，不占用正反合审查，也不会被 `promote` 提炼进知识库；同一轮重复落库会按 `session + turn` 覆盖同一条。`autoDecisionLog: false` 可关闭。
 
+面板「决策」页按两类分栏展示：**常规**（`outcome: observed` 的自动执行记录）与**风险**（`aim_decide` 的正反合审查）。两类共用同一个 `decisions` 层和保留策略，只是职责分开。
+
 ### 4.5 `aim_ask`
 
 调用任何 OpenAI 兼容 HTTP API。

@@ -487,6 +487,8 @@ window.__ModuleLoader__.load({
         decisionReviewed: '已审查',
         decisionAuto: '自动放行',
         decisionObserved: '自动记录',
+        decisionRoutine: '常规',
+        emptyRoutine: '还没有常规记录。',
         decisionApproved: '已批准',
         decisionRejected: '已拒绝',
         decisionGate: '可逆性',
@@ -1019,6 +1021,8 @@ window.__ModuleLoader__.load({
         decisionReviewed: 'Reviewed',
         decisionAuto: 'Auto-approved',
         decisionObserved: 'Auto-recorded',
+        decisionRoutine: 'Routine',
+        emptyRoutine: 'No routine records yet.',
         decisionApproved: 'Approved',
         decisionRejected: 'Rejected',
         decisionGate: 'Reversibility',
@@ -3662,52 +3666,65 @@ window.__ModuleLoader__.load({
         const rows = data?.decisions ?? [];
         const outcomeSummary = Object.entries(data?.decisionsByOutcome ?? {})
           .map(([outcome, count]) => `${outcome}=${count}`).join('｜');
+        // Routine records are observed turn activity; risk records are the
+        // reviewed aim_decide decisions. They stay in one layer but are shown
+        // as two sections so the original review path keeps its own place.
+        const isRoutine = (row) => row.outcome === 'observed' || row.kind === 'turn-activity';
+        const routineRows = rows.filter(isRoutine);
+        const riskRows = rows.filter((row) => !isRoutine(row));
+        const routineTotal = data?.decisionsByOutcome?.observed ?? routineRows.length;
+        const riskTotal = Math.max(0, (data?.counts?.decisions ?? rows.length) - routineTotal);
+        const decisionCard = (row) => {
+          const key = keyOf(row.session_key, row.decision_id);
+          return h(LogRow, {
+            key,
+            rowKey: key,
+            open: rowOpen(key),
+            onToggle: toggleRow,
+            head: [
+              h('span', { key: 'outcome', style: badgeStyle(row.outcome) }, row.outcome),
+              h('span', { key: 'review', style: badgeStyle(row.reviewed ? 'pending' : 'approved') },
+                row.reviewed
+                  ? t.decisionReviewed
+                  : (row.outcome === 'observed' ? t.decisionObserved : t.decisionAuto)),
+              h('span', { key: 'approved', style: badgeStyle(row.approved ? 'approved' : 'rejected') },
+                row.approved ? t.decisionApproved : t.decisionRejected),
+              h('span', { key: 'risk', style: badgeStyle(row.risk_level) }, `${t.risk}: ${row.risk_level}`),
+              showSession && row.session_label
+                ? h('span', { key: 'session', style: badgeStyle('pending') }, row.session_label)
+                : null,
+              h('span', { key: 'time', style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.timestamp)),
+            ],
+            preview: row.decision,
+            children: [
+              h('p', { key: 'decision', style: styles.content }, row.decision),
+              row.reason ? h('p', { key: 'reason', style: styles.hint }, `${t.reason}: ${row.reason}`) : null,
+              row.thesis || row.antithesis
+                ? h('div', { key: 'thesis', style: styles.meta },
+                  row.thesis ? h('span', null, `${t.thesis}: ${row.thesis}`) : null,
+                  row.antithesis ? h('span', null, `${t.antithesis}: ${row.antithesis}`) : null)
+                : null,
+              row.irreversible !== null && row.irreversible !== undefined
+                ? h('p', { key: 'gate', style: styles.hint },
+                  `${t.decisionGate}: ${row.irreversible ? t.decisionIrreversible : t.decisionReversible}`
+                    + (row.recoverable_via ? `｜${t.decisionRecoverable}: ${row.recoverable_via}` : ''))
+                : null,
+            ],
+          });
+        };
+        const decisionSection = (label, total, list, emptyText, moreKey) => h('div', { key: `section-${moreKey}` },
+          h('p', { style: { ...styles.hint, margin: '0 0 4px', fontWeight: 600 } }, `${label}（${total}）`),
+          list.length === 0
+            ? h('p', { style: { ...styles.hint, margin: '0 0 8px' } }, emptyText)
+            : h('div', { style: styles.list },
+              ...list.slice(0, listLimit).map((row) => decisionCard(row)),
+              list.length > listLimit ? moreRow(moreKey, list.length) : null));
         content = h('div', null,
           outcomeSummary !== ''
             ? h('p', { style: { ...styles.hint, margin: '0 0 8px' } }, `${t.decisionStats}: ${outcomeSummary}`)
             : null,
-          rows.length === 0
-          ? h(Empty, { text: t.emptyDecisions })
-          : h('div', { style: styles.list },
-            ...rows.slice(0, listLimit).map((row) => {
-              const key = keyOf(row.session_key, row.decision_id);
-              return h(LogRow, {
-                key,
-                rowKey: key,
-                open: rowOpen(key),
-                onToggle: toggleRow,
-                head: [
-                  h('span', { key: 'outcome', style: badgeStyle(row.outcome) }, row.outcome),
-                  h('span', { key: 'review', style: badgeStyle(row.reviewed ? 'pending' : 'approved') },
-                    row.reviewed
-                      ? t.decisionReviewed
-                      : (row.outcome === 'observed' ? t.decisionObserved : t.decisionAuto)),
-                  h('span', { key: 'approved', style: badgeStyle(row.approved ? 'approved' : 'rejected') },
-                    row.approved ? t.decisionApproved : t.decisionRejected),
-                  h('span', { key: 'risk', style: badgeStyle(row.risk_level) }, `${t.risk}: ${row.risk_level}`),
-                  showSession && row.session_label
-                    ? h('span', { key: 'session', style: badgeStyle('pending') }, row.session_label)
-                    : null,
-                  h('span', { key: 'time', style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.timestamp)),
-                ],
-                preview: row.decision,
-                children: [
-                  h('p', { key: 'decision', style: styles.content }, row.decision),
-                  row.reason ? h('p', { key: 'reason', style: styles.hint }, `${t.reason}: ${row.reason}`) : null,
-                  row.thesis || row.antithesis
-                    ? h('div', { key: 'thesis', style: styles.meta },
-                      row.thesis ? h('span', null, `${t.thesis}: ${row.thesis}`) : null,
-                      row.antithesis ? h('span', null, `${t.antithesis}: ${row.antithesis}`) : null)
-                    : null,
-                  row.irreversible !== null && row.irreversible !== undefined
-                    ? h('p', { key: 'gate', style: styles.hint },
-                      `${t.decisionGate}: ${row.irreversible ? t.decisionIrreversible : t.decisionReversible}`
-                        + (row.recoverable_via ? `｜${t.decisionRecoverable}: ${row.recoverable_via}` : ''))
-                    : null,
-                ],
-              });
-            }),
-            rows.length > listLimit ? moreRow('more-decisions', rows.length) : null));
+          decisionSection(t.decisionRoutine, routineTotal, routineRows, t.emptyRoutine, 'more-routine'),
+          decisionSection(t.risk, riskTotal, riskRows, t.emptyDecisions, 'more-decisions'));
       } else if (tab === 'contexts') {
         const rows = data?.contexts ?? [];
         content = h('div', null,

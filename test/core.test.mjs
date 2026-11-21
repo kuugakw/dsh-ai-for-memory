@@ -1799,6 +1799,7 @@ test('knowledge tools write, learn in batch and preview promotion', async () => 
 
     const st = await memory.execute({ action: 'status' }, exec);
     assert.match(st, /知识库：4 篇/);
+    assert.match(st, /决策记录：0 条（常规 0，风险审查 0）/);
     assert.match(st, /知识来源：/);
     assert.match(st, /待提炼：约/);
 
@@ -5821,6 +5822,9 @@ test('turn/end records the tools the turn used in the decision layer', async () 
     assert.equal(rows[0].outcome, 'observed');
     assert.match(rows[0].decision, /edit×1/);
     assert.match(rows[0].decision, /src\/app\.ts/);
+    const status = store.status();
+    assert.equal(status.decisions.total, 1);
+    assert.equal(status.decisions.byOutcome.observed, 1);
 
     // Replaying the same turn must overwrite, not duplicate.
     onEvent(session, { type: 'turn/end', data: { turn: 1 } });
