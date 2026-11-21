@@ -27,7 +27,7 @@ import { evaluateDecision } from './lib/decision.js';
 import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
 import { defaultRegistryDir, listRootRows, rememberRoot } from './lib/registry.js';
 import { installApi } from './lib/api.js';
-import { restoreLocalEngines, stopAllLocalEngines } from './lib/local-engine.js';
+import { restoreLocalEngines } from './lib/local-engine.js';
 import { ensureMcpToken } from './lib/mcp-token.js';
 import { packageVersion } from './lib/version.js';
 import { collectTurnDigest } from './lib/auto.js';
@@ -3497,17 +3497,13 @@ export function apply(ctx, config) {
 
   // Adopt llama-server processes left by a previous DSH/plugin process before
   // the panel can offer a start button; otherwise a reload can spawn a second
-  // server on a new port while the survivor keeps its VRAM.
+  // server on a new port while the survivor keeps its VRAM. Adoption never
+  // starts or stops a model; lifecycle is an explicit user action.
   try {
     void restoreLocalEngines();
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error(`[ai-for-memory] 本地引擎接管失败：${error?.message ?? error}`);
-  }
-  if (typeof ctx?.effect === 'function') {
-    ctx.effect(() => () => {
-      void stopAllLocalEngines();
-    });
   }
 
   // The Web panel reads the same store over a small same-origin HTTP API.
