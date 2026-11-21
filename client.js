@@ -266,6 +266,12 @@ window.__ModuleLoader__.load({
         localModelCtxSave: '保存 ctx',
         localModelCtxSaved: 'ctx-size 已保存；重启本地引擎后生效。',
         localModelCtxInvalid: 'ctx-size 必须是 256~131072 的整数。',
+        localModelKind: '类型',
+        localModelKindUnknown: '未识别',
+        localModelKindByName: '按名称识别',
+        localModelMarkEmbedding: '标为 Embedding',
+        localModelMarkRerank: '标为 Rerank',
+        localModelKindSaved: '模型类型已保存。',
         localModelStale: '模型配置已变更，旧引擎不再复用；请先停止引擎，再重新启动。',
         localModelDiagnostics: '启动失败诊断（llama-server stderr）',
         localModelApplied: '已填入模型地址；确认后点「保存设置」。',
@@ -767,6 +773,12 @@ window.__ModuleLoader__.load({
         localModelCtxSave: 'Save ctx',
         localModelCtxSaved: 'ctx-size saved; restart the local engine to apply.',
         localModelCtxInvalid: 'ctx-size must be an integer from 256 to 131072.',
+        localModelKind: 'Type',
+        localModelKindUnknown: 'Unrecognized',
+        localModelKindByName: 'inferred from name',
+        localModelMarkEmbedding: 'Mark as Embedding',
+        localModelMarkRerank: 'Mark as Rerank',
+        localModelKindSaved: 'Model type saved.',
         localModelStale: 'The model configuration changed, so the old engine was not reused. Stop it and start again.',
         localModelDiagnostics: 'Startup diagnostics (llama-server stderr)',
         localModelApplied: 'Model address filled; click "Save settings" to apply.',
@@ -2132,7 +2144,7 @@ window.__ModuleLoader__.load({
       /** Fill endpoint fields from a discovered model folder, starting the local engine when it has a GGUF. */
       const applyLocalModel = async (category, model) => {
         if (!model) return;
-        const capability = String(category ?? '').toLowerCase();
+        const capability = String(category === 'Loose' ? model.kind : category ?? '').toLowerCase();
         if (!capability.includes('embed') && !capability.includes('rerank')) {
           // Routing and future categories are discovery-only until the plugin
           // has a consumer for them. Do not silently stuff them into the chat
@@ -2465,6 +2477,23 @@ window.__ModuleLoader__.load({
           showTool(t.searchResult, `${t.searchFailed}: ${String(searchError?.message ?? searchError)}`);
         } finally {
           setToolBusy('');
+        }
+      };
+
+      const saveLocalKind = async (model, kind) => {
+        setLocalModelBusy(model.id);
+        setNotice(null);
+        try {
+          await callApi('/local-engine/config', {
+            method: 'POST',
+            body: { model: model.id, kind },
+          });
+          setNotice({ kind: 'ok', text: t.localModelKindSaved });
+          await load('');
+        } catch (kindError) {
+          setNotice({ kind: 'err', text: String(kindError?.message ?? kindError) });
+        } finally {
+          setLocalModelBusy('');
         }
       };
 
@@ -4459,6 +4488,26 @@ window.__ModuleLoader__.load({
                 style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginTop: '3px' },
               },
               h('span', { style: { fontSize: '12.5px' } }, model.label),
+              h('span', { style: styles.hint },
+                `${t.localModelKind}: ${model.kind || t.localModelKindUnknown}`
+                  + (model.kindSource === 'name' ? `（${t.localModelKindByName}）` : '')),
+              category.name === 'Loose'
+                ? h('span', { style: { display: 'flex', gap: '4px' } },
+                  h('button', {
+                    type: 'button',
+                    className: 'aim-btn',
+                    style: { ...styles.button, padding: '1px 7px', fontSize: '11px' },
+                    disabled: localModelBusy === model.id,
+                    onClick: () => saveLocalKind(model, 'Embedding'),
+                  }, t.localModelMarkEmbedding),
+                  h('button', {
+                    type: 'button',
+                    className: 'aim-btn',
+                    style: { ...styles.button, padding: '1px 7px', fontSize: '11px' },
+                    disabled: localModelBusy === model.id,
+                    onClick: () => saveLocalKind(model, 'Rerank'),
+                  }, t.localModelMarkRerank))
+                : null,
               model.runnable
                 ? h('span', { style: { display: 'flex', alignItems: 'center', gap: '4px' } },
                   h('span', { style: styles.hint }, t.localModelCtx),
@@ -4489,7 +4538,8 @@ window.__ModuleLoader__.load({
                         : t.localModelEngineRunning}：${(data?.localEngines ?? []).find((engine) => engine.id === model.id)?.baseUrl ?? ''}`
                     : t.localModelGguf)
                   : (model.configured ? t.localModelReady : (model.error || t.localModelUnconfigured))),
-              (model.runnable || model.configured) && ['Embedding', 'Rerank'].includes(category.name)
+              (model.runnable || model.configured)
+                && (['Embedding', 'Rerank'].includes(category.name) || category.name === 'Loose')
                 ? h('button', {
                   type: 'button',
                   className: 'aim-btn',

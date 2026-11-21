@@ -39,7 +39,7 @@ import { RRF_K, reciprocalRankFusion, search, tokenize } from '../lib/retrieval.
 import { CATEGORIES, hourKey, listJsonlFiles } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
-import { buildServerArgs, findModelFile, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine } from '../lib/local-engine.js';
+import { buildServerArgs, findModelFile, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig } from '../lib/local-engine.js';
 import {
   commitSync, initSync, pullSync, pushSync, readSyncConfig, syncStatus, writeSyncConfig,
   parseGitRemote, probeHost,
@@ -2792,6 +2792,49 @@ test('local engine resolves GGUF files and builds llama.cpp arguments', () => {
     const routingCategory = catalog.categories.find((category) => category.name === 'Routing');
     assert.equal(routingCategory.models[0].runnable, false);
     assert.match(routingCategory.models[0].error, /预留/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('loose GGUF files are classified by name and can be marked by the user', () => {
+  const root = tempRoot();
+  try {
+    const models = path.join(root, 'models');
+    fs.mkdirSync(models, { recursive: true });
+    fs.writeFileSync(path.join(models, 'jina-reranker-v3.5-BF16.gguf'), '');
+    fs.writeFileSync(path.join(models, 'Qwen3-Embedding-4B-Q4_K_M.gguf'), '');
+    fs.writeFileSync(path.join(models, 'mystery-model.gguf'), '');
+
+    const catalog = listLocalModels(models);
+    const loose = catalog.categories.find((category) => category.name === 'Loose');
+    assert.ok(loose);
+    const byName = Object.fromEntries(loose.models.map((model) => [model.folder, model]));
+    assert.equal(byName['jina-reranker-v3.5-BF16.gguf'].kind, 'Rerank');
+    assert.equal(byName['jina-reranker-v3.5-BF16.gguf'].kindSource, 'name');
+    assert.equal(byName['Qwen3-Embedding-4B-Q4_K_M.gguf'].kind, 'Embedding');
+    assert.equal(byName['mystery-model.gguf'].kind, '');
+    assert.equal(byName['mystery-model.gguf'].runnable, false);
+
+    const rerank = resolveModel({ modelsRoot: models, modelId: 'Loose/jina-reranker-v3.5-BF16.gguf' });
+    assert.equal(rerank.ok, true);
+    assert.equal(rerank.model.kind, 'Rerank');
+    assert.ok(buildServerArgs(rerank.model, 19003).includes('--reranking'));
+    const unknown = resolveModel({ modelsRoot: models, modelId: 'Loose/mystery-model.gguf' });
+    assert.equal(unknown.ok, false);
+    assert.match(unknown.error, /标记|Embedding|Rerank/);
+
+    const marked = updateModelConfig({
+      modelsRoot: models,
+      modelId: 'Loose/mystery-model.gguf',
+      kind: 'Embedding',
+    });
+    assert.equal(marked.ok, true);
+    assert.equal(marked.kind, 'Embedding');
+    const after = listLocalModels(models).categories.find((category) => category.name === 'Loose')
+      .models.find((model) => model.folder === 'mystery-model.gguf');
+    assert.equal(after.kind, 'Embedding');
+    assert.equal(after.kindSource, 'user');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
