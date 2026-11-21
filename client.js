@@ -1672,6 +1672,10 @@ window.__ModuleLoader__.load({
       const [openRows, setOpenRows] = React.useState(() => new Set());
       const [listLimit, setListLimit] = React.useState(8);
       const [notice, setNotice] = React.useState(null);
+      // One reminder per panel open: the panel must not nag again after the
+      // user stops an engine on purpose, but a fresh open (or a reloaded page
+      // after a DSH restart) should still say that the model is not running.
+      const engineReminder = React.useRef({ checked: false, text: '' });
       const [formRoot, setFormRoot] = React.useState('');
       const [formDir, setFormDir] = React.useState('.ai-for-memory');
       const [formMode, setFormMode] = React.useState('manual');
@@ -1892,6 +1896,26 @@ window.__ModuleLoader__.load({
       }, [applyScope]);
 
       React.useEffect(() => { load(); }, [load]);
+
+      React.useEffect(() => {
+        if (data == null) return;
+        const reminder = typeof data.localEngineReminder === 'string' ? data.localEngineReminder : '';
+        if (!engineReminder.current.checked) {
+          engineReminder.current.checked = true;
+          if (reminder !== '') {
+            engineReminder.current.text = reminder;
+            setNotice({ kind: 'err', text: reminder });
+          }
+          return;
+        }
+        // The engines caught up (for example, started from another tab or the
+        // CLI): drop the stale line, but never a notice from another action.
+        if (reminder === '' && engineReminder.current.text !== '') {
+          const previous = engineReminder.current.text;
+          engineReminder.current.text = '';
+          setNotice((current) => (current?.text === previous ? null : current));
+        }
+      }, [data]);
 
       const selectedRoot = data?.selectedRoot ?? '';
       const localModelRows = (data?.localModels?.categories ?? [])

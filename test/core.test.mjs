@@ -40,7 +40,7 @@ import { applyDisclosure, RRF_K, reciprocalRankFusion, search, snippetOf, tokeni
 import { CATEGORIES, hourKey, listJsonlFiles } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
-import { buildServerArgs, findModelFile, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig } from '../lib/local-engine.js';
+import { buildServerArgs, findModelFile, missingLocalEngineKinds, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig } from '../lib/local-engine.js';
 import {
   commitSync, initSync, pullSync, pushSync, readSyncConfig, syncStatus, writeSyncConfig,
   parseGitRemote, probeHost,
@@ -2932,6 +2932,52 @@ test('a failed llama-server start reports its stderr and exact command', async (
     await stopAllLocalEngines();
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('the local engine reminder only names runnable llama.cpp kinds that are not running', () => {
+  const models = {
+    categories: [
+      {
+        name: 'Embedding',
+        models: [
+          { kind: 'embedding', runnable: true, engine: 'llama.cpp' },
+          // Not runnable (no weight file): never worth a reminder.
+          { kind: 'embedding', runnable: false, engine: 'llama.cpp' },
+        ],
+      },
+      {
+        name: 'Loose',
+        models: [
+          { kind: 'Rerank', runnable: true, engine: 'llama.cpp' },
+          // Someone else's server owns this endpoint; the plugin must not nudge.
+          { kind: 'Embedding', runnable: true, engine: 'ollama' },
+        ],
+      },
+      { name: 'Routing', models: [{ kind: '', runnable: false }] },
+    ],
+  };
+  // Nothing running: both kinds are reported, lower-cased and sorted.
+  assert.deepEqual(missingLocalEngineKinds(models, []), ['embedding', 'rerank']);
+  // A ready engine covers its kind even when the model spells it differently:
+  // loose GGUFs say `Rerank`, category folders say `rerank`.
+  assert.deepEqual(
+    missingLocalEngineKinds(models, [{ kind: 'Rerank', ready: true }]),
+    ['embedding'],
+  );
+  assert.deepEqual(
+    missingLocalEngineKinds(models, [
+      { kind: 'embedding', ready: true },
+      { kind: 'Rerank', ready: true },
+    ]),
+    [],
+  );
+  // A stopped engine is not ready; the reminder comes back.
+  assert.deepEqual(
+    missingLocalEngineKinds(models, [{ kind: 'embedding', ready: false }]),
+    ['embedding', 'rerank'],
+  );
+  // Cloud-only setups have no local models: stay silent.
+  assert.deepEqual(missingLocalEngineKinds({ categories: [] }, []), []);
 });
 
 test('a live llama-server from the previous plugin process is adopted', async () => {
