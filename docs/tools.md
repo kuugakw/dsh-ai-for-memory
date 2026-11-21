@@ -96,9 +96,10 @@ JSON 导出保留 `provenance`、`verified`、`changes`、`confidence`、`eviden
 | `query` | 检索词或自然语言问题，必填 |
 | `scope` | `all`（默认）/ `session` / `shared` |
 | `route` | `auto`（默认）/ `sql` / `vector` / `hybrid` |
-| `mode` | `bm25` / `vector` / `hybrid`（默认） |
+| `mode` | `bm25` / `vector` / `hybrid`（默认，按排名融合） |
 | `category` | 只搜某个分类 |
 | `top_k` | 返回条数，默认 5，最大 50 |
+| `detail` | `summary`（默认，查询附近摘要 + 全文长度）/ `full`（完整正文） |
 
 它会自动选择通道：
 

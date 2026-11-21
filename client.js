@@ -41,6 +41,8 @@ window.__ModuleLoader__.load({
         diagWritable: '记忆目录可写',
         diagGitignore: 'gitignore 保护',
         diagStorage: '磁盘占用',
+        diagSessionRepair: '会话日志修复',
+        diagValidator: '校验器',
         diagUsage: '知识命中与权重',
         diagUsageHint: '按权重从低到高排列；权重 0 表示本对话从未命中，可能是死条目。',
         diagHits: '命中',
@@ -70,6 +72,8 @@ window.__ModuleLoader__.load({
         diagSessionLogRepair: '修复',
         diagSessionLogCompact: '重排帧',
         diagSessionLogRepairConfirm: '确认修复',
+        diagSessionLogRepairConfirmDropped: '确认修复（将丢弃 {n} 条事件）',
+        diagSessionLogCompactConfirm: '确认压缩',
         diagSessionLogBusy: '处理中…',
         diagSessionLogNoLogs: '没有找到会话日志。',
         diagSessionLogOk: '正常',
@@ -86,6 +90,7 @@ window.__ModuleLoader__.load({
         sessionLogAllOk: '全部正常，没有需要处理的日志。',
         sessionLogDanger: '上次会话可能未正常关闭，建议先恢复上下文存档；不要直接继续写入旧对话。',
         sessionLogShallowWarning: '当前只读了文件头，无法确认帧序是否闭合；请点「深度体检」。',
+        sessionLogUnavailable: '会话日志修复需要 Node 22.15+；当前 Node 不支持 zstd。',
         sessionLogOversizedWarning: '日志结构正常，但体积/事件数异常偏大；可以「重排帧」缩小，不需要截断历史。',
         sessionLogIdle: '点击「快速扫描」检查会话日志；「深度体检」会解压并逐条校验事件。',
         sessionLogOpenDiagnostics: '在诊断页查看全部',
@@ -256,6 +261,11 @@ window.__ModuleLoader__.load({
         localModelStopConfirm: '停止这个本地引擎？正在使用它的请求会失败。',
         localModelStopped: '本地引擎已停止',
         localModelStopFailed: '停止本地引擎失败',
+        localModelCtx: '上下文 ctx-size',
+        localModelCtxHint: 'embedding 输入很短，ctx-size 过大会预分配一份常驻 KV cache；按模型能力调小，保存后重启引擎生效。',
+        localModelCtxSave: '保存 ctx',
+        localModelCtxSaved: 'ctx-size 已保存；重启本地引擎后生效。',
+        localModelCtxInvalid: 'ctx-size 必须是 256~131072 的整数。',
         localModelStale: '模型配置已变更，旧引擎不再复用；请先停止引擎，再重新启动。',
         localModelDiagnostics: '启动失败诊断（llama-server stderr）',
         localModelApplied: '已填入模型地址；确认后点「保存设置」。',
@@ -478,8 +488,9 @@ window.__ModuleLoader__.load({
         mcpEnabledLabel: '启用 MCP 出口',
         mcpUrlLabel: 'MCP 地址',
         mcpTokenLabel: '访问令牌（可选）',
-        mcpTokenSaved: '已设置，留空保持不变，填 - 清除',
-        mcpTokenNone: '未设置；只靠回环地址保护',
+        mcpTokenSaved: '已设置，留空或填 - 切回自动令牌',
+        mcpTokenNone: '未设置；将自动生成到本机文件',
+        mcpTokenAuto: '自动令牌文件',
         autoMode: '自动整理',
         switchOn: '开',
         switchOff: '关',
@@ -531,6 +542,8 @@ window.__ModuleLoader__.load({
         diagWritable: 'Memory directory writable',
         diagGitignore: 'gitignore protection',
         diagStorage: 'Disk use',
+        diagSessionRepair: 'Session-log repair',
+        diagValidator: 'Validator',
         diagUsage: 'Knowledge hits and weights',
         diagUsageHint: 'Lowest weight first; 0 means never used in this conversation and may be dead.',
         diagHits: 'Hits',
@@ -560,6 +573,8 @@ window.__ModuleLoader__.load({
         diagSessionLogRepair: 'Repair',
         diagSessionLogCompact: 'Re-frame',
         diagSessionLogRepairConfirm: 'Confirm repair',
+        diagSessionLogRepairConfirmDropped: 'Confirm repair (drops {n} events)',
+        diagSessionLogCompactConfirm: 'Confirm compaction',
         diagSessionLogBusy: 'Working…',
         diagSessionLogNoLogs: 'No session log found.',
         diagSessionLogOk: 'ok',
@@ -576,6 +591,7 @@ window.__ModuleLoader__.load({
         sessionLogAllOk: 'All normal — nothing to repair.',
         sessionLogDanger: 'The last session may not have closed cleanly. Restore a context archive before writing into it again.',
         sessionLogShallowWarning: 'Only file headers were read; frame closure is not verified. Run "Deep check".',
+        sessionLogUnavailable: 'Session-log repair needs Node 22.15+; this Node has no zstd support.',
         sessionLogOversizedWarning: 'The log is structurally valid but unusually large. "Re-frame" can shrink it without truncating history.',
         sessionLogIdle: 'Click "Quick scan" to check session logs; "Deep check" decompresses and validates every event.',
         sessionLogOpenDiagnostics: 'Open full list in Diagnostics',
@@ -746,6 +762,11 @@ window.__ModuleLoader__.load({
         localModelStopConfirm: 'Stop this local engine? In-flight requests using it will fail.',
         localModelStopped: 'Local engine stopped',
         localModelStopFailed: 'Failed to stop local engine',
+        localModelCtx: 'Context ctx-size',
+        localModelCtxHint: 'Embedding inputs are short; a large ctx-size reserves a permanent KV cache. Lower it to the model’s actual need; restart the engine after saving.',
+        localModelCtxSave: 'Save ctx',
+        localModelCtxSaved: 'ctx-size saved; restart the local engine to apply.',
+        localModelCtxInvalid: 'ctx-size must be an integer from 256 to 131072.',
         localModelStale: 'The model configuration changed, so the old engine was not reused. Stop it and start again.',
         localModelDiagnostics: 'Startup diagnostics (llama-server stderr)',
         localModelApplied: 'Model address filled; click "Save settings" to apply.',
@@ -968,8 +989,9 @@ window.__ModuleLoader__.load({
         mcpEnabledLabel: 'Enable MCP egress',
         mcpUrlLabel: 'MCP URL',
         mcpTokenLabel: 'Access token (optional)',
-        mcpTokenSaved: 'Stored; leave empty to keep, enter - to clear',
-        mcpTokenNone: 'Not set; loopback address is the only guard',
+        mcpTokenSaved: 'Stored; leave empty or enter - to use the automatic token',
+        mcpTokenNone: 'Not set; a token is generated in a local file',
+        mcpTokenAuto: 'Automatic token file',
         autoMode: 'Auto tidy',
         switchOn: 'On',
         switchOff: 'Off',
@@ -1575,6 +1597,7 @@ window.__ModuleLoader__.load({
       const [sessionLogScan, setSessionLogScan] = React.useState(null);
       const [sessionLogBusy, setSessionLogBusy] = React.useState('');
       const [sessionLogArmed, setSessionLogArmed] = React.useState('');
+      const [sessionLogPreview, setSessionLogPreview] = React.useState(null);
       const [sessionLogResult, setSessionLogResult] = React.useState('');
       const [snapshotCompare, setSnapshotCompare] = React.useState({ left: '', right: '', result: null, error: '' });
       // Knowledge filters and multi-select. Filters operate on the rows already
@@ -1634,6 +1657,7 @@ window.__ModuleLoader__.load({
       const [formMcpEnabled, setFormMcpEnabled] = React.useState(true);
       const [formMcpToken, setFormMcpToken] = React.useState('');
       const [mcpHasToken, setMcpHasToken] = React.useState(false);
+      const [mcpTokenFile, setMcpTokenFile] = React.useState('');
       const [ragIndex, setRagIndex] = React.useState({
         built: false, docs: 0, considered: 0, truncated: 0, deduped: 0, dim: 0, model: '', built_at: '',
       });
@@ -1665,6 +1689,7 @@ window.__ModuleLoader__.load({
       const [formPreset, setFormPreset] = React.useState('custom');
       const [externalProbing, setExternalProbing] = React.useState(false);
       const [localModelBusy, setLocalModelBusy] = React.useState('');
+      const [localCtxDrafts, setLocalCtxDrafts] = React.useState({});
       const [externalStatus, setExternalStatus] = React.useState('');
       const [formArchiveExternal, setFormArchiveExternal] = React.useState(false);
       const [formKnowledgeExternal, setFormKnowledgeExternal] = React.useState(false);
@@ -1739,6 +1764,7 @@ window.__ModuleLoader__.load({
           if (typeof payload.ragMount === 'boolean') setFormRagMount(payload.ragMount);
           if (typeof payload.mcpEnabled === 'boolean') setFormMcpEnabled(payload.mcpEnabled);
           setMcpHasToken(payload.mcpHasToken === true);
+          setMcpTokenFile(typeof payload.mcpTokenFile === 'string' ? payload.mcpTokenFile : '');
           setFormMcpToken('');
           if (payload.ragIndex && typeof payload.ragIndex === 'object') setRagIndex(payload.ragIndex);
           if (payload.knowledgeBackend === 'sqlite' || payload.knowledgeBackend === 'json') {
@@ -1999,9 +2025,7 @@ window.__ModuleLoader__.load({
         // The config editor reconciles the profile before /config resolves, so
         // the next state read normally shows the new values. Poll briefly anyway:
         // a slow reload must not leave the panel displaying stale settings.
-        const expectedHasToken = body.mcpToken === ''
-          ? mcpHasToken
-          : body.mcpToken !== '-';
+        const expectedHasToken = true;
         const configMatches = (payload) => Boolean(payload)
           && payload.fixedRoot === body.root
           && payload.directoryName === body.directoryName
@@ -2444,6 +2468,33 @@ window.__ModuleLoader__.load({
         }
       };
 
+      const saveLocalCtx = async (model) => {
+        const value = Number(localCtxDrafts[model.id] ?? (model.ctxSize > 0 ? model.ctxSize : 2048));
+        if (!Number.isInteger(value) || value < 256 || value > 131072) {
+          setNotice({ kind: 'err', text: t.localModelCtxInvalid });
+          return;
+        }
+        setLocalModelBusy(model.id);
+        setNotice(null);
+        try {
+          await callApi('/local-engine/config', {
+            method: 'POST',
+            body: { model: model.id, ctxSize: value },
+          });
+          setLocalCtxDrafts((prev) => {
+            const next = { ...prev };
+            delete next[model.id];
+            return next;
+          });
+          setNotice({ kind: 'ok', text: t.localModelCtxSaved });
+          await load('');
+        } catch (ctxError) {
+          setNotice({ kind: 'err', text: String(ctxError?.message ?? ctxError) });
+        } finally {
+          setLocalModelBusy('');
+        }
+      };
+
       const stopLocalEngine = async (model) => {
         if (typeof window !== 'undefined' && !window.confirm(t.localModelStopConfirm)) return;
         setLocalModelBusy(model.id);
@@ -2697,18 +2748,16 @@ window.__ModuleLoader__.load({
           .catch(() => {});
         return () => { cancelled = true; };
       }, [isDiagnostics, selectedRoot]);
-      // The overview card runs a deep check on the newest few logs, including
-      // the live conversation; a shallow header read cannot prove the frame
-      // sequence is closed. The diagnostics page can still scan everything.
+      // Overview only needs the cheap header scan; the deep validator is an
+      // explicit diagnostics action because it can inflate large logs.
       React.useEffect(() => {
+        if (!isOverview) return undefined;
         let cancelled = false;
-        void callApi('/session-logs?deep=1&limit=3')
-          .then((payload) => {
-            if (!cancelled) setSessionLogScan((prev) => prev ?? (payload ?? null));
-          })
+        void callApi('/session-logs?deep=0&limit=20')
+          .then((payload) => { if (!cancelled) setSessionLogScan(payload ?? null); })
           .catch(() => {});
         return () => { cancelled = true; };
-      }, []);
+      }, [isOverview, selectedRoot]);
       React.useEffect(() => {
         if (!isSettings || settingsSection !== 'network' || selectedRoot === '') return undefined;
         let cancelled = false;
@@ -3281,6 +3330,9 @@ window.__ModuleLoader__.load({
                   head: [
                     h('span', { key: 'id', style: { fontWeight: 600 } }, doc.doc_id),
                     h('span', { key: 'cat', style: badgeStyle('pending') }, doc.category),
+                    doc.source === 'mcp'
+                      ? h('span', { key: 'mcp', style: { ...badgeStyle('pending'), background: '#eef2ff', color: '#4338ca' } }, 'MCP')
+                      : null,
                     (doc.changes_count ?? 0) > 0
                       ? h('span', {
                         key: 'updated',
@@ -3579,9 +3631,11 @@ window.__ModuleLoader__.load({
       ];
       const loadSessionLogs = async (deep) => {
         setSessionLogBusy(deep ? 'deep' : 'scan');
+        setSessionLogPreview(null);
+        setSessionLogArmed('');
         setSessionLogResult('');
         try {
-          const payload = await callApi(`/session-logs?deep=${deep ? '1' : '0'}`);
+          const payload = await callApi(`/session-logs?deep=${deep ? '1' : '0'}${deep ? '&limit=20' : ''}`);
           setSessionLogScan(payload ?? null);
         } catch (scanError) {
           setNotice({ kind: 'err', text: String(scanError?.message ?? scanError) });
@@ -3589,19 +3643,33 @@ window.__ModuleLoader__.load({
           setSessionLogBusy('');
         }
       };
-      const runSessionLogRepair = async (file, compact = false) => {
-        setSessionLogArmed('');
-        setSessionLogBusy('repair');
+      const runSessionLogRepair = async (file, compact = false, apply = false) => {
+        setSessionLogBusy(apply ? 'repair' : 'preview');
         setSessionLogResult('');
         try {
           const payload = await callApi('/session-logs/repair', {
             method: 'POST',
-            body: { session: file, compact, apply: true },
+            body: { session: file, compact, apply },
           });
+          const report = payload?.report ?? {};
+          if (!apply) {
+            setSessionLogPreview({
+              file,
+              text: String(payload?.text ?? ''),
+              dropped: Number.isInteger(report.dropped) ? report.dropped : null,
+              strategy: report.strategy ?? (compact ? 'compact' : 'auto'),
+            });
+            setSessionLogArmed(file);
+            return;
+          }
+          setSessionLogArmed('');
+          setSessionLogPreview(null);
           setSessionLogResult(String(payload?.text ?? t.diagSessionLogOk));
           await loadSessionLogs(true);
         } catch (repairError) {
           setSessionLogResult(String(repairError?.message ?? repairError));
+          setSessionLogArmed('');
+          setSessionLogPreview(null);
         } finally {
           setSessionLogBusy('');
         }
@@ -3618,9 +3686,17 @@ window.__ModuleLoader__.load({
         const oversized = row.status === 'ok' && Array.isArray(row.anomalies) && row.anomalies.includes('oversized');
         const actionable = broken || oversized;
         const armed = sessionLogArmed === row.file;
+        const preview = sessionLogPreview && sessionLogPreview.file === row.file ? sessionLogPreview : null;
         const sizeText = row.logicalBytes === null || row.logicalBytes === undefined
           ? formatBytes(row.physicalBytes)
           : `${formatBytes(row.logicalBytes)} / ${formatBytes(row.physicalBytes)}`;
+        const confirmText = preview
+          ? (preview.strategy === 'compact'
+            ? t.diagSessionLogCompactConfirm
+            : (preview.strategy === 'salvage'
+              ? t.diagSessionLogRepairConfirm
+              : t.diagSessionLogRepairConfirmDropped.replace('{n}', String(preview.dropped ?? 0))))
+          : null;
         return h('div', {
           key: row.file,
           style: {
@@ -3642,10 +3718,12 @@ window.__ModuleLoader__.load({
           style: { ...styles.button, padding: '1px 7px', fontSize: '11px', marginLeft: 'auto' },
           disabled: sessionLogBusy !== '' || !actionable,
           onClick: () => {
-            if (sessionLogArmed === row.file) void runSessionLogRepair(row.file, oversized && !broken);
-            else setSessionLogArmed(row.file);
+            if (armed && preview) void runSessionLogRepair(row.file, oversized && !broken, true);
+            else void runSessionLogRepair(row.file, oversized && !broken, false);
           },
-        }, armed ? t.diagSessionLogRepairConfirm : (oversized && !broken ? t.diagSessionLogCompact : t.diagSessionLogRepair)));
+        }, preview
+          ? confirmText
+          : (oversized && !broken ? t.diagSessionLogCompact : t.diagSessionLogRepair)));
       };
       /**
        * One card shared by the overview (compact: only problems) and the
@@ -3655,6 +3733,7 @@ window.__ModuleLoader__.load({
       const sessionLogCard = (compact) => {
         const scan = sessionLogScan;
         const logs = Array.isArray(scan?.logs) ? scan.logs : [];
+        const unavailable = scan?.unavailable === true;
         const shallow = scan !== null && scan?.deep !== true;
         const actionable = logs.filter((row) => row.status === 'corrupt' || row.status === 'unreadable'
           || (Array.isArray(row.anomalies) && row.anomalies.includes('torn-tail'))
@@ -3682,6 +3761,13 @@ window.__ModuleLoader__.load({
               compact ? t.sessionLogTitle : t.diagSessionLogs),
             h('span', { style: { ...styles.hint, marginLeft: 'auto', color: danger ? colors.error : undefined } }, summary)),
           h('p', { style: styles.hint }, compact ? t.sessionLogHint : t.diagSessionLogsHint),
+          scan?.deep === true && scan?.validator?.note
+            ? h('p', { style: { ...styles.hint, marginTop: 0 } },
+              `${t.diagValidator}: ${scan.validator.note}`)
+            : null,
+          unavailable
+            ? h('p', { style: { color: colors.error, fontWeight: 600, margin: '4px 0' } }, scan.error ?? t.sessionLogUnavailable)
+            : null,
           danger
             ? h('p', { style: { color: colors.error, fontWeight: 600, margin: '4px 0' } }, t.sessionLogDanger)
             : (shallow
@@ -3696,14 +3782,14 @@ window.__ModuleLoader__.load({
               type: 'button',
               className: 'aim-btn',
               style: styles.button,
-              disabled: sessionLogBusy !== '',
+              disabled: sessionLogBusy !== '' || unavailable,
               onClick: () => loadSessionLogs(false),
             }, sessionLogBusy === 'scan' ? t.diagSessionLogBusy : t.diagSessionLogScan),
             h('button', {
               type: 'button',
               className: 'aim-btn',
               style: styles.button,
-              disabled: sessionLogBusy !== '',
+              disabled: sessionLogBusy !== '' || unavailable,
               onClick: () => loadSessionLogs(true),
             }, sessionLogBusy === 'deep' ? t.diagSessionLogBusy : t.diagSessionLogDeep),
             compact
@@ -3721,6 +3807,11 @@ window.__ModuleLoader__.load({
             ? h('pre', {
               style: { ...styles.pre, maxHeight: '200px', overflow: 'auto', whiteSpace: 'pre-wrap', marginBottom: '6px' },
             }, sessionLogResult)
+            : null,
+          sessionLogPreview && sessionLogPreview.text !== ''
+            ? h('pre', {
+              style: { ...styles.pre, maxHeight: '200px', overflow: 'auto', whiteSpace: 'pre-wrap', marginBottom: '6px', borderColor: colors.warning ?? '#b45309' },
+            }, sessionLogPreview.text)
             : null,
           !scan
             ? h(Empty, { text: t.sessionLogIdle })
@@ -3916,6 +4007,9 @@ window.__ModuleLoader__.load({
         [t.diagWritable, diag.writable === true ? t.diagAvailable : t.diagUnavailable],
         [t.diagGitignore, diag.gitignore?.state ?? '—'],
         [t.diagStorage, formatBytes(diag.storage?.totalBytes ?? 0)],
+        [t.diagSessionRepair, diag.sessionRepairAvailable === true
+          ? t.diagAvailable
+          : `${t.diagUnavailable}（${diag.sessionRepairNeed ?? 'Node 22.15+'}，当前 ${diag.node ?? '?'}）`],
       ];
       const diagUsage = Array.isArray(diag.usage) ? diag.usage : [];
       const diagConversations = Array.isArray(diag.conversations) ? diag.conversations : [];
@@ -4365,6 +4459,26 @@ window.__ModuleLoader__.load({
                 style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginTop: '3px' },
               },
               h('span', { style: { fontSize: '12.5px' } }, model.label),
+              model.runnable
+                ? h('span', { style: { display: 'flex', alignItems: 'center', gap: '4px' } },
+                  h('span', { style: styles.hint }, t.localModelCtx),
+                  h('input', {
+                    style: { ...styles.input, width: '78px', padding: '2px 5px', fontSize: '11.5px' },
+                    type: 'number',
+                    min: 256,
+                    max: 131072,
+                    step: 256,
+                    value: localCtxDrafts[model.id] ?? (model.ctxSize > 0 ? model.ctxSize : 2048),
+                    onChange: (event) => setLocalCtxDrafts((prev) => ({ ...prev, [model.id]: event.target.value })),
+                  }),
+                  h('button', {
+                    type: 'button',
+                    className: 'aim-btn',
+                    style: { ...styles.button, padding: '1px 7px', fontSize: '11px' },
+                    disabled: localModelBusy === model.id,
+                    onClick: () => saveLocalCtx(model),
+                  }, t.localModelCtxSave))
+                : null,
               h('span', { style: styles.hint },
                 model.runnable
                   ? ((data?.localEngines ?? []).find((engine) => engine.id === model.id)?.ready
@@ -5135,7 +5249,10 @@ window.__ModuleLoader__.load({
               value: formMcpToken,
               placeholder: mcpHasToken ? t.mcpTokenSaved : t.mcpTokenNone,
               onChange: (event) => setFormMcpToken(event.target.value),
-            }))),
+            })),
+          mcpTokenFile
+            ? h('p', { style: styles.hint }, `${t.mcpTokenAuto}: ${mcpTokenFile}`)
+            : null),
           h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' } },
             h('button', {
               type: 'button',

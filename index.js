@@ -28,6 +28,7 @@ import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
 import { defaultRegistryDir, listRootRows, rememberRoot } from './lib/registry.js';
 import { installApi } from './lib/api.js';
 import { restoreLocalEngines, stopAllLocalEngines } from './lib/local-engine.js';
+import { ensureMcpToken } from './lib/mcp-token.js';
 import { collectTurnDigest } from './lib/auto.js';
 import {
   buildContextSnapshot, collectTurns, formatRestoreContext, snapshotOfTurns,
@@ -53,7 +54,7 @@ import {
   buildRagIndex, embeddingIdentity, RAG_DEFAULTS, ragCandidates, ragModelStatus, ragStats, rerankCandidates,
 } from './lib/rag.js';
 import { writeExportArtifacts } from './lib/export.js';
-import { RRF_K, reciprocalRankFusion } from './lib/retrieval.js';
+import { RRF_K, applyDisclosure, reciprocalRankFusion } from './lib/retrieval.js';
 import { USAGE_BOOST, boostScore, weightLabel } from './lib/usage.js';
 import {
   formatSqlResult, routeKnowledgeQuery, runSqlQuery,
@@ -630,11 +631,12 @@ function foldDuplicateHits(rows, topK) {
   };
 }
 
-function formatHits(query, hits, mode, folded = 0) {
+function formatHits(query, hits, mode, folded = 0, detail = 'summary') {
   if (hits.length === 0) return `没有命中「${query}」的知识文档（mode=${mode}）。`;
   const claimCount = hits.filter((hit) => hit.unverified === true).length;
   const lines = [`命中 ${hits.length} 条（mode=${mode}`
-    + (folded > 0 ? `，已折叠跨来源重复 ${folded} 条` : '') + '）：'];
+    + (folded > 0 ? `，已折叠跨来源重复 ${folded} 条` : '')
+    + (detail === 'full' ? '，全文' : '，摘要；需要全文用 detail=full') + '）：'];
   if (claimCount > 0) {
     lines.push(`⚠ 其中 ${claimCount} 条是模型自述（未经用户确认），已降权；不要把它们当作项目事实。`);
   }
@@ -665,7 +667,10 @@ function formatHits(query, hits, mode, folded = 0) {
       + (hit.source && hit.source !== 'unknown' ? `｜知识来源：${hit.source}` : '')
       + (hit.origin_label ? `｜对话：${hit.origin_label}` : '')
       + seeAlso);
-    lines.push(`   ${clip(hit.text, 320)}`);
+    lines.push(`   ${hit.text}`);
+    if (detail !== 'full' && hit.text_truncated === true) {
+      lines.push(`   （全文 ${hit.text_chars ?? '?'} 字，已折叠为摘要）`);
+    }
   });
   return lines.join('\n');
 }
@@ -703,9 +708,7 @@ function rankChannelWithPriors(rows, weights, owner = null) {
     const confidence = Number.isFinite(row.confidence)
       ? Math.min(1, Math.max(0, row.confidence))
       : 0.8;
-    const prior = (1 + USAGE_BOOST * usage)
-      * (unverified ? 0.35 : 1)
-      * (0.85 + 0.15 * confidence);
+    const prior = 1 + USAGE_BOOST * usage;
     const base = Number.isFinite(row.local_score) ? row.local_score : (Number.isFinite(row.score) ? row.score : 0);
     return {
       ...row,
@@ -726,6 +729,7 @@ function localRrfRows(sources, query, options = {}) {
       category: options.category ?? null,
       mode: 'bm25',
       topK: 40,
+      detail: 'full',
     });
     // `hit.score` already carries confidence/unverified penalties from local
     // retrieval. Use the raw BM25 component here; the channel prior applies
@@ -876,12 +880,20 @@ export async function searchWithRag(config, sources, query, options = {}) {
     { name: 'local', rows: localChannel },
   ], { k: RRF_K });
   const ranked = fused
-    .map((row) => ({
-      ...row,
-      // Pure RRF order: no multiplier here, so the printed RRF and the printed
-      // channel ranks are the same ordering the user sees.
-      score: row.rrf_score,
-    }))
+    .map((row) => {
+      const confidence = Number.isFinite(row.confidence)
+        ? Math.min(1, Math.max(0, row.confidence))
+        : 0.8;
+      const prior = (0.85 + 0.15 * confidence) * (row.unverified === true ? 0.35 : 1);
+      return {
+        ...row,
+        // RRF consumes ranks, so priors that must survive fusion are applied
+        // after it. Keep `rrf_score` pristine for display/debugging; `score` is
+        // the final ordering with confidence and unverified penalties restored.
+        score: row.rrf_score * prior,
+        post_rrf_prior: prior,
+      };
+    })
     .sort((left, right) => right.score - left.score);
   if (ranked.length === 0) {
     return {
@@ -891,9 +903,11 @@ export async function searchWithRag(config, sources, query, options = {}) {
     };
   }
   const topK = Number.isInteger(options.topK) && options.topK > 0 ? options.topK : config.defaultTopK;
+  const detail = options.detail === 'full' ? 'full' : 'summary';
   const { hits, folded } = foldDuplicateHits(ranked, topK);
+  const disclosed = applyDisclosure(hits, query, detail);
   if (callerStore && typeof callerStore.recordKnowledgeUsage === 'function') {
-    const ownedHits = hits.filter((hit) => callerOwner === null || (
+    const ownedHits = disclosed.filter((hit) => callerOwner === null || (
       (hit.origin_key ?? '') === (callerOwner.key ?? '')
       && (hit.origin_scope ?? 'session') === (callerOwner.scope ?? 'session')
     ));
@@ -904,7 +918,7 @@ export async function searchWithRag(config, sources, query, options = {}) {
     ok: true,
     empty: false,
     text: `检索方式：RRF 融合（${channelSummary}）｜${covers}\n`
-      + formatHits(query, hits, 'rrf', folded)
+      + formatHits(query, disclosed, 'rrf', folded, detail)
       + '\n（RAG 索引会按语义去重；被索引去重掉的旧文档仍由本地 BM25 通道带回，不再出现“知识库里有、RAG 里没有”的两套结论。'
       + 'RAG#/BM25# 是通道内先按使用率、确认状态和置信度重排后的名次；RRF 只融合名次，最终分不再乘先验。'
       + '关闭「RAG 挂载」则只走本地 BM25。）',
@@ -1718,6 +1732,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         + '回答时不得把它当作项目已知事实，必要时向用户确认。'
         + '默认跨对话检索本对话、已打开的其他对话与共享层，结果逐条标注来源对话；'
         + '同一事实在多处各存一份时，合并后会折叠成一条（保留最高分，其他来源写成「另见」），不重复占 top_k。'
+        + '默认每条只返回查询附近的摘要和全文长度；需要全文时传 detail=full，不要为了浏览而一次性倾倒整篇知识。'
         + '未打开的对话不可见（默认新建对话不开放，需在面板逐个打开）。'
         + '需要历史约定、先前决策、错误修复记录或界面事实时先检索，不要凭空猜测。',
       parameters: {
@@ -1748,13 +1763,18 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         mode: {
           type: 'string',
           enum: ['bm25', 'vector', 'hybrid'],
-          description: '检索模式，默认 hybrid（0.6 BM25 + 0.4 余弦）。',
+          description: '检索模式，默认 hybrid（BM25 与哈希向量按排名融合）；bm25 / vector 可单独使用。',
         },
         top_k: {
           type: 'integer',
           minimum: 1,
           maximum: 50,
           description: `返回条数，默认 ${config.defaultTopK}。`,
+        },
+        detail: {
+          type: 'string',
+          enum: ['summary', 'full'],
+          description: '默认 summary=返回查询附近摘要和全文长度；full=返回完整正文（显式请求才用，避免一次性占满上下文）。',
         },
       },
       output: TEXT_OUTPUT,
@@ -1769,6 +1789,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         const query = String(args?.query ?? '').trim();
         if (query === '') throw new Error('query 必须为非空字符串');
         const mode = args?.mode ?? 'hybrid';
+        const detail = args?.detail === 'full' ? 'full' : 'summary';
         const scope = ['all', 'session', 'shared'].includes(args?.scope) ? args.scope : 'all';
         const context = memoryContext(config, exec, deps, runtime);
         const sources = memorySources(context, scope);
@@ -1820,6 +1841,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
               category: args?.category ?? null,
               mode,
               topK: Math.max(topK, 10),
+              detail: 'full',
             });
             // BM25 scores are not comparable across stores because each store's
             // corpus and document frequency differ. Normalize within the store
@@ -1849,15 +1871,16 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           // own dedupe gate cannot see the others, so without this one sentence
           // repeated in N conversations spends N top_k slots.
           const { hits, folded } = foldDuplicateHits(merged, topK);
+          const disclosed = applyDisclosure(hits, query, detail);
           // A returned hit counts as "used" for the caller's conversation, which
           // lifts it on later searches here (and only here).
           if (typeof callerStore.recordKnowledgeUsage === 'function') {
-            callerStore.recordKnowledgeUsage(hits.filter(ownedHit).map((hit) => hit.doc_id));
+            callerStore.recordKnowledgeUsage(disclosed.filter(ownedHit).map((hit) => hit.doc_id));
           }
           return {
             empty: false,
             text: `检索范围：${sources.map((source) => source.label).join(' + ')}`
-              + '（排序含本对话最近使用权重）\n' + formatHits(query, hits, mode, folded),
+              + '（排序含本对话最近使用权重）\n' + formatHits(query, disclosed, mode, folded, detail),
           };
         };
 
@@ -1872,6 +1895,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             category: args?.category ?? null,
             store: callerStore,
             owner: callerOwner,
+            detail,
           });
           if (rag.ok === true) {
             picked = { empty: rag.empty === true, text: rag.text };
@@ -2369,11 +2393,12 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         'DSH 会话日志体检与修复。DSH 把每个对话写成 session.v<N>.jsonl.zstd（多段 zstd 帧），'
         + '其中一条事件结构不合规就会让整个对话打不开（stored log is corrupt / SessionFormatError），'
         + '而 DSH 自身没有删除或修复接口。'
-        + 'scan=列出 <DSH_HOME>/sessions 下的会话日志，报告物理/逻辑大小、事件数、是否结构损坏、是否异常膨胀；'
+        + 'scan=列出 <DSH_HOME>/sessions 下的会话日志，默认只读文件头；deep=true 才异步解压并逐事件校验；'
         + 'repair=修复一份日志：先备份原文件，再优先把旧版插件写入的游离 developer 便条改写成等价的 user 便条'
         + '（保留全部历史），否则截断到第一处损坏之前并用 DSH 自带的合成收尾事件补全回合；'
         + 'compact=对结构有效但物理体积异常膨胀的日志重排 zstd 帧（事件一个不改）；'
         + '默认只预演，apply=true 才写回。修完要重新打开该对话才会重新加载。'
+        + '会话日志修复依赖 Node 22.15+ 的 zstd；Node 20 上其余功能正常，诊断页会显示不可用及校验器回退原因。'
         + '不要修复当前正在进行的对话。',
       parameters: {
         action: {
@@ -3423,6 +3448,7 @@ export function apply(ctx, config) {
     editor = undefined;
   }
   try {
+    const mcpAccess = ensureMcpToken(registryDir, resolved.mcpToken);
     installApi(ctx, {
       config: resolved,
       entry: ctx?.fiber?.entry,
@@ -3433,6 +3459,8 @@ export function apply(ctx, config) {
       runMcpTool,
       listMcpRoots,
       version: '0.3.0',
+      mcpToken: mcpAccess.token,
+      mcpTokenFile: mcpAccess.file,
     });
   } catch (error) {
     // eslint-disable-next-line no-console

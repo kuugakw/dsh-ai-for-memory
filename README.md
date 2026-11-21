@@ -170,7 +170,7 @@ aim_memory action=status
 
 ## 检索与知识库
 
-- **本地检索**：BM25 + 128 维哈希向量 + 混合；
+- **本地检索**：BM25 + 128 维哈希向量，用排名融合；索引/向量按文档签名缓存；默认每条只返回摘要，`detail=full` 才取全文；
 - **SQL 通道**：计数、分组、精确 id、最近 N 条等问题走只读 SQL；
 - **RAG**：配置 Embedding 和 Rerank 后，可把语义索引挂到检索上，再用 RRF 与 BM25 融合；
 - **知识库**：九类、来源、确认状态、冲突/更新闸门、完整 JSON 文档形状。
@@ -185,6 +185,8 @@ aim_memory action=status
 
 安全边界、API Key 处理、跨对话开放和 DNS rebinding 防护见 [隐私与安全](docs/security.md)。常见问题见 [FAQ](docs/faq.md)。
 
+**MCP 出口默认开启**，只绑定 DSH 的 loopback 监听器；它是独立于浏览器会话的本地 HTTP 入口，因此默认生成 `$DSH_HOME/ai-for-memory/mcp-token`，所有 MCP 请求都必须带 `Authorization: Bearer`。MCP 的 `aim_remember` 固定写共享层并标记 `source: mcp`，仍按模型自述处理。不需要时请在面板关闭 MCP 开关。
+
 ---
 
 ## 更新内容
@@ -196,7 +198,7 @@ aim_memory action=status
 - **诊断/用量页**：运行环境、知识命中与权重、对话磁盘占用、批量开放/关闭和面板操作审计集中在一页；
 - 知识页支持**分类/来源/确认状态筛选**、**时间/置信度/命中次数/权重排序**、**批量确认**与**撤销确认**；
 - 知识、上下文和快照条目可直接**打开 JSON / 下载全文**；context 可**导出 Markdown**，快照可**恢复/并排对比**；
-- **会话日志体检与修复**：总览对最近日志做深度体检，发现结构损坏或帧未闭合时红字提示先恢复上下文；诊断页可扫描/修复/重排 DSH 的 `session.v4.jsonl.zstd`；
+- **会话日志体检与修复**：总览默认只做快速头部扫描，深度体检需显式点击（异步 zstd、mtime+size 缓存）；诊断页可扫描/修复/重排 DSH 的 `session.v4.jsonl.zstd`，并显示校验器来源和降级原因；
 - 总览补齐六层卡片，并显示 tokenMeter 的**实时上下文占用**（阈值单独保留）；
 - **MCP 出口**：本机 MCP 客户端可列出记忆根并调用现有 `aim_*` 工具；
 - 上下文占用达到阈值时的**全量硬重置**与任务续接；
@@ -214,7 +216,7 @@ aim_memory action=status
 
 ## 开发与测试
 
-要求 Node.js 20+。
+要求 Node.js 20+。会话日志体检/修复依赖 Node 的 zstd，需要 Node 22.15+；在 Node 20 上插件其余功能正常，诊断页会明确标记这一项不可用，而不是等用户点下去才报错。
 
 ```bash
 npm test

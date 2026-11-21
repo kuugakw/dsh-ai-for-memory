@@ -71,7 +71,7 @@ Rerank 示例：
 - `engine` 目前支持 `llama.cpp`；有 `.gguf` 时默认即为它；
 - `binary` 可指定 `llama-server`，省略时用 `DSH_LLAMA_SERVER` / `LLAMA_SERVER` 环境变量，再退回 PATH；
 - `modelPath` 相对于模型文件夹；省略时自动找文件夹里的 `.gguf`；
-- `pooling` 用于 Embedding，BGE-M3 建议 `cls`；`ctxSize` 默认 8192；`port` 省略时自动选空闲端口；
+- `pooling` 用于 Embedding，BGE-M3 建议 `cls`；`ctxSize` 默认 2048（可调，面板每个本地模型旁有 `ctx-size` 输入框；embedding 实际输入很短，过大的 ctx 会白占常驻 KV cache）；`port` 省略时自动选空闲端口；端口被抢占（`EADDRINUSE`）时自动换端口重试最多 3 次，显式 `port` 不重试；
 - 面板里点「启动引擎并填入」会启动 `llama-server`，再填入地址和模型名，仍需点「保存设置」；
 - 启动失败时插件保留 `llama-server` 的 stderr/stdout 尾部、实际启动命令和按日志识别的修复提示（GGUF 版本、`--reranking`、`--pooling`、OOM、路径问题等），面板的「启动失败诊断」会一直显示，不用去终端手敲参数；
 - 每次启动会把 `{pid, port, model, modelPath, baseUrl, command, startedAt, fingerprint}` 写入 `models/.engine.lock/*.json`；一个模型一个文件（旧版单文件 `.engine.lock` 会在首次保存时自动迁移），并发启动 Embedding/Rerank 不会互相覆盖锁记录；插件重新加载/DSH 重载后先探测该端口的 `/health`、`/props`（必要时 `/v1/models`），模型路径或名称对得上就接管进「模型」页，端口已被占用时不会再起第二份；对不上只清理这一条锁记录，不杀未知进程；

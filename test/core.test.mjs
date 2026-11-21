@@ -47,6 +47,7 @@ import {
 import { collectTurnDigest } from '../lib/auto.js';
 import { buildContextSnapshot, collectTurns, formatContextMarkdown, formatRestoreContext, snapshotOfTurns } from '../lib/context.js';
 import { handleMcpMessage, MCP_PATH, mcpToolNames } from '../lib/mcp.js';
+import { ensureMcpToken, mcpTokenPath } from '../lib/mcp-token.js';
 import { contentTokens, selectTurnsByTopic, topicSimilarity } from '../lib/similarity.js';
 import {
   AUTO_SNAPSHOT_PREFIX, isAutoSnapshot, planSnapshotPrune, snapshotText,
@@ -214,6 +215,19 @@ test('snapshots are safe-named, unique and restorable', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('knowledge search defaults to snippets and full text is explicit', () => {
+  const long = `超时处理步骤：${'先重试再记录错误。'.repeat(80)}TAIL_MARKER`;
+  const docs = [{ doc_id: 'long', category: 'errors_fixes', text: long }];
+  const summary = search(docs, '超时处理', { mode: 'hybrid', topK: 1 });
+  assert.equal(summary.length, 1);
+  assert.ok(summary[0].text.length < long.length);
+  assert.equal(summary[0].text_chars, long.length);
+  assert.equal(summary[0].text_truncated, true);
+  const full = search(docs, '超时处理', { mode: 'hybrid', topK: 1, detail: 'full' });
+  assert.equal(full[0].text, long);
+  assert.equal(full[0].text_truncated, false);
 });
 
 test('knowledge search supports bm25, vector and hybrid', () => {
@@ -914,7 +928,9 @@ test('knowledge normalizes categories, ids and duplicates', () => {
   assert.equal(normalizeCategory('behavior_tristate'), 'project_facts');
   assert.equal(normalizeCategory('unknown-thing', 'workflow_rules'), 'workflow_rules');
   assert.equal(normalizeSource('web'), 'web');
+  assert.equal(normalizeSource('mcp'), 'mcp');
   assert.equal(normalizeSource('gui'), 'unknown');
+  assert.equal(normalizeProvenance('model', 'mcp'), 'model');
   // An absent/misspelled source must not become "authored and verified"; the
   // only caller of the write tool is the model, so it defaults to a claim.
   assert.equal(normalizeProvenance(undefined, 'unknown'), 'model');
@@ -2167,7 +2183,7 @@ test('MCP egress lists and routes root-scoped memory tools', async () => {
     ];
     const calls = [];
     const deps = {
-      version: '0.1.0',
+      version: '0.3.0',
       listRoots: () => roots,
       runTool: async (name, args, target) => {
         calls.push({ name, args, target });
@@ -2183,9 +2199,12 @@ test('MCP egress lists and routes root-scoped memory tools', async () => {
     }, deps);
     assert.equal(init.result.protocolVersion, '2025-06-18');
     assert.equal(init.result.serverInfo.name, 'ai-for-memory');
+    assert.equal(init.result.serverInfo.version, '0.3.0');
 
     const listed = await handleMcpMessage({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, deps);
     assert.ok(listed.result.tools.some((tool) => tool.name === 'aim_context_list'));
+    assert.equal(listed.result.tools.find((tool) => tool.name === 'aim_search').annotations.readOnlyHint, true);
+    assert.equal(listed.result.tools.find((tool) => tool.name === 'aim_remember').annotations.readOnlyHint, false);
 
     const search = await handleMcpMessage({
       jsonrpc: '2.0', id: 3, method: 'tools/call',
@@ -2203,6 +2222,14 @@ test('MCP egress lists and routes root-scoped memory tools', async () => {
     assert.equal(calls[1].name, 'aim_memory');
     assert.equal(calls[1].args.action, 'remember');
     assert.equal(calls[1].args.scope, 'shared');
+    assert.equal(calls[1].args.source, 'mcp');
+
+    const missingRoot = await handleMcpMessage({
+      jsonrpc: '2.0', id: 41, method: 'tools/call',
+      params: { name: 'aim_search', arguments: { query: '发布' } },
+    }, deps);
+    assert.equal(missingRoot.result.isError, true);
+    assert.match(missingRoot.result.content[0].text, /必须显式提供 root/);
 
     const missing = await handleMcpMessage({
       jsonrpc: '2.0', id: 5, method: 'tools/call',
@@ -2215,6 +2242,23 @@ test('MCP egress lists and routes root-scoped memory tools', async () => {
     assert.equal(notice, null);
     const unknown = await handleMcpMessage({ jsonrpc: '2.0', id: 6, method: 'nope' }, deps);
     assert.equal(unknown.error.code, -32601);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('MCP token is generated once on disk and configured tokens win', () => {
+  const root = tempRoot();
+  try {
+    const first = ensureMcpToken(root);
+    assert.equal(first.source, 'file');
+    assert.ok(first.token.length >= 32);
+    assert.equal(first.file, mcpTokenPath(root));
+    assert.equal(fs.readFileSync(first.file, 'utf8').trim(), first.token);
+    const second = ensureMcpToken(root);
+    assert.equal(second.token, first.token);
+    const configured = ensureMcpToken(root, 'configured-token');
+    assert.deepEqual(configured, { token: 'configured-token', source: 'config', file: '' });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -4986,7 +5030,12 @@ test('session repair: an ai-for-memory developer note is salvaged as a user noti
     const scan = await scanSessionLogs(root, { deep: true });
     assert.equal(scan.logs.length, 1);
     assert.equal(scan.logs[0].status, 'corrupt');
+    assert.equal(typeof scan.validator.note, 'string');
+    assert.ok(['dsh', 'local'].includes(scan.logs[0].validator));
     assert.match(formatScanReport(scan), /结构损坏/);
+    // A second unchanged scan is served from the mtime+size cache.
+    const cached = await scanSessionLogs(root, { deep: true });
+    assert.equal(cached.logs[0].status, 'corrupt');
 
     const dry = await repairSessionLog(file, { apply: false });
     assert.equal(dry.ok, true);
