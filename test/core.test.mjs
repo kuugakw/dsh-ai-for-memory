@@ -39,7 +39,7 @@ import {
   formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
 } from '../lib/knowledge-query.js';
 import { applyDisclosure, RRF_K, reciprocalRankFusion, search, snippetOf, tokenize } from '../lib/retrieval.js';
-import { BoundedCache, CATEGORIES, dshHome, hourKey, listJsonlFiles } from '../lib/util.js';
+import { BoundedCache, CATEGORIES, appendJsonLine, dshHome, hourKey, listJsonlFiles, writeJson } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
 import { buildServerArgs, findModelFile, missingLocalEngineKinds, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig } from '../lib/local-engine.js';
@@ -211,6 +211,31 @@ test('a torn last line is repaired before the next append', () => {
     const records = store.stagingRecords();
     assert.deepEqual(records.map((row) => row.content), ['ok', '正常记录']);
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('user data writes are fsynced; derived bookkeeping skips the flush', () => {
+  const root = tempRoot();
+  const original = fs.fsyncSync;
+  let flushed = 0;
+  fs.fsyncSync = (...args) => {
+    flushed += 1;
+    return original.apply(fs, args);
+  };
+  try {
+    writeJson(path.join(root, 'knowledge', 'k_a.json'), { doc_id: 'k_a', text: 'x' });
+    assert.equal(flushed > 0, true, 'a knowledge write must flush the file');
+    const before = flushed;
+    writeJson(path.join(root, 'meta', 'usage.json'), { docs: {} }, { durable: false });
+    assert.equal(flushed, before, 'a derived counter write must not flush');
+    appendJsonLine(path.join(root, 'archive', 'a.jsonl'), { id: 1 });
+    assert.equal(flushed > before, true, 'an archive append must flush');
+    const afterArchive = flushed;
+    appendJsonLine(path.join(root, 'staging', 's.jsonl'), { id: 2 }, { durable: false });
+    assert.equal(flushed, afterArchive, 'a staging append must not flush');
+  } finally {
+    fs.fsyncSync = original;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
