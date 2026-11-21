@@ -732,6 +732,7 @@ function localRrfRows(sources, query, options = {}) {
       mode: 'bm25',
       topK: 40,
       detail: 'full',
+      cacheMode: options.cacheMode,
     });
     // `hit.score` already carries confidence/unverified penalties from local
     // retrieval. Use the raw BM25 component here; the channel prior applies
@@ -874,7 +875,10 @@ export async function searchWithRag(config, sources, query, options = {}) {
       origin_scope: row.source.scope,
     };
   });
-  const localRows = localRrfRows(sources, query, { category: options.category ?? null });
+  const localRows = localRrfRows(sources, query, {
+    category: options.category ?? null,
+    cacheMode: options.cacheMode,
+  });
   // Priors belong inside a channel, not on top of the fused RRF score. This also
   // makes `RAG#` / `BM25#` in the output describe the order RRF actually saw.
   const ragChannel = rankChannelWithPriors(ragRows, weights, callerOwner);
@@ -1782,6 +1786,11 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           enum: ['summary', 'full'],
           description: '默认 summary=返回查询附近摘要和全文长度；full=返回完整正文（显式请求才用，避免一次性占满上下文）。',
         },
+        cache_mode: {
+          type: 'string',
+          enum: ['auto', 'library', 'document'],
+          description: '检索缓存路由：auto=库级快路径 + 文档级增量缓存；library=只用库级缓存；document=只用逐文档缓存。默认 auto。',
+        },
       },
       output: TEXT_OUTPUT,
       isConcurrencySafe: () => true,
@@ -1848,6 +1857,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
               mode,
               topK: Math.max(topK, 10),
               detail: 'full',
+              cacheMode: args?.cache_mode,
             });
             // BM25 scores are not comparable across stores because each store's
             // corpus and document frequency differ. Normalize within the store
@@ -1903,6 +1913,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             store: callerStore,
             owner: callerOwner,
             detail,
+            cacheMode: args?.cache_mode,
           });
           if (rag.ok === true) {
             picked = { empty: rag.empty === true, text: rag.text };

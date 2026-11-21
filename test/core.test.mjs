@@ -231,6 +231,18 @@ test('knowledge search defaults to snippets and full text is explicit', () => {
   assert.equal(full[0].text_truncated, false);
 });
 
+test('retrieval cache modes select the same result set', () => {
+  const docs = [
+    { doc_id: 'a', category: 'ui_facts', text: '网关超时需要重试', updated_at: '2026-01-01T00:00:00Z' },
+    { doc_id: 'b', category: 'ui_facts', text: '设置页面有通知开关', updated_at: '2026-01-02T00:00:00Z' },
+  ];
+  const auto = search(docs, '网关超时', { mode: 'hybrid', cacheMode: 'auto' });
+  const library = search(docs, '网关超时', { mode: 'hybrid', cacheMode: 'library' });
+  const document = search(docs, '网关超时', { mode: 'hybrid', cacheMode: 'document' });
+  assert.deepEqual(auto.map((hit) => hit.doc_id), library.map((hit) => hit.doc_id));
+  assert.deepEqual(auto.map((hit) => hit.doc_id), document.map((hit) => hit.doc_id));
+});
+
 test('Chinese snippets center on multi-character query terms, not the first single char', () => {
   const text = `${'无关开头。'.repeat(100)}网关超时，必须重试三次。`;
   const snippet = snippetOf(text, '网关超时', 100);
