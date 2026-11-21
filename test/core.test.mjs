@@ -12,6 +12,7 @@ import { defaultMemoryDirIgnoreStatus, ensureDefaultMemoryDirIgnored, ensureGiti
 import { MemoryScopes, sessionKey } from '../lib/scopes.js';
 import { decodeWorkspaceBucket, dshSessionsDir, encodeWorkspace, resolveWorkspacePath, workspaceIndex } from '../lib/dsh-workspace.js';
 import { userModelsDir } from '../lib/model-paths.js';
+import { summarizeTurnActivity } from '../lib/turn-activity.js';
 import {
   chat, embed, listModels, normalizeExternal, parseEmbeddingResponse, parseRerankResponse,
   probe, resolveBaseUrl, embedEndpoint, rerankEndpoint, buildRequest, PROBE_TIMEOUT_MS,
@@ -422,6 +423,72 @@ test('decision review gates on reversibility, not on reason length', () => {
     irreversible: true,
   }, { reviewHighRiskOnly: false });
   assert.equal(mediumReviewed.outcome, 'rejected');
+});
+
+test('turn activity becomes one observed decision with tools, failures and files', () => {
+  const events = [
+    { type: 'turn/start', data: { turn: 7 } },
+    { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '改一下配置' }] } },
+    {
+      type: 'assistant/message',
+      data: {
+        turn: 7,
+        step: 1,
+        message: { role: 'assistant', content: [{ type: 'tool-call', id: 'c1', name: 'read', arguments: '{"file_path":"src/config.ts"}' }] },
+      },
+    },
+    {
+      type: 'tool/result',
+      data: { turn: 7, step: 1, message: { role: 'tool', toolCallId: 'c1', content: [{ type: 'text', text: '内容' }] } },
+    },
+    {
+      type: 'assistant/message',
+      data: {
+        turn: 7,
+        step: 2,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool-call', id: 'c2', name: 'edit', arguments: { file_path: 'src/config.ts', old_string: 'a', new_string: 'b' } }],
+        },
+      },
+    },
+    {
+      type: 'tool/result',
+      data: {
+        turn: 7,
+        step: 2,
+        isError: true,
+        message: { role: 'tool', toolCallId: 'c2', content: [{ type: 'text', text: 'Error: permission denied' }] },
+      },
+    },
+    { type: 'turn/end', data: { turn: 7 } },
+  ];
+  const record = summarizeTurnActivity(events, 'session-activity', 7);
+  assert.equal(record.kind, 'turn-activity');
+  assert.equal(record.outcome, 'observed');
+  assert.equal(record.reviewed, false);
+  assert.equal(record.risk_level, 'medium');
+  assert.match(record.decision, /第 7 轮：调用 2 次工具/);
+  assert.match(record.decision, /edit×1/);
+  assert.match(record.decision, /src\/config\.ts/);
+  assert.deepEqual(record.files, { modified: ['src/config.ts'], read: ['src/config.ts'] });
+  assert.equal(record.tools.find((row) => row.name === 'edit').failed, 1);
+  // The id is deterministic, so replaying the same turn overwrites one file.
+  assert.equal(record.decision_id, summarizeTurnActivity(events, 'session-activity', 7).decision_id);
+
+  // A turn without tool calls records nothing.
+  assert.equal(summarizeTurnActivity([{ type: 'turn/end', data: { turn: 1 } }], 's', 1), null);
+
+  // Deleting files raises the inferred risk to high.
+  const deletion = summarizeTurnActivity([
+    {
+      type: 'assistant/message',
+      data: { turn: 2, message: { content: [{ type: 'tool-call', name: 'delete_file', arguments: '{"path":"tmp/a.txt"}' }] } },
+    },
+    { type: 'turn/end', data: { turn: 2 } },
+  ], 's', 2);
+  assert.equal(deletion.risk_level, 'high');
+  assert.match(deletion.decision, /tmp\/a\.txt/);
 });
 
 test('tools are registered and executable against the session workspace', async () => {
@@ -5702,6 +5769,66 @@ test('pressure reset clears a fragmented window in one contiguous replacement', 
     assert.equal(status.state, 'reset');
     assert.equal(status.turns, 4);
     assert.equal(status.kept, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('turn/end records the tools the turn used in the decision layer', async () => {
+  const root = tempRoot();
+  try {
+    const events = [
+      { type: 'turn/start', data: { turn: 1 } },
+      { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '改配置' }] } },
+      {
+        type: 'assistant/message',
+        data: {
+          turn: 1,
+          step: 1,
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool-call', id: 'call-1', name: 'edit', arguments: '{"file_path":"src/app.ts"}' }],
+          },
+        },
+      },
+      {
+        type: 'tool/result',
+        data: { turn: 1, step: 1, message: { role: 'tool', toolCallId: 'call-1', content: [{ type: 'text', text: 'ok' }] } },
+      },
+      { type: 'turn/end', data: { turn: 1 } },
+    ];
+    const { session } = fakeSession(events);
+    const handlers = new Map();
+    const ctx = {
+      effect: (fn) => fn(),
+      on: (event, handler) => { handlers.set(event, handler); return () => {}; },
+      get: () => undefined,
+    };
+    const config = normalizeConfig({
+      root: path.join(root, 'memory'),
+      autoEnabled: false,
+      autoSnapshot: false,
+    });
+    const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
+    installContextManagement(ctx, config, { registryDir: path.join(root, 'registry'), getService: ctx.get }, runtime);
+
+    const onEvent = handlers.get('session/event');
+    onEvent(session, { type: 'turn/end', data: { turn: 1 } });
+    const store = new MemoryScopes(path.join(root, 'memory')).sessionStoreFor('session-clear', {}).store;
+    const rows = store.decisionRecords(10);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].kind, 'turn-activity');
+    assert.equal(rows[0].outcome, 'observed');
+    assert.match(rows[0].decision, /edit×1/);
+    assert.match(rows[0].decision, /src\/app\.ts/);
+
+    // Replaying the same turn must overwrite, not duplicate.
+    onEvent(session, { type: 'turn/end', data: { turn: 1 } });
+    assert.equal(store.decisionRecords(10).length, 1);
+
+    // Activity records are audit only: promote must not mine them.
+    const promoted = store.promoteKnowledge({ dryRun: true });
+    assert.equal(promoted.added.length, 0);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

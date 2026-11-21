@@ -486,6 +486,7 @@ window.__ModuleLoader__.load({
         lastChange: '最近变化',
         decisionReviewed: '已审查',
         decisionAuto: '自动放行',
+        decisionObserved: '自动记录',
         decisionApproved: '已批准',
         decisionRejected: '已拒绝',
         decisionGate: '可逆性',
@@ -1017,6 +1018,7 @@ window.__ModuleLoader__.load({
         lastChange: 'Last change',
         decisionReviewed: 'Reviewed',
         decisionAuto: 'Auto-approved',
+        decisionObserved: 'Auto-recorded',
         decisionApproved: 'Approved',
         decisionRejected: 'Rejected',
         decisionGate: 'Reversibility',
@@ -3677,7 +3679,9 @@ window.__ModuleLoader__.load({
                 head: [
                   h('span', { key: 'outcome', style: badgeStyle(row.outcome) }, row.outcome),
                   h('span', { key: 'review', style: badgeStyle(row.reviewed ? 'pending' : 'approved') },
-                    row.reviewed ? t.decisionReviewed : t.decisionAuto),
+                    row.reviewed
+                      ? t.decisionReviewed
+                      : (row.outcome === 'observed' ? t.decisionObserved : t.decisionAuto)),
                   h('span', { key: 'approved', style: badgeStyle(row.approved ? 'approved' : 'rejected') },
                     row.approved ? t.decisionApproved : t.decisionRejected),
                   h('span', { key: 'risk', style: badgeStyle(row.risk_level) }, `${t.risk}: ${row.risk_level}`),

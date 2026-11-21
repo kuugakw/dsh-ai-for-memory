@@ -176,6 +176,17 @@ verified: false
 - 结果写入 `decisions`，包含正题、反题、结论、风险、可逆性和恢复路径；
 - `risk` 是调用方自己的标注，审查门只能校验结构化字段是否自洽；把不可逆操作同时标成 `low` 和 `irreversible=false` 属于威胁模型边界（审查记录仍保留声明的 risk 与 auto 闸门）。
 
+### 4.4.1 自动执行记录
+
+除了 `aim_decide` 的正反合审查，每次 `turn/end` 只要本轮调用过工具，就会自动往 `decisions` 写一条 `outcome: observed` 的记录：
+
+- `decision`：第 N 轮、工具调用次数与名称分布、修改了哪些本地文件、失败次数；
+- `reason`：完整工具/文件清单与风险推断说明；
+- `tools` / `files`：结构化的工具计数（含失败数）和读取/修改文件列表；
+- `risk_level`：按工具类型推断（删除/移动/`rm` 等 = high，写文件 = medium，只读 = low）。
+
+它是“做了什么”的执行审计，不占用正反合审查，也不会被 `promote` 提炼进知识库；同一轮重复落库会按 `session + turn` 覆盖同一条。`autoDecisionLog: false` 可关闭。
+
 ### 4.5 `aim_ask`
 
 调用任何 OpenAI 兼容 HTTP API。
@@ -679,6 +690,7 @@ http://127.0.0.1:<DSH 端口>/ai-for-memory/mcp
 | `stagingRetentionDays` | 30 | 旧过程记录保留天数；只删已归档文件 |
 | `contextRetentionDays` | 0 | 上下文存档保留天数；0=不自动删 |
 | `decisionRetentionDays` | 0 | 决策记录保留天数；0=不自动删 |
+| `autoDecisionLog` | `true` | 每轮把工具调用和本地文件改动自动记入决策层（outcome=observed） |
 | `requestAnchor` | `true` | 检查点到且本步无新请求时注入上一轮请求锚点 |
 | `mcpEnabled` | `true` | 是否启用 MCP 出口 |
 | `mcpToken` | 空 | 可选自定义 Bearer 令牌；空=自动生成本机令牌 |

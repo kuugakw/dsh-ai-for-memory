@@ -29,6 +29,7 @@ import { defaultRegistryDir, listRootRows, rememberRoot } from './lib/registry.j
 import { installApi } from './lib/api.js';
 import { restoreLocalEngines } from './lib/local-engine.js';
 import { ensureMcpToken } from './lib/mcp-token.js';
+import { summarizeTurnActivity } from './lib/turn-activity.js';
 import { packageVersion } from './lib/version.js';
 import { collectTurnDigest } from './lib/auto.js';
 import {
@@ -153,6 +154,10 @@ const DEFAULTS = Object.freeze({
   // the knowledge base grows without an extra prompt from the user.
   autoKnowledge: true,
   autoKnowledgeLimit: 10,
+  // Every completed turn that called a tool becomes one decision record: tool
+  // names, failures and the local files touched. The decision layer then also
+  // answers "what was executed", not only "which risky choices were reviewed".
+  autoDecisionLog: true,
   // Retention. Staging only loses a file after every record in it is archived;
   // context/decision retention is opt-in because those layers are restorable
   // or auditable data, not mirrors of archive/.
@@ -3587,6 +3592,21 @@ export function installContextManagement(ctx, config, deps, runtime) {
         }
       } else {
         snapshotCounters.set(id, count);
+      }
+    }
+
+    // Turn activity → decision layer: every completed turn that called a tool
+    // gets one observed decision record (tools, failures, files touched). This
+    // is independent of automatic tidying and is never mined into knowledge.
+    if (!isSubagent && config.autoDecisionLog !== false) {
+      try {
+        const context = memoryContext(config, { agent: { session } }, deps, runtime);
+        const store = writeSource(context, 'session').store;
+        const activity = summarizeTurnActivity(session.ownEvents(), id, event.data?.turn);
+        if (activity) store.recordDecision(activity);
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn(`[ai-for-memory] 自动决策记录失败：${error?.message ?? error}`);
       }
     }
 
