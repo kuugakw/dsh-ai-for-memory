@@ -9,7 +9,7 @@
 >
 > 升级前请备份记忆目录。
 
-**快速入口：** [安装](docs/installation.md) · [工具参考](docs/tools.md) · [面板](docs/panel.md) · [本地模型/推理引擎](docs/models.md) · [上下文与自动行为](docs/context.md) · [检索与 RAG](docs/search.md) · [知识库](docs/knowledge.md) · [配置](docs/configuration.md) · [隐私](docs/security.md) · [常见问题](docs/faq.md) · [开发](docs/development.md) · [更新记录](CHANGELOG.md)
+**快速入口：** [安装](docs/installation.md) · [功能全览](docs/features.md) · [工具参考](docs/tools.md) · [面板](docs/panel.md) · [本地模型/推理引擎](docs/models.md) · [上下文与自动行为](docs/context.md) · [检索与 RAG](docs/search.md) · [知识库](docs/knowledge.md) · [配置](docs/configuration.md) · [隐私](docs/security.md) · [常见问题](docs/faq.md) · [开发](docs/development.md) · [更新记录](CHANGELOG.md)
 
 ---
 
