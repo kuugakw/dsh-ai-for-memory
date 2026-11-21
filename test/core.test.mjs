@@ -4449,6 +4449,19 @@ test('harness checkpoints get a current-request anchor, not a repeated answer', 
       signal: new AbortController().signal,
     }, () => {});
     assert.equal(appended.length, 1);
+
+    // A checkpoint prefix followed by a real request is not a pure checkpoint;
+    // it must not make the old request win.
+    const mixedSession = { ...session, id: 'session-anchor-mixed' };
+    await preStep({
+      agent: { session: mixedSession },
+      messages: [{
+        role: 'user',
+        content: [{ type: 'text', text: 'Time sampled while preparing turn 2\n新请求：检查缓存签名' }],
+      }],
+      signal: new AbortController().signal,
+    }, () => {});
+    assert.equal(appended.length, 1);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -2513,6 +2513,34 @@ export function installContextManagement(ctx, config, deps, runtime) {
   };
 
   /**
+   * True only when the whole user turn is harness/checkpoint text. Do not treat
+   * a real request that merely starts with a checkpoint header as harness text;
+   * doing so made the anchor fall back to the previous request.
+   */
+  const isHarnessText = (text) => {
+    const value = String(text ?? '');
+    if (/^\s*<system-reminder>/i.test(value)) return true;
+    const stripped = value.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, ' ').trim();
+    if (stripped === '') return true;
+    const lines = stripped.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (lines.length === 0) return true;
+    return lines.every((line) => HARNESS_USER_RE.test(line)
+      || /^(Elapsed since|Browser time zone|Current DSH|Current working directory|Current runtime context|Time sampled while preparing turn|This is an automatically generated checkpoint|Updated Tool Schemas)/i.test(line));
+  };
+
+  /** The newest real user request in this exact model step, if visible. */
+  const incomingRequestText = (payload) => {
+    const incoming = Array.isArray(payload?.messages) ? payload.messages : [];
+    for (let index = incoming.length - 1; index >= 0; index -= 1) {
+      const message = incoming[index];
+      if (message?.role !== 'user' || message?.source?.kind === 'ai-for-memory') continue;
+      const text = textOfUserMessage(message);
+      if (text !== '' && !isHarnessText(text)) return text;
+    }
+    return '';
+  };
+
+  /**
    * When a harness checkpoint/schema notice arrives as the newest "user"
    * message, keep the last real request in view with one short developer note.
    * This is deliberately not an every-request memory injection: it only fires
@@ -2522,23 +2550,11 @@ export function installContextManagement(ctx, config, deps, runtime) {
     if (config.requestAnchor === false || payload?.signal?.aborted) return;
     if (session?.header?.parentSession) return;
     const events = typeof session.ownEvents === 'function' ? session.ownEvents() : [];
-    const isHarnessText = (text) => {
-      const value = String(text ?? '');
-      if (/^\s*<system-reminder>/i.test(value)) return true;
-      const stripped = value.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, ' ').trim();
-      return HARNESS_USER_RE.test(stripped);
-    };
     // `payload.messages` is exactly what will enter this step. If it already
     // contains a real user request, never inject a stale anchor: a checkpoint
     // and the next request can arrive together, and the anchor used to run
     // before the request was visible in `ownEvents`.
-    const incoming = Array.isArray(payload?.messages) ? payload.messages : [];
-    const hasIncomingRequest = incoming.some((message) => {
-      if (message?.role !== 'user') return false;
-      if (message?.source?.kind === 'ai-for-memory') return false;
-      const text = textOfUserMessage(message);
-      return text !== '' && !isHarnessText(text);
-    });
+    const hasIncomingRequest = incomingRequestText(payload) !== '';
     if (hasIncomingRequest) return;
     let latestUser = null;
     let realRequest = null;
@@ -2920,10 +2936,14 @@ export function installContextManagement(ctx, config, deps, runtime) {
       // Never mutate the surface after an abort.
       if (signal?.aborted) return;
       const latestUser = [...turns].reverse().find((turn) => turn.user)?.user ?? '';
+      // At pre-step the exact incoming request in payload.messages is more
+      // authoritative than the last event in ownEvents, which can still be the
+      // previous turn when a checkpoint and a new request arrive together.
+      const taskRequest = String(options.taskRequest ?? '').trim() || latestUser;
       const latestAssistant = [...turns].reverse()
         .find((turn) => turn.inFlight !== true && turn.assistant)?.assistant ?? '';
       const taskBrief = hardReset && hardReload
-        ? `【任务续接】当前请求：${clip(latestUser, 360)}`
+        ? `【任务续接】当前请求：${clip(taskRequest, 360)}`
           + (latestAssistant === '' ? '' : `\n最近进展：${clip(latestAssistant, 420)}`)
         : '';
       const replacementNote = [modelNote, taskBrief].filter((text) => text !== '').join('\n');
@@ -3042,6 +3062,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
       hardReload: true,
       immediate: true,
       signal: payload.signal,
+      taskRequest: incomingRequestText(payload),
     });
     pressureResets.set(id, currentTurn);
     return true;
