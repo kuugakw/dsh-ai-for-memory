@@ -6,7 +6,7 @@
 
 ### 本地模型增强
 
-- **运行中的本地模型自动接管 Embedding/Rerank**：配置为空或仍是旧 loopback 端口时，RAG、`aim_search`、`aim_ask`、归档/提炼等调用自动使用当前运行中的 Qwen3-Embedding / Jina-Rerank；显式云端地址优先，不会被覆盖。
+- **运行中的本地模型自动接管 Embedding/Rerank**：配置为空或仍是旧 loopback 端口时，RAG、`aim_search`、`aim_ask`、归档/提炼等调用自动使用当前运行中的 Qwen3-Embedding / Qwen3-Reranker；显式云端地址优先，不会被覆盖。
 - **RAG 自动挂载**：两个本地引擎都就绪且未配置独立外部端点时，自动挂载 RAG；索引身份使用 `local:<model>`，llama-server 重启换临时端口不再让索引失效。
 - **Rerank 真正参与 RAG**：Rerank 启动显式加 `--pooling rank`；RAG 在 Rerank 不可用时拒绝“只靠 Embedding”的结果并回退 BM25；检索输出明确标注 `Embedding + Rerank`，小 logits 用科学计数法显示。
 - **`ctx-size` 可调**：本地模型默认从 8192 降到 2048，面板每个模型可单独修改并写回 `model.json`；自动选端口遇到 `EADDRINUSE` 时换端口重试最多 3 次，显式端口仍直接报错。
