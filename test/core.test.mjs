@@ -3520,6 +3520,47 @@ test('a fact that disagrees with stored knowledge waits for the user', () => {
   }
 });
 
+test('blocked writes are logged and a confirmed rewrite resolves the report', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(path.join(root, 'memory'));
+    const first = store.remember({ text: '合并代码前必须先跑完整测试套件', category: 'project_facts' }, { confirm: true });
+    const blocked = store.remember({ text: '合并代码前不需要跑完整测试套件', category: 'project_facts' });
+    assert.equal(blocked.needs_confirm, true);
+
+    // The blocked write is an audit line, never a fact.
+    assert.equal(fs.existsSync(store.conflictsFile), true);
+    assert.equal(store.documents().length, 1);
+    assert.equal(store.documents()[0].text, '合并代码前必须先跑完整测试套件');
+    const logged = store.conflictLog(10);
+    assert.equal(logged.open, 1);
+    assert.equal(logged.items[0].doc_id, first.doc_id);
+    assert.equal(logged.items[0].text, '合并代码前不需要跑完整测试套件');
+    assert.equal(logged.items[0].kind, 'conflict');
+    assert.equal(store.status().knowledge.conflicts.open, 1);
+
+    // The panel state exposes the same audit trail (and it is not searchable).
+    const ui = buildUiState(store);
+    assert.equal(ui.knowledgeConflicts.length, 1);
+    assert.equal(ui.knowledgeConflictOpen, 1);
+    assert.equal(ui.knowledgeConflicts[0].resolved, false);
+
+    // A confirmed rewrite of the same target closes the report.
+    store.remember({
+      doc_id: first.doc_id,
+      text: '合并代码前不需要跑完整测试套件',
+      category: 'project_facts',
+    }, { confirm: true });
+    const after = store.conflictLog(10);
+    assert.equal(after.open, 0);
+    assert.equal(after.items[0].resolved, true);
+    assert.equal(store.documents()[0].text, '合并代码前不需要跑完整测试套件');
+    assert.equal(store.status().knowledge.conflicts.open, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('external endpoint is unconfigured by default and probes use a 5s budget', async () => {
   assert.equal(normalizeExternal({}).baseUrl, '');
   assert.equal(resolveBaseUrl('').api, '');

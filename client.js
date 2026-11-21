@@ -174,6 +174,13 @@ window.__ModuleLoader__.load({
         pendingAccepted: '已接受更新并写入知识库',
         pendingRejected: '已拒绝这条待确认更新',
         pendingResolveFailed: '处理待确认更新失败',
+        conflictsTitle: '知识冲突（只做审计）',
+        conflictsOpen: '未确认',
+        conflictsResolved: '已确认',
+        conflictsHint: '被拦下的写入记录在这里，不会自动应用；确认后才会覆盖知识。模型没转述时，你仍能在这里看到。',
+        conflictsTarget: '已有知识',
+        conflictsIncoming: '待写入',
+        conflictsNone: '最近没有冲突。',
         pendingAccept: '接受并写入',
         pendingReject: '拒绝',
         delete: '删除这条',
@@ -718,6 +725,13 @@ window.__ModuleLoader__.load({
         pendingAccepted: 'Update accepted and written',
         pendingRejected: 'Pending update rejected',
         pendingResolveFailed: 'Failed to resolve pending update',
+        conflictsTitle: 'Knowledge conflicts (audit only)',
+        conflictsOpen: 'Unconfirmed',
+        conflictsResolved: 'Resolved',
+        conflictsHint: 'Blocked writes are logged here and never applied automatically; a fact is overwritten only after you confirm it. If the model forgets to relay the question, this list still shows it.',
+        conflictsTarget: 'Existing fact',
+        conflictsIncoming: 'Proposed write',
+        conflictsNone: 'No recent conflicts.',
         pendingAccept: 'Accept & write',
         pendingReject: 'Reject',
         delete: 'Delete this',
@@ -3050,6 +3064,8 @@ window.__ModuleLoader__.load({
       item.count === undefined ? null : h('span', { style: styles.navBadge }, String(item.count ?? 0)));
 
       const knowledgeRows = data?.knowledge ?? [];
+      const knowledgeConflicts = Array.isArray(data?.knowledgeConflicts) ? data.knowledgeConflicts : [];
+      const knowledgeConflictOpen = Number(data?.knowledgeConflictOpen ?? 0);
       const knowledgeCategories = [...new Set(knowledgeRows.map((doc) => String(doc.category ?? '')).filter(Boolean))].sort();
       const knowledgeSources = [...new Set(knowledgeRows.flatMap((doc) => [
         String(doc.source ?? 'unknown'),
@@ -3537,6 +3553,32 @@ window.__ModuleLoader__.load({
                   resolvePendingUpdate(row, 'reject');
                 },
               }, t.pendingReject)))))
+            : null,
+          knowledgeConflicts.length > 0
+            ? h('div', {
+              style: {
+                padding: '8px 10px', border: '1px solid #f59e0b', borderRadius: '8px',
+                background: '#fffbeb', color: '#92400e', fontSize: '12.5px',
+              },
+            },
+            h('div', { style: { fontWeight: 600 } },
+              `⚠ ${t.conflictsTitle}：${knowledgeConflictOpen} ${t.conflictsOpen}`),
+            h('div', { style: { margin: '4px 0' } }, t.conflictsHint),
+            ...knowledgeConflicts.slice(0, 5).map((row) => h('div', {
+              key: row.conflict_id,
+              style: { margin: '6px 0', paddingTop: '6px', borderTop: '1px dashed rgba(146,64,14,0.35)' },
+            },
+            h('div', { style: { fontWeight: 600 } },
+              `${row.resolved ? t.conflictsResolved : t.conflictsOpen}｜${formatTime(row.at)}`
+                + (row.category ? `｜${row.category}` : '')),
+            h('div', { style: { whiteSpace: 'pre-wrap' } },
+              `${t.conflictsIncoming}: ${clipPreview(row.text, 220)}`),
+            (row.conflicts ?? []).length > 0
+              ? h('div', { style: { marginTop: '3px', opacity: 0.9 } },
+                `${t.conflictsTarget}: ${(row.conflicts ?? []).map((item) => clipPreview(item.text ?? '', 120)).join(' / ')}`)
+              : null,
+            row.origin_label ? h('div', { style: { opacity: 0.8 } }, `对话：${row.origin_label}`) : null,
+            )))
             : null,
           knowledge.length === 0
             ? h(Empty, { text: t.emptyKnowledge })

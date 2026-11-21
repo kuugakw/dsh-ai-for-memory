@@ -569,6 +569,13 @@ function formatLayers(status) {
     lines.push(`历史待确认知识更新：${status.knowledge.pendingUpdates} 条`
       + '（旧版本提炼入队、未写入；面板知识库页可接受或忽略。新提炼不再入队）');
   }
+  const conflicts = status.knowledge.conflicts ?? { open: 0, items: [] };
+  if (conflicts.open > 0) {
+    const latest = Array.isArray(conflicts.items) ? conflicts.items[0] : null;
+    lines.push(`知识冲突：${conflicts.open} 条未确认（记在 knowledge/conflicts.jsonl，只做审计，`
+      + '不会自动写入；面板知识库页可查看，确认后才覆盖）'
+      + (latest ? `\n  最近：${clip(latest.text, 80)}` : ''));
+  }
   // One layer, two kinds: routine turn activity (observed) and reviewed risk
   // decisions (aim_decide). Reporting them together was what made the layer
   // look like an audit dump; report the split explicitly.
@@ -1049,6 +1056,7 @@ function formatConflict(result) {
     lines.push(`- 已有 [${row.category || '未分类'}] ${row.doc_id}（相似度 ${row.similarity}${delta}）：${clip(row.text, 160)}`);
   }
   lines.push('请向用户确认三件事：以哪条为准、是否覆盖旧条目（给旧条目 doc_id）、是否只是补充；');
+  lines.push('这条被拦下的写入已记入 knowledge/conflicts.jsonl（只做审计，不会自动应用；aim_memory status 会显示未确认数）。');
   if (isUpdate) {
     lines.push('用户确认后用 confirm=true 重新调用；会写入新正文，并在 changes 中保留上一版审计。');
   } else {
@@ -1211,7 +1219,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         + '每条知识只写一句可复用的结论，必须带分类，并尽量给出处（url 或 source）。'
         + '默认写入当前对话自己的独立记忆；scope=shared 时写入所有对话共用的共享层。'
         + '冲突规则：新知识与已有知识、或与你自己的认知不一致时，先询问用户，得到同意后再带 confirm=true 写入；'
-        + '冲突不会入队：不带 confirm 的写入若与已有知识相近但不同，会返回 needs_confirm 并列出冲突条目，必须先问用户，不要擅自覆盖。'
+        + '冲突不会入队：不带 confirm 的写入若与已有知识相近但不同，会返回 needs_confirm 并列出冲突条目，必须先问用户，不要擅自覆盖；'
+        + '被拦下的写入会记一条到 knowledge/conflicts.jsonl（只做审计，不会自动应用），status 会显示未确认数。'
         + '注意：只改数字（端口/阈值/版本）、URL 或开关（开启/关闭）的“更新”即使措辞高度相似也会返回 kind=update，必须先确认；'
         + '确认后传原 doc_id + confirm=true 会覆盖该条正文，并在 changes 中保留上一版审计，不要把它当普通重复直接合并。'
         + '需要检索时用 aim_search（默认跨对话）。不要写入密钥、令牌或用户没有说过的事实。'

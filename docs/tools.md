@@ -35,6 +35,7 @@
 - 不写 `category` 时默认 `project_facts`；带 `url` 时默认归到 `external_sources`；
 - `doc_id` 默认由正文生成；传已有条目的 `doc_id` 表示“要改写这一条”：不带 `confirm` 返回更新确认，带 `confirm=true` 覆盖正文并保留 `changes` 审计；
 - 与已有知识相近但不同，会返回 `needs_confirm`，先问用户；
+- 被拦下的写入会记一条到 `knowledge/conflicts.jsonl`（只做审计，不会自动应用）；`status` 显示未确认冲突数，面板「知识库」页也能看到，模型忘了转述时用户仍可发现；确认覆盖后该条自动标为已确认；
 - 数字、URL、开关发生变化，会当成“更新”而不是普通重复；
 - 更新会保留 `changes` 审计，不会悄悄覆盖旧内容。
 
