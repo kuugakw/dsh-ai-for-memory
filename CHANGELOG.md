@@ -28,7 +28,7 @@
 - **文件解析缓存有界**：`fileJsonCache` / `fileJsonlCache` 改为带条数和字节预算的 LRU，不再把每个记忆目录的每个文件留到进程退出。
 - **DSH_HOME 修复**：环境变量未设置时不再解析成字面 `undefined` 目录；`~/.dsh` 回退集中到一个 helper，并把 `undefined`/`null` 字面值当作未设置。
 - **对抗性加固**：混合检索显式使用 RRF，平局时保留两路排名；相似度打分丢弃英文停用词、只按两个以上共享内容词计 Dice；`provenance=user` 只信任上下文/用户确认来源；`irreversible=true` 的决策直接拒绝，不能靠标低 risk 绕过。
-- 测试：156 个用例通过。
+- 测试：156 个用例（Node 22.15+ 全量通过；Node 20 上 13 项依赖 `node:sqlite` / zstd / git 的用例按运行时能力跳过，其余通过）。
 
 ## 0.3.2（2026-11-21）
 
