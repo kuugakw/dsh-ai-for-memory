@@ -2987,6 +2987,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
       // eslint-disable-next-line no-console
       console.log(`[ai-for-memory] ${hardReset ? '已全量清出' : '已按话题相似度清出'} ${turnCount} 轮`
         + `（保留 ${hardReset ? 0 : selection.keep.length} 轮），存档 ${saved.context_id}`);
+      return shadowed > 0;
     };
 
     // Pre-step mode: run the exact same selection and archive synchronously
@@ -3040,6 +3041,17 @@ export function installContextManagement(ctx, config, deps, runtime) {
    * "delete all, reload the active task" path. The current in-flight turn is
    * excluded because its tool call/result pair is not committed yet.
    */
+  /** Last real user message sequence in this session, for reset suppression. */
+  const latestUserSeq = (events) => {
+    for (let index = (events?.length ?? 0) - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (event?.type !== 'user/message') continue;
+      if (event?.data?.source?.kind === 'ai-for-memory') continue;
+      if (Number.isInteger(event.seq)) return event.seq;
+    }
+    return -1;
+  };
+
   const maybePressureReset = async (session, payload) => {
     if (!session || typeof session.ownEvents !== 'function') return false;
     if (session.header?.parentSession) return false;
@@ -3048,15 +3060,22 @@ export function installContextManagement(ctx, config, deps, runtime) {
     const pressure = contextPressureOf(session);
     if (!exceedsUsageThreshold(pressure, config.contextUsagePercent)) return false;
     const id = String(session.id);
-    const turns = collectTurns(session.ownEvents());
+    const events = session.ownEvents();
+    const turns = collectTurns(events);
     const currentTurn = turns[turns.length - 1]?.turn ?? 0;
-    if (pressureResets.get(id) === currentTurn) return false;
+    const resetKey = { turn: currentTurn, seq: latestUserSeq(events) };
+    const previous = pressureResets.get(id);
+    // Suppress only within the same open request. A turn number alone can stay
+    // stale while a new user message arrives; the user-message seq is the
+    // boundary that makes a new reset eligible.
+    if (previous && typeof previous === 'object'
+      && previous.turn === resetKey.turn && previous.seq === resetKey.seq) return false;
     if (!turns.some((turn) => turn.inFlight !== true)) {
-      pressureResets.set(id, currentTurn);
+      pressureResets.set(id, resetKey);
       return false;
     }
     const percent = usagePercentOf(pressure);
-    await runTopicalClear(session, {
+    const cleared = await runTopicalClear(session, {
       label: `auto-pressure-${percent}pct`,
       hardReset: true,
       hardReload: true,
@@ -3064,7 +3083,10 @@ export function installContextManagement(ctx, config, deps, runtime) {
       signal: payload.signal,
       taskRequest: incomingRequestText(payload),
     });
-    pressureResets.set(id, currentTurn);
+    // Only suppress another reset for this request when something was actually
+    // removed. A skipped attempt must be allowed to retry at the next step.
+    if (cleared !== true) return false;
+    pressureResets.set(id, resetKey);
     return true;
   };
 
@@ -3273,8 +3295,17 @@ export function installContextManagement(ctx, config, deps, runtime) {
     const handledTurn = Number.isInteger(event?.data?.turn)
       ? event.data.turn
       : (collectTurns(session.ownEvents()).at(-1)?.turn ?? -1);
+    const handledSeq = latestUserSeq(session.ownEvents());
+    const previousReset = pressureResets.get(id);
+    // A turn number alone can stay stale across requests; compare the latest
+    // real-user seq as well, or a failed pre-step reset would suppress every
+    // later automatic pass.
+    const resetHandled = previousReset !== undefined
+      && (typeof previousReset === 'object'
+        ? previousReset.turn === handledTurn && previousReset.seq === handledSeq
+        : previousReset === handledTurn);
     if (!isSubagent && config.autoEnabled && !pending.has(id)
-      && pressureResets.get(id) !== handledTurn) {
+      && resetHandled !== true) {
       // Two independent triggers share one tidy pass: every N rounds, and the
       // measured context usage reaching the configured share of the window.
       // Both firing at once still tidies once.
