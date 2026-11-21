@@ -121,6 +121,7 @@ window.__ModuleLoader__.load({
         settingsSubtitle: '插件内部设置；保存后自动重载，不需要打开 DSH 设置页。',
         settingsGeneral: '常规与上下文',
         settingsModels: '模型与检索',
+        settingsLlama: 'llama.cpp',
         settingsAdvanced: '高级策略与保留',
         settingsNetwork: '网络同步',
         settingsConversation: '当前对话',
@@ -272,6 +273,28 @@ window.__ModuleLoader__.load({
         localModelMarkEmbedding: '标为 Embedding',
         localModelMarkRerank: '标为 Rerank',
         localModelKindSaved: '模型类型已保存。',
+        llamaColumns: '两类本地模型',
+        llamaEmbeddingColumn: 'Embedding 模型',
+        llamaRerankColumn: 'Rerank 模型',
+        llamaNoModels: '没有识别出这一类模型。',
+        llamaTuneTitle: 'llama.cpp 调参',
+        llamaTuneHint: '这些参数写入模型的 model.json 或根目录 .model-meta.json；保存后点击启动，正在运行的实例不会热改。',
+        llamaSelectModel: '选择模型',
+        llamaModel: '模型',
+        llamaCtx: 'ctx-size',
+        llamaPort: '端口（0=自动）',
+        llamaPooling: 'pooling',
+        llamaTimeout: '启动超时（毫秒）',
+        llamaBinary: 'llama-server 路径（留空=PATH）',
+        llamaExtra: '额外参数（每行一个）',
+        llamaSave: '保存模型参数',
+        llamaSaved: '模型参数已保存；启动后生效。',
+        llamaSaveFailed: '保存模型参数失败',
+        llamaStart: '启动这个模型',
+        llamaStop: '停止这个模型',
+        llamaRunning: '运行中',
+        llamaNotRunning: '未运行',
+        llamaAutoPort: '自动',
         localModelStale: '模型配置已变更，旧引擎不再复用；请先停止引擎，再重新启动。',
         localModelDiagnostics: '启动失败诊断（llama-server stderr）',
         localModelApplied: '已填入模型地址；确认后点「保存设置」。',
@@ -628,6 +651,7 @@ window.__ModuleLoader__.load({
         settingsSubtitle: 'Plugin-local settings. Saving reloads the plugin automatically; no DSH settings page needed.',
         settingsGeneral: 'General & context',
         settingsModels: 'Models & retrieval',
+        settingsLlama: 'llama.cpp',
         settingsAdvanced: 'Advanced & retention',
         settingsNetwork: 'Network sync',
         settingsConversation: 'Current conversation',
@@ -779,6 +803,28 @@ window.__ModuleLoader__.load({
         localModelMarkEmbedding: 'Mark as Embedding',
         localModelMarkRerank: 'Mark as Rerank',
         localModelKindSaved: 'Model type saved.',
+        llamaColumns: 'Local model columns',
+        llamaEmbeddingColumn: 'Embedding models',
+        llamaRerankColumn: 'Rerank models',
+        llamaNoModels: 'No model of this type detected.',
+        llamaTuneTitle: 'llama.cpp tuning',
+        llamaTuneHint: 'These values are written to the model.json or the root .model-meta.json; save then start. A running instance is not hot-reloaded.',
+        llamaSelectModel: 'Select model',
+        llamaModel: 'Model',
+        llamaCtx: 'ctx-size',
+        llamaPort: 'Port (0 = auto)',
+        llamaPooling: 'pooling',
+        llamaTimeout: 'Startup timeout (ms)',
+        llamaBinary: 'llama-server path (empty = PATH)',
+        llamaExtra: 'Extra args (one per line)',
+        llamaSave: 'Save model settings',
+        llamaSaved: 'Model settings saved; start to apply.',
+        llamaSaveFailed: 'Failed to save model settings',
+        llamaStart: 'Start this model',
+        llamaStop: 'Stop this model',
+        llamaRunning: 'running',
+        llamaNotRunning: 'not running',
+        llamaAutoPort: 'auto',
         localModelStale: 'The model configuration changed, so the old engine was not reused. Stop it and start again.',
         localModelDiagnostics: 'Startup diagnostics (llama-server stderr)',
         localModelApplied: 'Model address filled; click "Save settings" to apply.',
@@ -1702,6 +1748,13 @@ window.__ModuleLoader__.load({
       const [externalProbing, setExternalProbing] = React.useState(false);
       const [localModelBusy, setLocalModelBusy] = React.useState('');
       const [localCtxDrafts, setLocalCtxDrafts] = React.useState({});
+      const [llamaModelId, setLlamaModelId] = React.useState('');
+      const [llamaCtx, setLlamaCtx] = React.useState(2048);
+      const [llamaPort, setLlamaPort] = React.useState(0);
+      const [llamaPooling, setLlamaPooling] = React.useState('');
+      const [llamaTimeout, setLlamaTimeout] = React.useState(120000);
+      const [llamaBinary, setLlamaBinary] = React.useState('');
+      const [llamaExtra, setLlamaExtra] = React.useState('');
       const [externalStatus, setExternalStatus] = React.useState('');
       const [formArchiveExternal, setFormArchiveExternal] = React.useState(false);
       const [formKnowledgeExternal, setFormKnowledgeExternal] = React.useState(false);
@@ -1841,6 +1894,25 @@ window.__ModuleLoader__.load({
       React.useEffect(() => { load(); }, [load]);
 
       const selectedRoot = data?.selectedRoot ?? '';
+      const localModelRows = (data?.localModels?.categories ?? [])
+        .flatMap((category) => (category.models ?? []).map((model) => ({ ...model, category: category.name })));
+      const llamaModelKind = (model) => String(model?.kind ?? '').toLowerCase();
+      const llamaModels = localModelRows.filter((model) => model.runnable
+        && ['embedding', 'rerank'].includes(llamaModelKind(model)));
+      const llamaSelected = llamaModels.find((model) => model.id === llamaModelId) ?? null;
+      React.useEffect(() => {
+        if (llamaModelId === '' && llamaModels.length > 0) setLlamaModelId(llamaModels[0].id);
+      }, [llamaModelId, localModelRows.length]);
+      React.useEffect(() => {
+        const model = llamaModels.find((row) => row.id === llamaModelId);
+        if (!model) return;
+        setLlamaCtx(model.ctxSize > 0 ? model.ctxSize : 2048);
+        setLlamaPort(model.port > 0 ? model.port : 0);
+        setLlamaPooling(model.pooling ?? '');
+        setLlamaTimeout(model.startupTimeoutMs > 0 ? model.startupTimeoutMs : 120000);
+        setLlamaBinary(model.binary ?? '');
+        setLlamaExtra(Array.isArray(model.extraArgs) ? model.extraArgs.join('\n') : '');
+      }, [llamaModelId, data?.localModels]);
       const roots = Array.isArray(data?.roots) ? data.roots : [];
       const gitignoreWarning = typeof data?.gitignore?.warning === 'string' ? data.gitignore.warning : '';
       const gitignoreState = data?.gitignore?.state ?? '';
@@ -2480,6 +2552,66 @@ window.__ModuleLoader__.load({
         }
       };
 
+      const saveLlamaConfig = async () => {
+        if (!llamaSelected) return;
+        setLocalModelBusy(llamaSelected.id);
+        setNotice(null);
+        try {
+          await callApi('/local-engine/config', {
+            method: 'POST',
+            body: {
+              model: llamaSelected.id,
+              ctxSize: Number(llamaCtx),
+              port: Number(llamaPort),
+              pooling: llamaPooling,
+              startupTimeoutMs: Number(llamaTimeout),
+              binary: llamaBinary.trim(),
+              extraArgs: llamaExtra.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+            },
+          });
+          setNotice({ kind: 'ok', text: t.llamaSaved });
+          await load('');
+        } catch (llamaError) {
+          setNotice({ kind: 'err', text: `${t.llamaSaveFailed}: ${String(llamaError?.message ?? llamaError)}` });
+        } finally {
+          setLocalModelBusy('');
+        }
+      };
+      const startLlamaModel = async (model = llamaSelected) => {
+        if (!model) return;
+        setLocalModelBusy(model.id);
+        setNotice({ kind: 'ok', text: t.localModelStarting });
+        try {
+          const payload = await callApi('/local-engine/start', {
+            method: 'POST',
+            body: { model: model.id },
+          });
+          if (payload?.ok !== true) {
+            setNotice({ kind: 'err', text: `${t.localModelStartFailed}: ${clipPreview(payload?.error ?? '', 500)}` });
+          } else {
+            setNotice({ kind: 'ok', text: t.localModelStarted });
+          }
+          await load('');
+        } catch (startError) {
+          setNotice({ kind: 'err', text: `${t.localModelStartFailed}: ${String(startError?.message ?? startError)}` });
+        } finally {
+          setLocalModelBusy('');
+        }
+      };
+      const stopLlamaModel = async (model = llamaSelected) => {
+        if (!model) return;
+        setLocalModelBusy(model.id);
+        try {
+          await callApi('/local-engine/stop', { method: 'POST', body: { model: model.id } });
+          setNotice({ kind: 'ok', text: t.localModelStopped });
+          await load('');
+        } catch (stopError) {
+          setNotice({ kind: 'err', text: `${t.localModelStopFailed}: ${String(stopError?.message ?? stopError)}` });
+        } finally {
+          setLocalModelBusy('');
+        }
+      };
+
       const saveLocalKind = async (model, kind) => {
         setLocalModelBusy(model.id);
         setNotice(null);
@@ -2745,6 +2877,7 @@ window.__ModuleLoader__.load({
       const settingsSections = [
         { id: 'general', label: t.settingsGeneral },
         { id: 'models', label: t.settingsModels },
+        { id: 'llama', label: t.settingsLlama },
         { id: 'advanced', label: t.settingsAdvanced },
         { id: 'network', label: t.settingsNetwork },
         { id: 'conversation', label: t.settingsConversation },
@@ -3860,6 +3993,63 @@ window.__ModuleLoader__.load({
       const recentStaging = (data?.staging ?? []).slice(0, 5);
       const mcpUrl = `${typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:PORT'}`
         + `${data?.mcpPath ?? '/ai-for-memory/mcp'}`;
+      const llamaColumnCard = (kind, title) => {
+        const models = llamaModels.filter((model) => llamaModelKind(model) === kind);
+        return h('section', { key: kind, style: styles.card },
+          h('h3', { style: styles.cardTitle }, title),
+          models.length === 0
+            ? h('p', { style: styles.hint }, t.llamaNoModels)
+            : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '7px' } },
+              models.map((model) => {
+                const engine = (data?.localEngines ?? []).find((row) => row.id === model.id);
+                const running = engine?.ready === true;
+                return h('div', {
+                  key: model.id,
+                  style: { borderTop: `1px solid ${colors.border}`, paddingTop: '6px' },
+                },
+                h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' } },
+                  h('span', { style: { fontSize: '12.5px', fontWeight: 600 } }, model.label),
+                  h('span', { style: { ...styles.hint, marginLeft: 'auto' } },
+                    running ? `${t.llamaRunning}：${engine.baseUrl}` : t.llamaNotRunning)),
+                h('div', { style: { display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap', marginTop: '4px' } },
+                  h('span', { style: styles.hint }, t.localModelCtx),
+                  h('input', {
+                    style: { ...styles.input, width: '76px', padding: '2px 5px', fontSize: '11.5px' },
+                    type: 'number',
+                    min: 256,
+                    max: 131072,
+                    step: 256,
+                    value: localCtxDrafts[model.id] ?? (model.ctxSize > 0 ? model.ctxSize : 2048),
+                    onChange: (event) => setLocalCtxDrafts((prev) => ({ ...prev, [model.id]: event.target.value })),
+                  }),
+                  h('button', {
+                    type: 'button', className: 'aim-btn', style: { ...styles.button, padding: '1px 7px', fontSize: '11px' },
+                    disabled: localModelBusy === model.id,
+                    onClick: () => saveLocalCtx(model),
+                  }, t.localModelCtxSave),
+                  model.runnable && !running
+                    ? h('button', {
+                      type: 'button', className: 'aim-btn', style: styles.primary,
+                      disabled: localModelBusy === model.id,
+                      onClick: () => startLlamaModel(model),
+                    }, localModelBusy === model.id ? t.localModelStarting : t.localModelStart)
+                    : null,
+                  running
+                    ? h('button', {
+                      type: 'button', className: 'aim-btn', style: styles.button,
+                      disabled: localModelBusy === model.id,
+                      onClick: () => stopLlamaModel(model),
+                    }, t.localModelStop)
+                    : null));
+              })));
+      };
+      const llamaColumns = h('div', {
+        className: 'aim-overview-grid',
+        style: { ...styles.overviewGrid, marginBottom: '10px' },
+      },
+      llamaColumnCard('embedding', t.llamaEmbeddingColumn),
+      llamaColumnCard('rerank', t.llamaRerankColumn));
+
       const overview = h('div', { className: 'aim-fade-up', style: { display: 'flex', flexDirection: 'column', gap: '14px' } },
         h('div', { style: styles.overviewToolbar },
           h('span', { style: styles.overviewPill }, `● ${t.overviewLocalPill}`),
@@ -4458,6 +4648,7 @@ window.__ModuleLoader__.load({
 
         isSettings && settingsSection === 'models'
           ? h('section', { style: styles.card },
+          llamaColumns,
           h('h3', { style: styles.cardTitle }, t.externalTitle),
           h('p', { style: styles.hint }, t.externalHint),
           h('div', {
@@ -4912,6 +5103,82 @@ window.__ModuleLoader__.load({
                   + (networkStatus.behind > 0 ? `｜${t.networkBehind} ${networkStatus.behind}` : '')
                   + (networkStatus.lastCommit ? `｜${networkStatus.lastCommit.hash} ${networkStatus.lastCommit.subject}` : ''))
             : null) : null,
+
+        isSettings && settingsSection === 'llama'
+          ? h('section', { style: styles.card },
+            h('h3', { style: styles.cardTitle }, t.llamaTuneTitle),
+            h('p', { style: styles.hint }, t.llamaTuneHint),
+            h('label', { style: styles.label },
+              t.llamaSelectModel,
+              h('select', {
+                style: styles.input,
+                value: llamaModelId,
+                onChange: (event) => setLlamaModelId(event.target.value),
+              },
+              llamaModels.length === 0 ? h('option', { value: '' }, t.llamaNoModels) : null,
+              llamaModels.map((model) => h('option', { key: model.id, value: model.id },
+                `${model.label}（${model.kind}）`)))),
+            llamaSelected
+              ? h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: '8px', marginTop: '8px' } },
+                h('label', { style: styles.label }, t.llamaCtx,
+                  h('input', {
+                    style: styles.input, type: 'number', min: 256, max: 131072, step: 256,
+                    value: llamaCtx, onChange: (event) => setLlamaCtx(event.target.value),
+                  })),
+                h('label', { style: styles.label }, t.llamaPort,
+                  h('input', {
+                    style: styles.input, type: 'number', min: 0, max: 65535,
+                    value: llamaPort, onChange: (event) => setLlamaPort(event.target.value),
+                  })),
+                h('label', { style: styles.label }, t.llamaPooling,
+                  h('select', {
+                    style: styles.input, value: llamaPooling,
+                    onChange: (event) => setLlamaPooling(event.target.value),
+                  },
+                  h('option', { value: '' }, '—'),
+                  ['cls', 'mean', 'last', 'none'].map((value) => h('option', { key: value, value }, value)))),
+                h('label', { style: styles.label }, t.llamaTimeout,
+                  h('input', {
+                    style: styles.input, type: 'number', min: 1000, max: 600000, step: 1000,
+                    value: llamaTimeout, onChange: (event) => setLlamaTimeout(event.target.value),
+                  })),
+                h('label', { style: styles.label }, t.llamaBinary,
+                  h('input', {
+                    style: styles.input, value: llamaBinary,
+                    placeholder: 'llama-server',
+                    onChange: (event) => setLlamaBinary(event.target.value),
+                  })),
+                h('label', { style: { ...styles.label, gridColumn: '1 / -1' } }, t.llamaExtra,
+                  h('textarea', {
+                    style: { ...styles.input, minHeight: '62px', resize: 'vertical', fontFamily: 'ui-monospace, Consolas, monospace' },
+                    value: llamaExtra, onChange: (event) => setLlamaExtra(event.target.value),
+                  })))
+              : null,
+            h('div', { style: { display: 'flex', gap: '7px', flexWrap: 'wrap', marginTop: '9px', alignItems: 'center' } },
+              h('button', {
+                type: 'button', className: 'aim-btn', style: styles.primary,
+                disabled: !llamaSelected || localModelBusy === llamaSelected.id,
+                onClick: saveLlamaConfig,
+              }, t.llamaSave),
+              llamaSelected?.runnable
+                ? h('button', {
+                  type: 'button', className: 'aim-btn', style: styles.button,
+                  disabled: localModelBusy === llamaSelected.id,
+                  onClick: () => startLlamaModel(),
+                }, t.llamaStart)
+                : null,
+              llamaSelected && (data?.localEngines ?? []).some((engine) => engine.id === llamaSelected.id)
+                ? h('button', {
+                  type: 'button', className: 'aim-btn', style: styles.button,
+                  disabled: localModelBusy === llamaSelected.id,
+                  onClick: () => stopLlamaModel(),
+                }, t.llamaStop)
+                : null,
+              h('span', { style: { ...styles.hint, marginLeft: 'auto' } },
+                llamaSelected
+                  ? `${t.llamaModel}：${llamaSelected.path}`
+                  : t.llamaNoModels)))
+          : null,
 
         isSettings && settingsSection === 'advanced'
           ? h('section', { style: styles.card },
