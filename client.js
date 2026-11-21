@@ -414,6 +414,7 @@ window.__ModuleLoader__.load({
         clearingTopic: '按话题相似度清理',
         clearingThreshold: '相似度阈值（越大清得越狠）',
         clearingKeep: '始终保留最近几轮',
+        clearingKeepSteps: '始终保留当前轮最近几步',
         clearingHint: '按话题相似度清理：以当轮与上轮为基准，相似度低的老轮次被清出，相似度高的原样保留；清出前先完整存档，随时可以 restore 调回。',
         restoreBudget: '恢复时最多注入字符数',
         advancedHint: '这些是 DSH 记忆内核的硬边界：上下文预算、检索条数、归档字符上限、自动提炼和三层保留。留空/0 的保留天数表示不自动删除。',
@@ -944,6 +945,7 @@ window.__ModuleLoader__.load({
         clearingTopic: 'Topic similarity',
         clearingThreshold: 'Similarity threshold (higher clears more)',
         clearingKeep: 'Always keep the last N turns',
+        clearingKeepSteps: 'Always keep the last N steps of the running turn',
         clearingHint: 'Topic-aware clearing: each older turn is compared with the current and previous turn. Turns that still share the topic stay verbatim; only the ones the conversation has left behind are cleared, and their full text is archived first so restore can always bring them back.',
         restoreBudget: 'Max characters injected by restore',
         advancedHint: 'Hard bounds of the memory core: context budget, retrieval count, archive size limits, auto-distillation and per-layer retention. A retention of 0 means never auto-delete.',
@@ -1696,6 +1698,7 @@ window.__ModuleLoader__.load({
       const [formTopical, setFormTopical] = React.useState(true);
       const [formThreshold, setFormThreshold] = React.useState(0.05);
       const [formKeepRecent, setFormKeepRecent] = React.useState(2);
+      const [formKeepSteps, setFormKeepSteps] = React.useState(3);
       const [formRestoreMax, setFormRestoreMax] = React.useState(12000);
       const [formMaxContext, setFormMaxContext] = React.useState(30000);
       const [formTopK, setFormTopK] = React.useState(5);
@@ -1848,6 +1851,7 @@ window.__ModuleLoader__.load({
           }
           if (typeof payload.similarityThreshold === 'number') setFormThreshold(payload.similarityThreshold);
           if (Number.isInteger(payload.keepRecentTurns)) setFormKeepRecent(payload.keepRecentTurns);
+          if (Number.isInteger(payload.keepRecentSteps)) setFormKeepSteps(payload.keepRecentSteps);
           if (Number.isInteger(payload.restoreMaxChars)) setFormRestoreMax(payload.restoreMaxChars);
           if (Number.isInteger(payload.maxContextChars)) setFormMaxContext(payload.maxContextChars);
           if (Number.isInteger(payload.defaultTopK)) setFormTopK(payload.defaultTopK);
@@ -2100,6 +2104,7 @@ window.__ModuleLoader__.load({
           knowledgeBackend: formStorage,
           similarityThreshold: Number(formThreshold) || 0.05,
           keepRecentTurns: Number(formKeepRecent) || 2,
+          keepRecentSteps: Number(formKeepSteps) || 3,
           restoreMaxChars: Number(formRestoreMax) || 12000,
           maxContextChars: Number(formMaxContext) || 30000,
           defaultTopK: Number(formTopK) || 5,
@@ -2151,6 +2156,7 @@ window.__ModuleLoader__.load({
           && payload.knowledgeBackend === body.knowledgeBackend
           && payload.similarityThreshold === body.similarityThreshold
           && payload.keepRecentTurns === body.keepRecentTurns
+          && payload.keepRecentSteps === body.keepRecentSteps
           && payload.restoreMaxChars === body.restoreMaxChars
           && payload.maxContextChars === body.maxContextChars
           && payload.defaultTopK === body.defaultTopK
@@ -5527,6 +5533,16 @@ window.__ModuleLoader__.load({
                   max: 20,
                   value: formKeepRecent,
                   onChange: (event) => setFormKeepRecent(event.target.value),
+                })),
+              h('label', { style: styles.label },
+                t.clearingKeepSteps,
+                h('input', {
+                  style: styles.input,
+                  type: 'number',
+                  min: 1,
+                  max: 20,
+                  value: formKeepSteps,
+                  onChange: (event) => setFormKeepSteps(event.target.value),
                 })))
             : null,
           h('label', { style: styles.label },

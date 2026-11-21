@@ -69,7 +69,7 @@ import {
   formatScanReport, repairSessionLog, resolveSessionLogTarget, scanSessionLogs, validateSessionEvents,
 } from '../lib/session-repair.js';
 import { isTrustedRequest } from '../lib/api.js';
-import { apply, compileParameterSchema, Config, createTools, installContextManagement, memoryContext, normalizeConfig, searchWithRag, workspaceOf } from '../index.js';
+import { apply, compileParameterSchema, Config, createTools, installContextManagement, memoryContext, normalizeConfig, planPrefixReset, searchWithRag, workspaceOf } from '../index.js';
 
 function tempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agm-test-'));
@@ -242,6 +242,22 @@ test('retrieval cache modes select the same result set', () => {
   const document = search(docs, '网关超时', { mode: 'hybrid', cacheMode: 'document' });
   assert.deepEqual(auto.map((hit) => hit.doc_id), library.map((hit) => hit.doc_id));
   assert.deepEqual(auto.map((hit) => hit.doc_id), document.map((hit) => hit.doc_id));
+});
+
+test('the retrieval cache key uses revision, not the text length', () => {
+  const stamp = '2026-01-01T00:00:00Z';
+  const before = [{
+    doc_id: 'docversion-same', category: 'ui_facts', text: '网关超时是三十秒', updated_at: stamp, revision: 1,
+  }];
+  const after = [{
+    doc_id: 'docversion-same', category: 'ui_facts', text: '网关重试是三十秒', updated_at: stamp, revision: 2,
+  }];
+  assert.equal(before[0].text.length, after[0].text.length);
+  assert.equal(search(before, '超时', { mode: 'bm25' }).length, 1);
+  // Same id, same timestamp, same length: only revision tells them apart. A
+  // stale key would reuse the first document's tokens and miss "重试".
+  assert.equal(search(after, '重试', { mode: 'bm25' }).length, 1);
+  assert.equal(search(after, '超时', { mode: 'bm25' }).length, 0);
 });
 
 test('Chinese snippets center on multi-character query terms, not the first single char', () => {
@@ -2019,6 +2035,7 @@ test('config validator bounds auto settings', () => {
   assert.equal(defaults.defaultPublic, false);
   assert.equal(defaults.topicalClear, true);
   assert.equal(defaults.keepRecentTurns, 2);
+  assert.equal(defaults.keepRecentSteps, 3);
   assert.equal(defaults.similarityThreshold, 0.05);
   assert.equal(defaults.minClearChars, 200);
   assert.equal(defaults.externalBaseUrl, '');
@@ -2038,6 +2055,9 @@ test('config validator bounds auto settings', () => {
   assert.ok(validator({ maxContextChars: 500 }).issues);
   assert.ok(validator({ keepRecentTurns: 0 }).issues);
   assert.ok(validator({ keepRecentTurns: 2.5 }).issues);
+  assert.equal(validator({ keepRecentSteps: 5 }).value.keepRecentSteps, 5);
+  assert.ok(validator({ keepRecentSteps: 0 }).issues);
+  assert.ok(validator({ keepRecentSteps: 2.5 }).issues);
   assert.ok(validator({ similarityThreshold: 1.5 }).issues);
   assert.ok(validator({ similarityThreshold: 'high' }).issues);
   assert.ok(validator({ topicalClear: 'yes' }).issues);
@@ -5438,6 +5458,52 @@ test('session repair: compact re-frames a valid log without changing events', as
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('prefix reset steps back one step when the newest boundary is unsafe', () => {
+  const events = [
+    { type: 'system/message', data: { turn: 0, step: 0, message: { role: 'system', content: [{ type: 'text', text: 'SYSTEM' }] } } },
+    { type: 'turn/start', data: { turn: 1 } },
+    { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '任务：整理发布说明' }] } },
+    { type: 'assistant/message', data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '步骤一' }, { type: 'tool-call', id: 'c1', name: 'read', arguments: '{}' }] } } },
+    { type: 'tool/result', data: { turn: 1, step: 1, message: { role: 'tool', toolCallId: 'c1', content: [{ type: 'text', text: '结果一' }] } } },
+    { type: 'assistant/message', data: { turn: 1, step: 2, message: { role: 'assistant', content: [{ type: 'text', text: '步骤二' }, { type: 'tool-call', id: 'c2', name: 'read', arguments: '{}' }] } } },
+    { type: 'tool/result', data: { turn: 1, step: 2, message: { role: 'tool', toolCallId: 'c2', content: [{ type: 'text', text: '结果二' }] } } },
+    { type: 'assistant/message', data: { turn: 1, step: 3, message: { role: 'assistant', content: [{ type: 'text', text: '步骤三' }, { type: 'tool-call', id: 'c3', name: 'read', arguments: '{}' }] } } },
+    // Step 4 starts on its tool result, directly after the call: cutting there
+    // would end the replaced range on an unanswered tool call.
+    { type: 'tool/result', data: { turn: 1, step: 4, message: { role: 'tool', toolCallId: 'c3', content: [{ type: 'text', text: '结果三' }] } } },
+    { type: 'assistant/message', data: { turn: 1, step: 5, message: { role: 'assistant', content: [{ type: 'text', text: '步骤五' }] } } },
+    { type: 'tool/result', data: { turn: 1, step: 5, message: { role: 'tool', toolCallId: 'c4', content: [{ type: 'text', text: '结果五' }] } } },
+  ];
+  const { session, nodes } = fakeSession(events);
+  const turns = collectTurns(session.ownEvents());
+  const plan = planPrefixReset(session, turns, { keepRecentTurns: 1, keepRecentSteps: 2 });
+  assert.ok(plan, 'an earlier step boundary is safe, so the reset must still fire');
+  // The cut moved one step earlier than the newest kept step (step 4 → step 3)
+  // and ends on the tool result of step 2.
+  assert.equal(plan.run.startSeq, nodes[2]);
+  assert.equal(plan.run.endSeq, nodes[5]);
+  assert.equal(plan.run.seqs.length, 4);
+  assert.ok(plan.run.seqs.length < nodes.length - 1, 'must not clear the whole running turn');
+});
+
+test('prefix reset leaves the whole running turn when every boundary is unsafe', () => {
+  const events = [
+    { type: 'system/message', data: { turn: 0, step: 0, message: { role: 'system', content: [{ type: 'text', text: 'SYSTEM' }] } } },
+    { type: 'turn/start', data: { turn: 1 } },
+    { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '任务：整理发布说明' }] } },
+    // No assistant node carries a step, so every step starts on a tool result
+    // whose predecessor is the assistant call itself: no boundary is safe.
+    { type: 'assistant/message', data: { turn: 1, message: { role: 'assistant', content: [{ type: 'text', text: '第一步' }, { type: 'tool-call', id: 'c1', name: 'read', arguments: '{}' }] } } },
+    { type: 'tool/result', data: { turn: 1, step: 1, message: { role: 'tool', toolCallId: 'c1', content: [{ type: 'text', text: '结果一' }] } } },
+    { type: 'assistant/message', data: { turn: 1, message: { role: 'assistant', content: [{ type: 'text', text: '第二步' }, { type: 'tool-call', id: 'c2', name: 'read', arguments: '{}' }] } } },
+    { type: 'tool/result', data: { turn: 1, step: 2, message: { role: 'tool', toolCallId: 'c2', content: [{ type: 'text', text: '结果二' }] } } },
+  ];
+  const { session } = fakeSession(events);
+  const turns = collectTurns(session.ownEvents());
+  // Giving up is correct here; clearing down to the request is not.
+  assert.equal(planPrefixReset(session, turns, { keepRecentTurns: 1, keepRecentSteps: 1 }), null);
 });
 
 test('pressure reset clears a fragmented window in one contiguous replacement', async () => {

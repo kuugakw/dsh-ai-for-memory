@@ -140,6 +140,12 @@ const DEFAULTS = Object.freeze({
   topicalClear: true,
   similarityThreshold: SIMILARITY_DEFAULT,
   keepRecentTurns: 2,
+  // Steps of the running turn that survive a hard reset verbatim. A real DSH
+  // task is one user request executed over many tool steps, so the running turn
+  // holds the whole working set. Keeping it whole would keep the whole window
+  // and a mid-task reset could never fire; keeping too few would clear the task
+  // that is still running.
+  keepRecentSteps: 3,
   maxClearTurns: 8,
   minClearChars: 200,
   maxClearChars: 120000,
@@ -167,17 +173,8 @@ const DEFAULTS = Object.freeze({
 });
 
 /**
- * Steps of the running turn that survive a hard reset verbatim.
- *
- * A real DSH task is one user request executed over many tool steps, so the
- * running turn holds the whole working set. Keeping it whole would keep the
- * whole window and a mid-task reset could never fire; keeping the last few
- * steps leaves enough context to continue the same task while the old,
- * already-archived steps leave the window.
+ * Related-memory lines injected into a mid-task reset brief, and their budget.
  */
-const RESET_KEEP_STEPS = 3;
-
-/** Related-memory lines injected into a mid-task reset brief, and their budget. */
 const RESET_RELATED_LIMIT = 3;
 const RESET_RELATED_CHARS = 1200;
 
@@ -190,6 +187,7 @@ const NUMERIC_BOUNDS = Object.freeze({
   maxContextChars: [1000, 200000],
   restoreMaxChars: [1000, 100000],
   keepRecentTurns: [1, 20],
+  keepRecentSteps: [1, 20],
   maxClearTurns: [1, 50],
   minClearChars: [0, 20000],
   maxClearChars: [1000, 1000000],
@@ -749,7 +747,6 @@ function localRrfRows(sources, query, options = {}) {
       mode: 'bm25',
       topK: 40,
       detail: 'full',
-      cacheMode: options.cacheMode,
     });
     // `hit.score` already carries confidence/unverified penalties from local
     // retrieval. Use the raw BM25 component here; the channel prior applies
@@ -894,7 +891,6 @@ export async function searchWithRag(config, sources, query, options = {}) {
   });
   const localRows = localRrfRows(sources, query, {
     category: options.category ?? null,
-    cacheMode: options.cacheMode,
   });
   // Priors belong inside a channel, not on top of the fused RRF score. This also
   // makes `RAG#` / `BM25#` in the output describe the order RRF actually saw.
@@ -1799,11 +1795,6 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           enum: ['summary', 'full'],
           description: '默认 summary=返回查询附近摘要和全文长度；full=返回完整正文（显式请求才用，避免一次性占满上下文）。',
         },
-        cache_mode: {
-          type: 'string',
-          enum: ['auto', 'library', 'document'],
-          description: '检索缓存路由：auto=库级快路径 + 文档级增量缓存；library=只用库级缓存；document=只用逐文档缓存。默认 auto。',
-        },
       },
       output: TEXT_OUTPUT,
       isConcurrencySafe: () => true,
@@ -1870,7 +1861,6 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
               mode,
               topK: Math.max(topK, 10),
               detail: 'full',
-              cacheMode: args?.cache_mode,
             });
             // BM25 scores are not comparable across stores because each store's
             // corpus and document frequency differ. Normalize within the store
@@ -1926,7 +1916,6 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             store: callerStore,
             owner: callerOwner,
             detail,
-            cacheMode: args?.cache_mode,
           });
           if (rag.ok === true) {
             picked = { empty: rag.empty === true, text: rag.text };
@@ -2034,7 +2023,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         + 'sessions=列出所有对话及其记忆规模。'
         + '手动 clear 按话题相似度：相似度低的老轮次先完整存档再清出，相似度高的保留，随时可用 restore 调回。'
         + '自动整理开启时，上下文占用达到设定百分比会做硬重置，而且是在任务进行中就做：'
-        + '下一次模型请求前，按步骤清出当前轮较早的工具步骤（保留当前请求、最近 3 步和最近 keepRecentTurns 轮），'
+        + `下一次模型请求前，按步骤清出当前轮较早的工具步骤（保留当前请求、最近 ${config.keepRecentSteps} 步和最近 keepRecentTurns 轮），`
         + '并注入续接包（当前请求 + 最近进展 + 相关记忆）后继续同一个任务，不用等到轮末；'
         + '若这一轮已经结束、没有下一次请求，则在轮末保留最近几轮后清出其余内容。'
         + '每 N 轮的自动整理仍按相似度选择，手动工具始终可用。'
@@ -2595,17 +2584,32 @@ export function planPrefixReset(session, turns, options = 1) {
         if (turnFirst < keepIndex) keepIndex = turnFirst;
         continue;
       }
-      const cutIndex = stepStart.get(steps[steps.length - keepStepCount]);
-      if (!Number.isInteger(cutIndex) || cutIndex <= firstClearIndex) continue;
-      // Never cut right after an assistant message that still owns tool calls:
-      // the matching results live in the next step, so the range would end in
-      // an unanswered call.
-      const before = eventAt(nodes[cutIndex - 1]);
-      const ownsToolCalls = before?.type === 'assistant/message'
-        && Array.isArray(before.data?.message?.content)
-        && before.data.message.content.some((block) => block?.type === 'tool-call');
-      if (ownsToolCalls) continue;
-      if (cutIndex < keepIndex) keepIndex = cutIndex;
+      // Prefer the newest kept step boundary. A boundary right after an
+      // assistant message that still owns tool calls is unsafe: the matching
+      // results live in the next step, so the range would end in an unanswered
+      // call. Step back one step instead of skipping the trim: giving up here
+      // would leave keepIndex at the end and clear the whole running turn.
+      let safeCut = null;
+      for (let pick = steps.length - keepStepCount; pick >= 0; pick -= 1) {
+        const candidate = stepStart.get(steps[pick]);
+        if (!Number.isInteger(candidate) || candidate <= firstClearIndex) break;
+        const before = eventAt(nodes[candidate - 1]);
+        const ownsToolCalls = before?.type === 'assistant/message'
+          && Array.isArray(before.data?.message?.content)
+          && before.data.message.content.some((block) => block?.type === 'tool-call');
+        if (!ownsToolCalls) {
+          safeCut = candidate;
+          break;
+        }
+      }
+      if (safeCut !== null) {
+        if (safeCut < keepIndex) keepIndex = safeCut;
+      } else if (turnFirst < keepIndex) {
+        // Even the earliest step boundary is unsafe (or starts at the clear
+        // boundary): keep the whole running turn rather than clearing it down
+        // to the request, which is what the old `continue` fallback did.
+        keepIndex = turnFirst;
+      }
     }
   }
   if (keepIndex <= firstClearIndex) return null;
@@ -3109,7 +3113,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
         // single-turn task could never be cleared while it was running.
         resetPlan = planPrefixReset(session, turns, {
           keepRecentTurns: config.keepRecentTurns,
-          keepRecentSteps: RESET_KEEP_STEPS,
+          keepRecentSteps: config.keepRecentSteps,
         });
         if (!resetPlan) {
           record({

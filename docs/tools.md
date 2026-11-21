@@ -82,7 +82,7 @@ JSON 导出保留 `provenance`、`verified`、`changes`、`confidence`、`eviden
 
 特点：
 
-- 最近 `keepRecentTurns` 轮始终保留；
+- 最近 `keepRecentTurns` 轮始终保留，当前轮最近 `keepRecentSteps` 步也始终保留；
 - 旧轮次按话题相似度选择，低相似度才清出；
 - 清理前先完整存档，`restore` 可以调回；
 - 恢复不会整份塞回去，按 `restoreMaxChars` 从尾部取最近的轮次/事件段；

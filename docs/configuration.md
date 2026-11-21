@@ -55,6 +55,7 @@
 | `topicalClear` | `true` | 按话题相似度清理手动/每轮触发；关掉则用整段压缩（占用阈值仍走全量重置） |
 | `similarityThreshold` | 0.05 | 话题相似度阈值 |
 | `keepRecentTurns` | 2 | 始终保留最近几轮 |
+| `keepRecentSteps` | 3 | 硬重置时保留当前轮最近几个工具步骤 |
 | `maxClearTurns` | 8 | 单次最多清出轮数 |
 | `minClearChars` | 200 | 少于这个字符数不清理 |
 | `maxClearChars` | 120000 | 单次清出字符上限 |

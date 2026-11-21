@@ -139,7 +139,7 @@ verified: false
 - `top_k` 控制返回条数；
 - `detail=summary` 默认只返回查询附近的摘要和全文长度；
 - `detail=full` 才返回完整正文；
-- `cache_mode=auto|library|document` 控制库级/文档级缓存路由。
+- 缓存路由是内部实现（库级快路径 + 逐文档增量兜底），不作为工具参数暴露。
 
 输出会标注：
 
@@ -234,7 +234,7 @@ DSH 把每个对话写成 `session.v4.jsonl.zstd`。其中一条事件结构不�
 
 手动清理按话题相似度选择：
 
-- 最近 `keepRecentTurns` 轮始终保留；
+- 最近 `keepRecentTurns` 轮始终保留，当前轮最近 `keepRecentSteps` 步也始终保留；
 - 老轮次按话题相似度选择，低相似度才清出；
 - 当轮仍在执行时，绝不作为清理候选；
 - 清理前先完整存档；
@@ -670,6 +670,7 @@ http://127.0.0.1:<DSH 端口>/ai-for-memory/mcp
 | `topicalClear` | `true` | 按话题相似度清理；关掉则用整段压缩（占用阈值仍全量重置） |
 | `similarityThreshold` | 0.05 | 话题相似度阈值 |
 | `keepRecentTurns` | 2 | 始终保留最近几轮 |
+| `keepRecentSteps` | 3 | 硬重置时保留当前轮最近几个工具步骤 |
 | `maxClearTurns` | 8 | 单次最多清出轮数 |
 | `minClearChars` | 200 | 少于这个字符数不清理 |
 | `maxClearChars` | 120000 | 单次清出字符上限 |
