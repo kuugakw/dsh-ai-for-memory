@@ -166,6 +166,21 @@ const DEFAULTS = Object.freeze({
   mcpToken: '',
 });
 
+/**
+ * Steps of the running turn that survive a hard reset verbatim.
+ *
+ * A real DSH task is one user request executed over many tool steps, so the
+ * running turn holds the whole working set. Keeping it whole would keep the
+ * whole window and a mid-task reset could never fire; keeping the last few
+ * steps leaves enough context to continue the same task while the old,
+ * already-archived steps leave the window.
+ */
+const RESET_KEEP_STEPS = 3;
+
+/** Related-memory lines injected into a mid-task reset brief, and their budget. */
+const RESET_RELATED_LIMIT = 3;
+const RESET_RELATED_CHARS = 1200;
+
 /** Integer bounds for the numeric settings; `null` marks a float setting. */
 const NUMERIC_BOUNDS = Object.freeze({
   autoEveryRounds: [1, 100],
@@ -2021,9 +2036,11 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         + 'list=列出存档；status=查看清理策略与存档状态；'
         + 'sessions=列出所有对话及其记忆规模。'
         + '手动 clear 按话题相似度：相似度低的老轮次先完整存档再清出，相似度高的保留，随时可用 restore 调回。'
-        + '自动整理开启时，上下文占用达到设定百分比会做硬重置：已完成的轮次全部存档并清出，'
-        + '在下一次模型请求前只重新载入当前请求和最近进展；若这一轮已经结束、没有下一次请求，'
-        + '则在轮末全部清出。每 N 轮的自动整理仍按相似度选择，手动工具始终可用。'
+        + '自动整理开启时，上下文占用达到设定百分比会做硬重置，而且是在任务进行中就做：'
+        + '下一次模型请求前，按步骤清出当前轮较早的工具步骤（保留当前请求、最近 3 步和最近 keepRecentTurns 轮），'
+        + '并注入续接包（当前请求 + 最近进展 + 相关记忆）后继续同一个任务，不用等到轮末；'
+        + '若这一轮已经结束、没有下一次请求，则在轮末保留最近几轮后清出其余内容。'
+        + '每 N 轮的自动整理仍按相似度选择，手动工具始终可用。'
         + '存档默认按对话隔离（每个对话只列出自己的），restore 默认可以跨对话找到别的对话保存过的上下文，'
         + '但只有已打开的对话可见（新建对话默认不开放）。',
       parameters: {
@@ -2493,64 +2510,152 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
 /**
  * One contiguous surface prefix that a hard reset may replace, or `null`.
  *
- * A hard reset promises "archive everything, then start from the current
- * request". Per-turn ranges cannot keep that promise: one earlier partial
- * clear leaves turns whose node runs are no longer contiguous, `turnRange`
- * refuses them forever, and the reset degrades into "clear the newest turn"
- * on every pass — the window stays at the threshold while each pass only
- * removes what the pass before it created. The prefix form has no such state:
- * it starts right after the system prompt and ends at the first node of the
- * block being kept, so it is contiguous by construction and never splits a
- * turn (the kept block always starts at a turn boundary).
+ * A hard reset promises "archive everything, then leave only what the task in
+ * progress still needs". Two things used to break that promise:
+ *
+ * - Per-turn ranges: one earlier partial clear leaves a turn whose nodes are no
+ *   longer contiguous, `turnRange` refuses it forever, and the reset degrades
+ *   into "clear the newest turn" on every pass.
+ * - Turn granularity: a real DSH task is one long turn full of tool steps, so
+ *   "keep the running turn" keeps the whole window and a mid-task reset can
+ *   never fire at all.
+ *
+ * The prefix form has neither problem: it starts right after the system prompt
+ * and ends at the first node of the block being kept, so it is contiguous by
+ * construction. Inside the running turn the kept block starts at a **step**
+ * boundary (the last `keepRecentSteps` steps stay verbatim), and a step
+ * boundary is safe because every tool call is answered by a `tool/result`
+ * before the next step starts — the cut never lands between a call and its
+ * result.
  *
  * @param {object} session live DSH session (needs `surface.nodes` and `eventAt`)
  * @param {Array<object>} turns `collectTurns()` output, oldest first
- * @param {number} keepRecent newest completed turns to keep verbatim
+ * @param {number|{keepRecentTurns?: number, keepRecentSteps?: number}} options
+ *   a number keeps the same meaning as `keepRecentTurns`
  * @returns {{run: object, keptTurns: Array<object>}|null}
  */
-export function planPrefixReset(session, turns, keepRecent) {
+export function planPrefixReset(session, turns, options = 1) {
+  const resolved = typeof options === 'number'
+    ? { keepRecentTurns: options, keepRecentSteps: 0 }
+    : (options && typeof options === 'object' ? options : {});
   const nodes = session?.surface && Array.isArray(session.surface.nodes)
     ? session.surface.nodes : null;
   if (!nodes || nodes.length <= 1) return null;
   const position = new Map();
   nodes.forEach((seq, index) => position.set(seq, index));
-  const keepCount = Math.max(1, Number.isFinite(Number(keepRecent)) ? Number(keepRecent) : 1);
+  const keepTurnCount = Math.max(1, Number.isFinite(Number(resolved.keepRecentTurns))
+    ? Number(resolved.keepRecentTurns) : 1);
+  const keepStepCount = Math.max(0, Number.isFinite(Number(resolved.keepRecentSteps))
+    ? Number(resolved.keepRecentSteps) : 0);
   const list = Array.isArray(turns) ? turns : [];
   const completed = list.filter((turn) => turn.inFlight !== true);
   const inFlight = list.filter((turn) => turn.inFlight === true);
   const keptTurns = [
-    ...completed.slice(Math.max(0, completed.length - keepCount)),
+    ...completed.slice(Math.max(0, completed.length - keepTurnCount)),
     ...inFlight,
   ];
+  // Node 0 is the system prompt whenever it holds one, and a clear never
+  // shadows it; a session whose first node is already a message may clear from 0.
+  const eventAt = typeof session.eventAt === 'function'
+    ? (seq) => session.eventAt(seq) : () => undefined;
+  const head = eventAt(nodes[0]);
+  const firstClearIndex = head && head.type === 'system/message' ? 1 : 0;
+
   // The kept block starts at the earliest still-visible node of any kept turn.
-  // A kept turn that is already fully shadowed has no node here and simply
-  // contributes nothing.
+  // A kept turn that is already fully shadowed contributes nothing.
   let keepIndex = nodes.length;
-  for (const turn of keptTurns) {
+  const keptCompleted = keptTurns.filter((turn) => turn.inFlight !== true);
+  for (const turn of keptCompleted) {
     for (const seq of Array.isArray(turn.seqs) ? turn.seqs : []) {
       const index = position.get(seq);
       if (index !== undefined && index < keepIndex) keepIndex = index;
     }
   }
-  // Node 0 is the system prompt whenever it holds one, and a clear never
-  // shadows it; a session whose first node is already a message may clear
-  // from 0.
-  const head = typeof session.eventAt === 'function' ? session.eventAt(nodes[0]) : undefined;
-  const firstClearIndex = head && head.type === 'system/message' ? 1 : 0;
+  // Step granularity inside the running turn: keep only its newest steps, and
+  // cut at the first surface node of the earliest kept step.
+  if (keepStepCount > 0 && inFlight.length > 0) {
+    for (const turn of inFlight) {
+      const stepStart = new Map();
+      // A real user message carries no turn/step of its own, so the running
+      // turn's first node has to come from its collected `seqs`, not from
+      // `data.turn` on individual events.
+      let turnFirst = nodes.length;
+      for (const seq of Array.isArray(turn.seqs) ? turn.seqs : []) {
+        const index = position.get(seq);
+        if (index !== undefined && index < turnFirst) turnFirst = index;
+      }
+      for (let index = firstClearIndex; index < nodes.length; index += 1) {
+        const event = eventAt(nodes[index]);
+        if (!event || event.data?.turn !== turn.turn) continue;
+        const step = Number(event.data?.step);
+        if (!Number.isInteger(step)) continue;
+        if (!stepStart.has(step)) stepStart.set(step, index);
+      }
+      const steps = [...stepStart.keys()].sort((left, right) => left - right);
+      if (steps.length <= keepStepCount || steps.length === 0) {
+        // Too few steps to trim: keep the whole running turn. Without this the
+        // second reset would clear the steps the first one deliberately kept.
+        if (turnFirst < keepIndex) keepIndex = turnFirst;
+        continue;
+      }
+      const cutIndex = stepStart.get(steps[steps.length - keepStepCount]);
+      if (!Number.isInteger(cutIndex) || cutIndex <= firstClearIndex) continue;
+      // Never cut right after an assistant message that still owns tool calls:
+      // the matching results live in the next step, so the range would end in
+      // an unanswered call.
+      const before = eventAt(nodes[cutIndex - 1]);
+      const ownsToolCalls = before?.type === 'assistant/message'
+        && Array.isArray(before.data?.message?.content)
+        && before.data.message.content.some((block) => block?.type === 'tool-call');
+      if (ownsToolCalls) continue;
+      if (cutIndex < keepIndex) keepIndex = cutIndex;
+    }
+  }
   if (keepIndex <= firstClearIndex) return null;
-  const startSeq = nodes[firstClearIndex];
+  // Keep the running turn's preamble: its user request and the harness
+  // reminders that arrived with it are the only copy of what this task *is*.
+  // The raw steps are what grows, so a mid-task clear starts at the first
+  // assistant node of the running turn and leaves the request itself visible
+  // (in the transcript as well as to the model).
+  let clearFromIndex = firstClearIndex;
+  if (inFlight.length > 0) {
+    const runningTurn = inFlight[inFlight.length - 1].turn;
+    for (let index = firstClearIndex; index < keepIndex; index += 1) {
+      const event = eventAt(nodes[index]);
+      if (event?.type === 'assistant/message' && event.data?.turn === runningTurn) {
+        clearFromIndex = index;
+        break;
+      }
+    }
+  }
+  if (keepIndex <= clearFromIndex) return null;
+  // A prefix that holds nothing but the plugin's own notices is not worth a
+  // replacement: it would archive a note and write a new one, forever.
+  let hasRealContent = false;
+  for (let index = clearFromIndex; index < keepIndex; index += 1) {
+    const event = eventAt(nodes[index]);
+    if (event?.data?.source?.kind !== 'ai-for-memory') { hasRealContent = true; break; }
+  }
+  if (!hasRealContent) return null;
+  const startSeq = nodes[clearFromIndex];
   const endSeq = nodes[keepIndex - 1];
   if (!Number.isInteger(startSeq) || !Number.isInteger(endSeq) || endSeq < startSeq) return null;
-  const cleared = list.filter((turn) => (Array.isArray(turn.seqs) ? turn.seqs : [])
-    .some((seq) => seq >= startSeq && seq <= endSeq));
+  // Only fully completed turns are archived as turns: a running turn is cut in
+  // the middle, and its kept tail is still in the window, so listing it as
+  // "cleared" would duplicate it on restore. Its removed steps are still kept
+  // in `raw_events`.
+  const cleared = list.filter((turn) => turn.inFlight !== true
+    && (Array.isArray(turn.seqs) ? turn.seqs : []).some((seq) => seq >= startSeq && seq <= endSeq));
   return {
     keptTurns,
+    clearedTurns: cleared,
+    currentTurn: inFlight.length > 0 ? inFlight[inFlight.length - 1].turn : null,
     run: {
       turns: cleared,
-      seqs: nodes.slice(firstClearIndex, keepIndex),
+      seqs: nodes.slice(clearFromIndex, keepIndex),
       startSeq,
       endSeq,
-      startIdx: firstClearIndex,
+      startIdx: clearFromIndex,
       endIdx: keepIndex - 1,
       chars: cleared.reduce((sum, turn) => sum + Number(turn.chars ?? 0), 0),
       similarity: 0,
@@ -2749,6 +2854,60 @@ export function installContextManagement(ctx, config, deps, runtime) {
     }
   };
 
+  /** Shared-layer store, or `undefined` when this profile has no shared layer. */
+  const sharedStoreOfSession = (session) => {
+    try {
+      const context = memoryContext(config, { agent: { session } }, deps, runtime);
+      return context.scopes.sharedStore();
+    } catch {
+      return undefined;
+    }
+  };
+
+  /**
+   * Compact "related memory" lines for a mid-task reset brief.
+   *
+   * Clearing mid-task must not mean forgetting the project: what leaves is the
+   * raw step-by-step transcript, not the facts. Knowledge that matches the
+   * running request is restated in the brief inside a small budget, so the
+   * model continues with the same rules and constraints instead of rediscovering
+   * them (or inventing them).
+   *
+   * @returns {string} `- line` rows, or `''` when nothing matches
+   */
+  const relatedMemoryLines = (store, sharedStore, query) => {
+    const text = String(query ?? '').trim();
+    if (text === '') return '';
+    const lines = [];
+    let used = 0;
+    const seen = new Set();
+    for (const candidate of [store, sharedStore]) {
+      if (!candidate || typeof candidate.search !== 'function') continue;
+      let hits = [];
+      try {
+        hits = candidate.search(text, {
+          topK: RESET_RELATED_LIMIT,
+          detail: 'summary',
+          mode: 'hybrid',
+        }) ?? [];
+      } catch {
+        continue;
+      }
+      for (const hit of hits) {
+        const body = String(hit?.text ?? '').replace(/\s+/g, ' ').trim();
+        if (body === '' || seen.has(body)) continue;
+        seen.add(body);
+        const line = `- ${clip(body, 220)}`;
+        if (used + line.length > RESET_RELATED_CHARS) break;
+        lines.push(line);
+        used += line.length + 1;
+        if (lines.length >= RESET_RELATED_LIMIT) break;
+      }
+      if (lines.length >= RESET_RELATED_LIMIT) break;
+    }
+    return lines.join('\n');
+  };
+
   /** Diagnostics sink for the last clear/compaction attempt. */
   const recorderOf = (store) => (data) => {
     try {
@@ -2858,6 +3017,11 @@ export function installContextManagement(ctx, config, deps, runtime) {
   const clearRun = (session, run, contextId, modelNote = '') => {
     let shadowedTokens = 0;
     for (const seq of run.seqs) shadowedTokens += priceOfNode(session, seq);
+    // A mid-task reset clears steps of the running turn, which carry no turn
+    // number of their own; describe that case instead of claiming turns left.
+    const removed = run.turns.length > 0
+      ? describeTurns(run.turns, run.similarity)
+      : `本轮较早的 ${run.seqs.length} 个步骤`;
     // Shadow-price protocol: the metering event and its replacement are
     // appended adjacently so a pure consumer can subtract the shadowed price.
     // Pricing is diagnostics; a log that refuses it must not block the clear.
@@ -2879,7 +3043,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
       role: 'user',
       content: [{
         type: 'text',
-        text: `【上下文清理】${describeTurns(run.turns, run.similarity)}已清出当前上下文，`
+        text: `【上下文清理】${removed}已清出当前上下文，`
           + (modelNote !== '' ? `${modelNote}\n` : '')
           + `原文完整保存在本对话的记忆存档 ${contextId}。`
           + `需要时调用 aim_context restore（context_id=${contextId}）即可调回。`,
@@ -2887,7 +3051,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
       source: {
         kind: 'ai-for-memory',
         form: 'notice',
-        summary: clip(`上下文清理：${describeTurns(run.turns, run.similarity)}`, 120),
+        summary: clip(`上下文清理：${removed}`, 120),
       },
     }, {
       surfaceOp: { op: 'replace', startSeq: run.startSeq, endSeq: run.endSeq },
@@ -2941,11 +3105,15 @@ export function installContextManagement(ctx, config, deps, runtime) {
       let clearTurns = selection.clear.filter((turn) => turn.inFlight !== true);
       let resetPlan = null;
       if (hardReset) {
-        // Hard reset is a single prefix replacement: the whole old window goes,
-        // only the newest completed turns and the in-flight turn stay. Without
-        // this, fragmented turns made every reset clear just one turn, so the
-        // measured usage never actually dropped.
-        resetPlan = planPrefixReset(session, turns, config.keepRecentTurns);
+        // Hard reset is a single prefix replacement: everything before the
+        // newest completed turns goes, and inside the running turn only its
+        // newest steps stay. Without the prefix form, fragmented turns made
+        // every reset clear just one turn; without the step form, a long
+        // single-turn task could never be cleared while it was running.
+        resetPlan = planPrefixReset(session, turns, {
+          keepRecentTurns: config.keepRecentTurns,
+          keepRecentSteps: RESET_KEEP_STEPS,
+        });
         if (!resetPlan) {
           record({
             state: 'skipped',
@@ -3010,7 +3178,25 @@ export function installContextManagement(ctx, config, deps, runtime) {
       }
 
       const clearedTurns = chosen.flatMap((run) => run.turns);
-      const snapshot = snapshotOfTurns(clearedTurns, { maxChars: Infinity });
+      // A mid-task reset can clear only the running turn's earlier steps. Those
+      // are not turns, so `snapshotOfTurns` has nothing to render; the archive
+      // still needs a record because `raw_events` is the only complete copy.
+      const partialOnly = resetPlan !== null && clearedTurns.length === 0;
+      const partialTurn = Number.isInteger(resetPlan?.currentTurn) ? resetPlan.currentTurn : 0;
+      const snapshot = snapshotOfTurns(clearedTurns, { maxChars: Infinity })
+        ?? (partialOnly ? {
+          turns: [],
+          text: `（第 ${partialTurn} 轮进行中：已清出 ${resetPlan.run.seqs.length} 个早期步骤节点，`
+            + '节点原文见 raw_events，可用 aim_context restore 调回）',
+          turnFrom: partialTurn,
+          turnTo: partialTurn,
+          turnCount: 0,
+          chars: 0,
+        } : null);
+      if (!snapshot) {
+        record({ state: 'skipped', reason: '没有可归档的清理内容', cleared: 0 });
+        return;
+      }
       // External mode: let the local model describe what is leaving, so the
       // replacement note carries a summary instead of only counts. A failed
       // summary must never block the clear — it just adds nothing.
@@ -3037,12 +3223,18 @@ export function installContextManagement(ctx, config, deps, runtime) {
       // authoritative than the last event in ownEvents, which can still be the
       // previous turn when a checkpoint and a new request arrive together.
       const taskRequest = String(options.taskRequest ?? '').trim() || latestUser;
+      // Progress means the newest kept output, including the running turn: with
+      // step-level clearing the most recent progress is inside this turn.
       const latestAssistant = [...turns].reverse()
-        .find((turn) => turn.inFlight !== true && !clearedNumbers.has(turn.turn) && turn.assistant)
-        ?.assistant ?? '';
+        .find((turn) => !clearedNumbers.has(turn.turn) && turn.assistant)?.assistant ?? '';
+      const related = hardReset && hardReload
+        ? relatedMemoryLines(store, sharedStoreOfSession(session), taskRequest)
+        : '';
       const taskBrief = hardReset && hardReload
-        ? `【任务续接】当前请求：${clip(taskRequest, 360)}`
+        ? '【任务续接】插件在进行中清出了旧上下文后写的续接包，不是新的用户请求，请继续当前任务。\n'
+          + `当前请求：${clip(taskRequest, 360)}`
           + (latestAssistant === '' ? '' : `\n最近进展：${clip(latestAssistant, 420)}`)
+          + (related === '' ? '' : `\n相关记忆（来自本对话记忆库，仅供参照）：\n${related}`)
         : '';
       const replacementNote = [modelNote, taskBrief].filter((text) => text !== '').join('\n');
       // Keep the raw event rows as well. The rendered `turns` above
@@ -3083,7 +3275,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
         threshold: selection.threshold,
       });
       // eslint-disable-next-line no-console
-      console.log(`[ai-for-memory] ${hardReset ? '已全量清出' : '已按话题相似度清出'} ${turnCount} 轮`
+      console.log(`[ai-for-memory] ${hardReset ? '已全量清出' : '已按话题相似度清出'} ${turnCount} 轮 / ${shadowed} 个节点`
         + `（保留 ${resetPlan ? resetPlan.keptTurns.length : selection.keep.length} 轮），存档 ${saved.context_id}`);
       return shadowed > 0;
     };
@@ -3161,17 +3353,22 @@ export function installContextManagement(ctx, config, deps, runtime) {
     const events = session.ownEvents();
     const turns = collectTurns(events);
     const currentTurn = turns[turns.length - 1]?.turn ?? 0;
-    const resetKey = { turn: currentTurn, seq: latestUserSeq(events) };
+    // A real task is one turn of many steps, so `{turn, seq}` stays identical
+    // for the whole task and one reset would suppress every later one. The
+    // measured prompt size is the only thing that changes when a new request
+    // has been sent, so it belongs in the key: after a reset the next request
+    // reports a fresh (smaller) size, which makes the next reset eligible.
+    const resetKey = {
+      turn: currentTurn,
+      seq: latestUserSeq(events),
+      tokens: Number.isFinite(Number(pressure?.pressureTokens))
+        ? Number(pressure.pressureTokens) : null,
+    };
     const previous = pressureResets.get(id);
-    // Suppress only within the same open request. A turn number alone can stay
-    // stale while a new user message arrives; the user-message seq is the
-    // boundary that makes a new reset eligible.
+    // Suppress only while nothing has been measured since the last reset.
     if (previous && typeof previous === 'object'
-      && previous.turn === resetKey.turn && previous.seq === resetKey.seq) return false;
-    if (!turns.some((turn) => turn.inFlight !== true)) {
-      pressureResets.set(id, resetKey);
-      return false;
-    }
+      && previous.turn === resetKey.turn && previous.seq === resetKey.seq
+      && previous.tokens === resetKey.tokens) return false;
     const percent = usagePercentOf(pressure);
     const cleared = await runTopicalClear(session, {
       label: `auto-pressure-${percent}pct`,

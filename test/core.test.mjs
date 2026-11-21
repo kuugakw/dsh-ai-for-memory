@@ -5445,3 +5445,108 @@ test('request anchor never restates a request that already left the surface', as
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a long running turn is cleared mid-task and continues from a resume brief', async () => {
+  const root = tempRoot();
+  try {
+    const events = [
+      { type: 'system/message', data: { turn: 0, step: 0, message: { role: 'system', content: [{ type: 'text', text: 'SYSTEM PROMPT' }] } } },
+      { type: 'turn/start', data: { turn: 1 } },
+      { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '当前任务：把存储层迁移到新 schema' }] } },
+    ];
+    // One long task turn: six steps, each with an assistant message that owns a
+    // tool call and the tool result that answers it. That is the real shape of
+    // a DSH task, and a turn-granular clear could never shrink it.
+    for (let step = 1; step <= 6; step += 1) {
+      events.push(
+        {
+          type: 'assistant/message',
+          data: {
+            turn: 1,
+            step,
+            message: {
+              role: 'assistant',
+              content: [
+                { type: 'text', text: `步骤 ${step} 的进展` },
+                { type: 'tool-call', id: `call-${step}`, name: 'read', arguments: '{}' },
+              ],
+            },
+          },
+        },
+        {
+          type: 'tool/result',
+          data: {
+            turn: 1,
+            step,
+            message: { role: 'tool', toolCallId: `call-${step}`, content: [{ type: 'text', text: `步骤 ${step} 的工具输出 STEP_${step}` }] },
+          },
+        },
+      );
+    }
+    const { session, log, nodes } = fakeSession(events);
+    let pressure = { pressureTokens: 90000, contextWindow: 100000 };
+    const handlers = new Map();
+    const ctx = {
+      effect: (fn) => fn(),
+      on: (event, handler) => { handlers.set(event, handler); return () => {}; },
+      get: (service) => (service === 'tokenMeter' ? { contextPressure: () => pressure } : undefined),
+    };
+    const config = normalizeConfig({
+      root: path.join(root, 'memory'),
+      autoEnabled: true,
+      autoEveryRounds: 100,
+      contextUsagePercent: 50,
+      keepRecentTurns: 1,
+    });
+    const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
+    installContextManagement(ctx, config, { registryDir: path.join(root, 'registry'), getService: ctx.get }, runtime);
+    const preStep = handlers.get('agent/pre-step');
+    const signal = new AbortController().signal;
+
+    await preStep({ agent: { session }, step: 7, turn: 1, messages: [], signal }, () => {});
+
+    const replacements = log.filter((event) => event.surfaceOp?.op === 'replace');
+    assert.equal(replacements.length, 1, 'a mid-task reset replaces the old steps once');
+    const run = replacements[0];
+    // The cut is a step boundary: it ends on the tool result of step 3, never
+    // between a tool call and its result. It starts at the first assistant node,
+    // so the user request and the harness reminders that came with it stay.
+    assert.equal(log[run.surfaceOp.startSeq].type, 'assistant/message');
+    assert.equal(log[run.surfaceOp.startSeq].data.step, 1);
+    assert.equal(log[run.surfaceOp.endSeq].type, 'tool/result');
+    assert.equal(log[run.surfaceOp.endSeq].data.step, 3);
+    const keptText = nodes.map((seq) => log[seq])
+      .flatMap((event) => event.data?.content ?? event.data?.message?.content ?? [])
+      .map((block) => block.text ?? '')
+      .join('\n');
+    assert.match(keptText, /当前任务：把存储层迁移到新 schema/);
+    assert.match(keptText, /步骤 4 的进展/);
+    assert.match(keptText, /步骤 6 的工具输出 STEP_6/);
+    assert.doesNotMatch(keptText, /步骤 1 的进展/);
+    const brief = String(run.data.content[0].text);
+    assert.match(brief, /任务续接/);
+    assert.match(brief, /当前任务：把存储层迁移到新 schema/);
+    assert.match(brief, /不是新的用户请求/);
+    assert.match(brief, /本轮较早的 6 个步骤/);
+
+    const store = new MemoryScopes(path.join(root, 'memory')).sessionStoreFor('session-clear', {}).store;
+    assert.equal(store.readCompactionStatus().state, 'reset');
+    const archived = store.loadContext(store.listContexts()[0].context_id);
+    assert.ok(archived.raw_events.some((event) => event.type === 'tool/result'));
+
+    // Nothing new has been sent, so the measured size is unchanged and the reset
+    // must not fire again for the same measurement.
+    await preStep({ agent: { session }, step: 8, turn: 1, messages: [], signal }, () => {});
+    assert.equal(log.filter((event) => event.surfaceOp?.op === 'replace').length, 1);
+
+    // A new request reports a new prompt size, which makes the reset eligible
+    // again; with only the newest three steps left there is too little to trim,
+    // so the running turn is kept whole instead of eating what was just kept.
+    pressure = { pressureTokens: 70000, contextWindow: 100000 };
+    const before = nodes.length;
+    await preStep({ agent: { session }, step: 9, turn: 1, messages: [], signal }, () => {});
+    assert.equal(nodes.length, before);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
