@@ -3144,7 +3144,10 @@ export function installContextManagement(ctx, config, deps, runtime) {
       // the "task is ending" case and leave no old context behind.
       hardReset: kind === 'auto' && meta.reason === 'usage',
       hardReload: false,
-      pressureFallback: kind === 'auto' && meta.reason === 'usage',
+      // Every-N-rounds is also a scheduled pass: if topic similarity rejects
+      // everything, clear the oldest completed turns instead of silently
+      // deferring the trigger.
+      pressureFallback: kind === 'auto',
     });
   };
 
@@ -3292,23 +3295,12 @@ export function installContextManagement(ctx, config, deps, runtime) {
 
     // Automatic archiving never runs for subagents; a manual `clear` still
     // honors its pending request below.
-    const handledTurn = Number.isInteger(event?.data?.turn)
-      ? event.data.turn
-      : (collectTurns(session.ownEvents()).at(-1)?.turn ?? -1);
-    const handledSeq = latestUserSeq(session.ownEvents());
-    const previousReset = pressureResets.get(id);
-    // A turn number alone can stay stale across requests; compare the latest
-    // real-user seq as well, or a failed pre-step reset would suppress every
-    // later automatic pass.
-    const resetHandled = previousReset !== undefined
-      && (typeof previousReset === 'object'
-        ? previousReset.turn === handledTurn && previousReset.seq === handledSeq
-        : previousReset === handledTurn);
-    if (!isSubagent && config.autoEnabled && !pending.has(id)
-      && resetHandled !== true) {
-      // Two independent triggers share one tidy pass: every N rounds, and the
-      // measured context usage reaching the configured share of the window.
-      // Both firing at once still tidies once.
+    // The two triggers are independent: a pre-step 45% reset must not suppress
+    // the every-N-rounds pass at turn/end, and an every-N-rounds pass must not
+    // reset the round counter when it only fired because of usage.
+    if (!isSubagent && config.autoEnabled && !pending.has(id)) {
+      // Two independent triggers share one tidy pass when both fire at the same
+      // turn; otherwise each one runs on its own schedule.
       const count = (counters.get(id) ?? 0) + 1;
       const pressure = contextPressureOf(session);
       const byRounds = count >= config.autoEveryRounds;
@@ -3316,7 +3308,10 @@ export function installContextManagement(ctx, config, deps, runtime) {
       if (!byRounds && !byUsage) {
         counters.set(id, count);
       } else {
-        counters.delete(id);
+        // Only the round trigger consumes the round counter. A usage-only pass
+        // leaves it intact so a 2-round setting still fires after two rounds.
+        if (byRounds) counters.delete(id);
+        else counters.set(id, count);
         const trigger = byUsage ? 'usage' : 'rounds';
         const percent = usagePercentOf(pressure);
         // eslint-disable-next-line no-console
