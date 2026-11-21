@@ -37,7 +37,7 @@ import {
   formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
 } from '../lib/knowledge-query.js';
 import { applyDisclosure, RRF_K, reciprocalRankFusion, search, snippetOf, tokenize } from '../lib/retrieval.js';
-import { CATEGORIES, hourKey, listJsonlFiles } from '../lib/util.js';
+import { BoundedCache, CATEGORIES, hourKey, listJsonlFiles } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
 import { buildServerArgs, findModelFile, missingLocalEngineKinds, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig } from '../lib/local-engine.js';
@@ -2835,6 +2835,43 @@ test('cache views invalidate across store instances and retention is archive-saf
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('process-wide file caches stay bounded by entries and bytes', () => {
+  // Entry budget: reading an entry refreshes it, so the least recently used one
+  // is the one that leaves.
+  const entries = new BoundedCache({ maxEntries: 2 });
+  entries.set('a', 1);
+  entries.set('b', 2);
+  assert.equal(entries.get('a'), 1);
+  entries.set('c', 3);
+  assert.equal(entries.get('b'), undefined);
+  assert.equal(entries.get('a'), 1);
+  assert.equal(entries.get('c'), 3);
+  assert.equal(entries.size, 2);
+
+  // Byte budget uses the source file size as the weight.
+  const bytes = new BoundedCache({ maxEntries: 10, maxBytes: 25 });
+  bytes.set('x', 'x', 10);
+  bytes.set('y', 'y', 10);
+  bytes.set('z', 'z', 10); // 30 > 25: evicts x
+  assert.equal(bytes.get('x'), undefined);
+  assert.equal(bytes.get('y'), 'y');
+  assert.equal(bytes.get('z'), 'z');
+
+  // One file larger than the whole budget is not retained, and it must not
+  // flush the smaller entries that still fit.
+  bytes.set('huge', 'huge', 1000);
+  assert.equal(bytes.get('huge'), undefined);
+  assert.equal(bytes.size, 2);
+  assert.equal(bytes.bytes, 20);
+
+  // Deleting refunds the weight, so later values can still be cached.
+  bytes.delete('y');
+  assert.equal(bytes.bytes, 10);
+  bytes.set('w', 'w', 20); // 30 > 25: evicts z
+  assert.equal(bytes.get('w'), 'w');
+  assert.equal(bytes.get('z'), undefined);
 });
 
 test('promote ledger never evicts old refs just to stay under a cap', () => {
