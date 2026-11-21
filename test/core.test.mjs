@@ -43,6 +43,7 @@ import { BoundedCache, CATEGORIES, dshHome, hourKey, listJsonlFiles } from '../l
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
 import { buildServerArgs, findModelFile, missingLocalEngineKinds, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig } from '../lib/local-engine.js';
+import { configuredEndpointBase, createEndpointGate } from '../lib/engine-gate.js';
 import {
   commitSync, initSync, pullSync, pushSync, readSyncConfig, syncStatus, writeSyncConfig,
   parseGitRemote, probeHost,
@@ -2214,6 +2215,59 @@ test('config validator bounds auto settings', () => {
   assert.ok(validator({ similarityThreshold: 1.5 }).issues);
   assert.ok(validator({ similarityThreshold: 'high' }).issues);
   assert.ok(validator({ topicalClear: 'yes' }).issues);
+});
+
+test('engine gate suppresses auto-start only when the configured endpoint answers', async () => {
+  // Kind-specific endpoint wins; the main endpoint is the documented fallback.
+  assert.equal(configuredEndpointBase({ externalEmbedBaseUrl: 'http://127.0.0.1:1111' }, 'embedding'), 'http://127.0.0.1:1111');
+  assert.equal(configuredEndpointBase({ externalBaseUrl: 'http://main:9999' }, 'embedding'), 'http://main:9999');
+  assert.equal(configuredEndpointBase({ externalRerankBaseUrl: 'http://r:1', externalBaseUrl: 'http://main:9' }, 'rerank'), 'http://r:1');
+  assert.equal(configuredEndpointBase({}, 'embedding'), '');
+
+  const liveCalls = [];
+  const live = createEndpointGate({
+    timeoutMs: 100,
+    fetchImpl: async (url) => {
+      liveCalls.push(url);
+      if (url.endsWith('/v1/models')) return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) };
+      throw new Error('no such route');
+    },
+  });
+  assert.equal(await live.configuredEndpointReachable('embedding', {
+    externalEmbedBaseUrl: 'http://127.0.0.1:54392',
+  }), true);
+  const beforeCache = liveCalls.length;
+  assert.equal(await live.configuredEndpointReachable('embedding', {
+    externalEmbedBaseUrl: 'http://127.0.0.1:54392',
+  }), true);
+  assert.equal(liveCalls.length, beforeCache, 'second check must be served from the cache');
+
+  // A server that only answers /health still counts as reachable.
+  const healthOnly = createEndpointGate({
+    timeoutMs: 100,
+    fetchImpl: async (url) => {
+      if (url.endsWith('/health')) return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) };
+      throw new Error('ECONNREFUSED');
+    },
+  });
+  assert.equal(await healthOnly.configuredEndpointReachable('rerank', {
+    externalRerankBaseUrl: 'http://127.0.0.1:54393',
+  }), true);
+
+  // Nothing listening: unreachable, so the local engine is allowed to start.
+  const dead = createEndpointGate({
+    timeoutMs: 100,
+    fetchImpl: async () => { throw new Error('ECONNREFUSED'); },
+  });
+  assert.equal(await dead.configuredEndpointReachable('rerank', {
+    externalRerankBaseUrl: 'http://127.0.0.1:59999',
+  }), false);
+
+  // Unconfigured: no probe at all, and the local engine may start.
+  const unconfigured = createEndpointGate({
+    fetchImpl: async () => { throw new Error('must not probe an unconfigured endpoint'); },
+  });
+  assert.equal(await unconfigured.configuredEndpointReachable('embedding', {}), false);
 });
 
 test('context pressure triggers only when measured usage reaches the threshold', () => {

@@ -27,6 +27,7 @@ import { evaluateDecision } from './lib/decision.js';
 import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
 import { defaultRegistryDir, listRootRows, rememberRoot } from './lib/registry.js';
 import { installApi } from './lib/api.js';
+import { createEndpointGate } from './lib/engine-gate.js';
 import { listLocalModelsCached } from './lib/model-catalog.js';
 import {
   localEngineStatus, restoreLocalEngines, startLocalEngine, stopLocalEngine,
@@ -2715,35 +2716,55 @@ export function installContextManagement(ctx, config, deps, runtime) {
   // empty so one conversation ending cannot kill an engine another one uses.
   const activeTurns = new Set();
 
-  const runnableEngineModelIds = () => {
+  /**
+   * A configured endpoint that already answers wins over auto-start: the local
+   * engine is the fallback for "no service configured" and "the configured
+   * service is down". Probes are short and cached inside the gate.
+   */
+  const endpointGate = createEndpointGate();
+
+  const runnableEngineModels = () => {
     let catalog;
     try {
       catalog = listLocalModelsCached();
     } catch {
       return [];
     }
-    const ids = [];
+    const models = [];
     for (const category of catalog?.categories ?? []) {
       for (const model of category?.models ?? []) {
         if (model?.runnable !== true) continue;
         const kind = String(model.kind ?? '').toLowerCase();
         if (kind !== 'embedding' && kind !== 'rerank') continue;
         if (model.engine !== '' && model.engine !== 'llama.cpp') continue;
-        ids.push(model.id);
+        models.push({ id: model.id, kind });
       }
     }
-    return ids;
+    return models;
   };
 
-  const ensureLocalEngines = (mode) => {
+  /**
+   * Start the runnable local models that are not already up.
+   *
+   * A configured endpoint wins when it answers: the local engine is the
+   * fallback for "no service configured" and "configured service is down", so a
+   * reachable endpoint (the usual manually managed llama-server, or a cloud
+   * provider) must not be duplicated by a second process on another port.
+   */
+  const ensureLocalEngines = async (mode) => {
     if (mode !== 'always' && mode !== 'turn') return;
-    const ids = runnableEngineModelIds();
-    if (ids.length === 0) return;
+    const models = runnableEngineModels();
+    if (models.length === 0) return;
     const statuses = new Map(localEngineStatus().map((engine) => [engine.id, engine]));
-    for (const id of ids) {
+    for (const { id, kind } of models) {
       const status = statuses.get(id);
       if (status?.ready === true || status?.starting === true) continue;
       if ((engineStartFailures.get(id) ?? 0) > Date.now()) continue;
+      if (await endpointGate.configuredEndpointReachable(kind, config)) {
+        // The service the user configured already answers; do not start a
+        // second one just because a runnable GGUF exists on disk.
+        continue;
+      }
       // Record before the async start: if the turn ends while the model is
       // still loading, the turn-end stop must know it owns that process.
       if (mode === 'turn') engineTurnStarted.add(id);
@@ -2763,6 +2784,8 @@ export function installContextManagement(ctx, config, deps, runtime) {
         // eslint-disable-next-line no-console
         console.warn(`[ai-for-memory] 本地引擎自动启动失败：${id}：${error?.message ?? error}`);
       });
+      // Do not await the model load: the pre-step caller must never wait for
+      // it, and the next ensure sees `starting` and skips the duplicate.
     }
   };
 
@@ -3598,7 +3621,8 @@ export function installContextManagement(ctx, config, deps, runtime) {
     // `turn` and `always` modes start runnable local models before the first
     // model request of a turn; the start is fire-and-forget so a slow model
     // load never delays the request (evidence/RAG falls back until it is up).
-    if (!Boolean(session.header?.parentSession)) ensureLocalEngines(config.engineLifecycle);
+    // A configured endpoint that already answers suppresses the start entirely.
+    if (!Boolean(session.header?.parentSession)) void ensureLocalEngines(config.engineLifecycle);
     if (!request || typeof request !== 'object' || request.mode !== 'immediate') {
       await maybePressureReset(session, payload);
       await maybeAnchorRequest(session, payload);
@@ -3629,7 +3653,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
     if (event.type === 'turn/start') {
       if (!isSubagent) {
         activeTurns.add(id);
-        ensureLocalEngines(config.engineLifecycle);
+        void ensureLocalEngines(config.engineLifecycle);
       }
       return;
     }
@@ -3848,7 +3872,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
   // `always`: bring the runnable local models up at plugin load. A manual
   // "stop" in the panel still wins until the next turn's pre-step re-ensures
   // them; the panel start/stop buttons are never gated by this mode.
-  if (config.engineLifecycle === 'always') ensureLocalEngines('always');
+  if (config.engineLifecycle === 'always') void ensureLocalEngines('always');
 }
 
 /**
