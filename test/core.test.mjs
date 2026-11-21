@@ -10,7 +10,8 @@ import { execFileSync, spawn } from 'node:child_process';
 import { MemoryStore } from '../lib/store.js';
 import { defaultMemoryDirIgnoreStatus, ensureDefaultMemoryDirIgnored, ensureGitignoreEntry } from '../lib/gitignore.js';
 import { MemoryScopes, sessionKey } from '../lib/scopes.js';
-import { decodeWorkspaceBucket, encodeWorkspace, resolveWorkspacePath, workspaceIndex } from '../lib/dsh-workspace.js';
+import { decodeWorkspaceBucket, dshSessionsDir, encodeWorkspace, resolveWorkspacePath, workspaceIndex } from '../lib/dsh-workspace.js';
+import { userModelsDir } from '../lib/model-paths.js';
 import {
   chat, embed, listModels, normalizeExternal, parseEmbeddingResponse, parseRerankResponse,
   probe, resolveBaseUrl, embedEndpoint, rerankEndpoint, buildRequest, PROBE_TIMEOUT_MS,
@@ -37,7 +38,7 @@ import {
   formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
 } from '../lib/knowledge-query.js';
 import { applyDisclosure, RRF_K, reciprocalRankFusion, search, snippetOf, tokenize } from '../lib/retrieval.js';
-import { BoundedCache, CATEGORIES, hourKey, listJsonlFiles } from '../lib/util.js';
+import { BoundedCache, CATEGORIES, dshHome, hourKey, listJsonlFiles } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
 import { buildServerArgs, findModelFile, missingLocalEngineKinds, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig } from '../lib/local-engine.js';
@@ -62,7 +63,7 @@ import {
   KNOWLEDGE_CATEGORIES, knowledgeKey, normalizeCategory, normalizeKnowledge, normalizeProvenance,
   normalizeSource, stripInjectedText, withTokens,
 } from '../lib/knowledge.js';
-import { listRootRows, readRoots, rememberRoot, resolveRegisteredRoot } from '../lib/registry.js';
+import { defaultRegistryDir, listRootRows, readRoots, rememberRoot, resolveRegisteredRoot } from '../lib/registry.js';
 import { appendAudit, readAudit } from '../lib/audit.js';
 import {
   decodeSeqRanges, encodeSeqRanges, encodeZstdLog, findSessionLogs, formatRepairReport,
@@ -73,6 +74,16 @@ import { apply, compileParameterSchema, Config, createTools, installContextManag
 
 function tempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agm-test-'));
+}
+
+/**
+ * Restore DSH_HOME exactly. `process.env.DSH_HOME = undefined` stores the
+ * string "undefined", which path joins then turn into a relative
+ * `undefined/ai-for-memory` directory inside the working tree.
+ */
+function restoreDshHome(previous) {
+  if (previous === undefined) delete process.env.DSH_HOME;
+  else process.env.DSH_HOME = previous;
 }
 
 /** Explicit local endpoint: the product default is now "unconfigured". */
@@ -440,7 +451,7 @@ test('tools are registered and executable against the session workspace', async 
     assert.equal(readRoots(registryDir).length, 1);
     assert.equal(readRoots(registryDir)[0].workspace, root);
   } finally {
-    process.env.DSH_HOME = previousHome;
+    restoreDshHome(previousHome);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -497,6 +508,22 @@ test('registry only resolves roots it recorded', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('DSH_HOME falls back instead of becoming a literal "undefined" path', () => {
+  const home = path.join(os.homedir(), '.dsh');
+  // `process.env.X = undefined` stores "undefined"; interpolation then makes a
+  // relative `undefined/ai-for-memory` directory inside the working tree.
+  for (const env of [{}, { DSH_HOME: '' }, { DSH_HOME: 'undefined' }, { DSH_HOME: 'null' }, { DSH_HOME: '  undefined  ' }]) {
+    assert.equal(dshHome(env), home);
+    assert.ok(path.isAbsolute(defaultRegistryDir(env)));
+    assert.equal(defaultRegistryDir(env), path.join(home, 'ai-for-memory'));
+    assert.equal(userModelsDir(env), path.join(home, 'ai-for-memory', 'models'));
+    assert.equal(dshSessionsDir(env), path.join(home, 'sessions'));
+  }
+  const custom = path.join(os.tmpdir(), 'dsh-home-custom');
+  assert.equal(dshHome({ DSH_HOME: custom }), custom);
+  assert.equal(defaultRegistryDir({ DSH_HOME: custom }), path.join(custom, 'ai-for-memory'));
 });
 
 test('parameter compilation lifts required and keeps enums', () => {
@@ -868,7 +895,7 @@ test('cross conversation search labels every hit', async () => {
     assert.equal(scopes.sharedStore().decisionStats().total, 1);
     assert.equal(scopes.counts(sessionKey('conv-alpha')).decisions, 0);
   } finally {
-    process.env.DSH_HOME = previousHome;
+    restoreDshHome(previousHome);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -935,7 +962,7 @@ test('context archives stay per conversation and restore can cross', async () =>
     assert.equal(scopes.counts(sessionKey('conv-beta')).contexts, 0);
     assert.equal(scopes.counts(sessionKey('conv-alpha')).contexts, 1);
   } finally {
-    process.env.DSH_HOME = previousHome;
+    restoreDshHome(previousHome);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1978,7 +2005,7 @@ test('closed conversations are invisible to other conversations', async () => {
     const reopened = await searchTool.execute({ query: '部署', scope: 'all' }, execB);
     assert.match(reopened, /open_doc/);
   } finally {
-    process.env.DSH_HOME = previousHome;
+    restoreDshHome(previousHome);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -2021,7 +2048,7 @@ test('cross-conversation search folds the same fact into one hit', async () => {
     assert.match(result, /已折叠跨来源重复 1 /);
     assert.match(result, /另见/);
   } finally {
-    process.env.DSH_HOME = previousHome;
+    restoreDshHome(previousHome);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -4752,7 +4779,7 @@ test('aim_search 记录本对话使用并标注权重', async () => {
     assert.equal(bStore.knowledgeUsage().weight_marker_doc, undefined);
     assert.ok(aStore.knowledgeUsage().weight_marker_doc.count >= aUsage.weight_marker_doc.count);
   } finally {
-    process.env.DSH_HOME = previousHome;
+    restoreDshHome(previousHome);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -4840,7 +4867,7 @@ test('aim_memory incident 动作单独记录事故并可检索', async () => {
     assert.match(found, /\[incidents\]/);
     assert.match(found, /测试事故：缓存目录写满/);
   } finally {
-    process.env.DSH_HOME = previousHome;
+    restoreDshHome(previousHome);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
