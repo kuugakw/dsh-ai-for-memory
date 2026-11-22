@@ -4,10 +4,30 @@
 
 ## 未发布
 
+### 安全
+
+- **快照 / 上下文 id 只接受纯文件名**：`loadSnapshot` / `loadContext` 之前把调用方传入的 id 直接拼进 `path.join`，`../knowledge/k_secret` 可以读出目录外的 JSON；`removeSnapshot` 还会用记录里的 `snapshot_id` 拼路径，构造一条恶意快照记录即可删除任意 JSON。现在只在 id 不含 `/`、`\`、`:`、NUL 且不是 `.` / `..` 时走精确路径，否则退回按名称/前缀扫描；删除前也复核记录里的 id。回归用例覆盖越界读取和越界删除。
+
+### SQL 路由
+
+- **分类识别改用知识库分类**：`categoryOf` 之前遍历归档层的 `CATEGORIES`，`workflow_rules` / `tools_apis` / `project_facts` 等知识分类识别为 `null`，统计退化成全库总数；`action_logs` 这类归档分类则生成恒为 0 的过滤。现在使用 `KNOWLEDGE_CATEGORIES`，回归用例覆盖知识分类与 `action_logs`。
+
+### 检索
+
+- **每文档缓存键加入 scope**：token / vector 缓存之前只用 `doc_id + updated_at + revision`，两个对话存在同 id、同时间戳、同 revision 但不同文本时，后一个对话会复用前一个的 tokens/向量，搜自己的文本 0 命中、反而命中对方向量。现在缓存键带 `cacheScope`，与库级索引的分键一致；回归用例覆盖 hybrid 与 document 两种模式。
+
+### 面板
+
+- **`/probe-external` 不再漏 API Key**：面板探测与 `/rag/index` 之前手工拼 `normalizeExternal`，漏了 `embedApiKey` / `rerankApiKey`，面板“测试连接”的 Embedding/Rerank 探测不带 key，实际调用却正常。现在两处统一调用 `externalConfigFrom()`，与 `aim_ask` 的工具路径共用同一份配置构造。
+
+### 决策保留
+
+- **`pruneDecisions` 不再误删自动活动记录**：该函数现在跳过 `decision_auto_*`；这些每轮记录由 `pruneAutoDecisions` 的独立保留期处理。用户开启 `decisionRetentionDays` 不会再把自动活动日志一起清掉。
+
 ### 端点探测
 
 - **`/props` 快路径恢复生效**：`createEndpointGate` 的 `request()` 为释放 socket 无条件读取 `response.arrayBuffer()`，而 `propsOf()` 随后还要 `response.json()`；Fetch 的 body 只能读一次，第二次抛 `Body is unusable: Body has already been read` 被吞掉，`has_embeddings` / `has_reranking` 永远读不到，所有端点都退化为发真实推理请求。现在只有状态探测才排空 body，读取 `/props` 的请求保留 body。
-- 回归用例：真实 HTTP 服务返回 `has_embeddings:true` 时只请求一次 `/props`，不再发 `/v1/embeddings`；mock 响应也改成单次消费的 body（`arrayBuffer` + `json` 共享 used 标记），避免同类问题再次被 mock 掩盖。测试 170 项。
+- 回归用例：真实 HTTP 服务返回 `has_embeddings:true` 时只请求一次 `/props`，不再发 `/v1/embeddings`；mock 响应也改成单次消费的 body（`arrayBuffer` + `json` 共享 used 标记），避免同类问题再次被 mock 掩盖。测试 175 项。
 
 ## 0.4.3（2026-11-22）
 

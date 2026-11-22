@@ -16,7 +16,7 @@ import { userModelsDir } from '../lib/model-paths.js';
 import { summarizeTurnActivity } from '../lib/turn-activity.js';
 import { isSessionActive } from '../lib/activity.js';
 import {
-  chat, embed, listModels, normalizeExternal, parseEmbeddingResponse, parseRerankResponse,
+  chat, embed, externalConfigFrom, listModels, normalizeExternal, parseEmbeddingResponse, parseRerankResponse,
   probe, resolveBaseUrl, embedEndpoint, rerankEndpoint, buildRequest, PROBE_TIMEOUT_MS,
 } from '../lib/external.js';
 import {
@@ -38,7 +38,7 @@ import {
 } from '../lib/export.js';
 import { knowledgeDatabasePath, sqliteAvailable } from '../lib/knowledge-sqlite.js';
 import {
-  formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
+  categoryOf, formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
 } from '../lib/knowledge-query.js';
 import { applyDisclosure, buildIndex, RRF_K, reciprocalRankFusion, search, snippetOf, tokenize } from '../lib/retrieval.js';
 import { BoundedCache, CATEGORIES, appendJsonLine, dshHome, hourKey, listJsonlFiles, writeJson } from '../lib/util.js';
@@ -73,7 +73,7 @@ import {
   decodeSeqRanges, encodeSeqRanges, encodeZstdLog, findSessionLogs, formatRepairReport,
   formatScanReport, repairSessionLog, resolveSessionLogTarget, scanSessionLogs, validateSessionEvents,
 } from '../lib/session-repair.js';
-import { isTrustedRequest } from '../lib/api.js';
+import { installApi, isTrustedRequest } from '../lib/api.js';
 import { apply, compileParameterSchema, Config, createTools, installContextManagement, memoryContext, normalizeConfig, planPrefixReset, searchWithRag, workspaceOf } from '../index.js';
 
 function tempRoot() {
@@ -259,6 +259,59 @@ test('snapshots are safe-named, unique and restorable', () => {
   }
 });
 
+test('snapshot and context ids cannot escape their layer directories', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    store.init();
+    const knowledgeDir = path.join(root, 'knowledge');
+    fs.mkdirSync(knowledgeDir, { recursive: true });
+    const secret = path.join(knowledgeDir, 'k_secret.json');
+    fs.writeFileSync(secret, JSON.stringify({ doc_id: 'k_secret', text: 'TOP SECRET' }), 'utf8');
+
+    // Read attempts via a relative path must not reach knowledge/.
+    assert.equal(store.loadSnapshot('../knowledge/k_secret'), null);
+    assert.equal(store.loadContext('../knowledge/k_secret'), null);
+    assert.equal(store.restoreSnapshot('../knowledge/k_secret'), null);
+
+    // Delete attempts: the loader must not return the foreign file, and a
+    // crafted record inside snapshots/ must not turn its own id into a path.
+    assert.equal(store.removeSnapshot('../knowledge/k_secret'), false);
+    const evil = path.join(root, 'snapshots', 'evil.json');
+    fs.writeFileSync(evil, JSON.stringify({
+      snapshot_id: '../knowledge/k_secret', name: 'evil', state: { step: 1 },
+    }), 'utf8');
+    assert.equal(store.removeSnapshot('evil'), false);
+    assert.equal(fs.existsSync(secret), true);
+    assert.equal(JSON.parse(fs.readFileSync(secret, 'utf8')).text, 'TOP SECRET');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('decision retention leaves auto-logged turn activity to its own pruner', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    store.init();
+    const manual = path.join(root, 'decisions', 'decision_manual.json');
+    const auto = path.join(root, 'decisions', 'decision_auto_0123456789abcdef.json');
+    fs.writeFileSync(manual, JSON.stringify({ decision_id: 'decision_manual', decision: 'keep me' }), 'utf8');
+    fs.writeFileSync(auto, JSON.stringify({ decision_id: 'decision_auto_0123456789abcdef', decision: 'auto' }), 'utf8');
+    const old = new Date(Date.now() - 10 * 86400000);
+    fs.utimesSync(manual, old, old);
+    fs.utimesSync(auto, old, old);
+
+    assert.equal(store.pruneDecisions(7), 1);
+    assert.equal(fs.existsSync(manual), false);
+    assert.equal(fs.existsSync(auto), true, 'decision retention must not delete decision_auto_*');
+    assert.equal(store.pruneAutoDecisions(7), 1);
+    assert.equal(fs.existsSync(auto), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('knowledge search defaults to snippets and full text is explicit', () => {
   const long = `超时处理步骤：${'先重试再记录错误。'.repeat(80)}TAIL_MARKER`;
   const docs = [{ doc_id: 'long', category: 'errors_fixes', text: long }];
@@ -345,6 +398,33 @@ test('incremental retrieval caches are scoped per store and category', () => {
     ['scope-a'],
   );
   assert.equal(search(docs, '网关超时', { mode: 'bm25', cacheScope: '/root/a' }).length, 2);
+});
+
+test('per-document retrieval caches are scoped per store', () => {
+  const stamp = '2026-01-01T00:00:00Z';
+  const inA = [{
+    doc_id: 'same-id', category: 'ui_facts', text: 'alpha gateway timeout', updated_at: stamp, revision: 1,
+  }];
+  const inB = [{
+    doc_id: 'same-id', category: 'ui_facts', text: 'beta retry budget', updated_at: stamp, revision: 1,
+  }];
+  // Warm every channel's cache from store A.
+  assert.deepEqual(
+    search(inA, 'alpha', { mode: 'hybrid', cacheScope: '/root/scope-a' }).map((hit) => hit.doc_id),
+    ['same-id'],
+  );
+  // Same id/timestamp/revision but different text in store B: its own token and
+  // vector caches must not reuse A's. A stale key makes this B query miss.
+  assert.deepEqual(
+    search(inB, 'retry', { mode: 'hybrid', cacheScope: '/root/scope-b' }).map((hit) => hit.doc_id),
+    ['same-id'],
+  );
+  assert.deepEqual(
+    search(inB, 'retry', { mode: 'hybrid', cacheScope: '/root/scope-b', cacheMode: 'document' })
+      .map((hit) => hit.doc_id),
+    ['same-id'],
+  );
+  assert.equal(search(inB, 'alpha', { mode: 'hybrid', cacheScope: '/root/scope-b' }).length, 0);
 });
 
 test('hybrid keeps the keyword channel when every BM25 score ties', () => {
@@ -3915,6 +3995,99 @@ test('blocked writes are logged and a confirmed rewrite resolves the report', ()
   }
 });
 
+test('external endpoint config keeps per-kind API keys for panel probes', () => {
+  const config = externalConfigFrom({
+    externalBaseUrl: 'http://main:8080',
+    externalModel: 'chat',
+    externalEmbedBaseUrl: 'http://embed:8081',
+    externalEmbedModel: 'embed',
+    externalEmbedApiKey: 'embed-key',
+    externalRerankBaseUrl: 'http://rerank:8082',
+    externalRerankModel: 'rerank',
+    externalRerankApiKey: 'rerank-key',
+    externalApiKey: 'main-key',
+    externalTimeoutMs: 1234,
+  });
+  assert.equal(config.apiKey, 'main-key');
+  assert.equal(config.embedApiKey, 'embed-key');
+  assert.equal(config.rerankApiKey, 'rerank-key');
+  assert.equal(embedEndpoint(config).apiKey, 'embed-key');
+  assert.equal(rerankEndpoint(config).apiKey, 'rerank-key');
+  assert.equal(config.timeoutMs, 1234);
+});
+
+test('panel external probe sends the per-kind API keys', async () => {
+  const handlers = new Map();
+  const ctx = {
+    inject(_names, callback) {
+      callback({
+        webServer: {
+          register({ path, handler }) {
+            handlers.set(path, handler);
+            return () => {};
+          },
+        },
+        effect(fn) {
+          return fn();
+        },
+      });
+    },
+  };
+  const root = tempRoot();
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    installApi(ctx, {
+      config: {
+        externalBaseUrl: 'http://main:8080',
+        externalEmbedBaseUrl: 'http://embed:8081',
+        externalEmbedApiKey: 'embed-key',
+        externalRerankBaseUrl: 'http://rerank:8082',
+        externalRerankApiKey: 'rerank-key',
+        externalApiKey: 'main-key',
+      },
+      registryDir: root,
+    });
+    const handler = handlers.get('/ai-for-memory/api/external');
+    assert.equal(typeof handler, 'function');
+
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url: String(url), auth: init?.headers?.authorization ?? '' });
+      if (String(url).endsWith('/health')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ status: 'ok' }),
+        };
+      }
+      return { ok: false, status: 500, text: async () => 'down' };
+    };
+    let body = '';
+    const response = {
+      headersSent: false,
+      setHeader() {},
+      writeHead() { this.headersSent = true; },
+      end(chunk) { body += chunk ?? ''; },
+    };
+    const request = {
+      method: 'GET',
+      url: '/ai-for-memory/api/external?deep=1',
+      headers: { host: '127.0.0.1:59164' },
+      socket: { remoteAddress: '127.0.0.1', localPort: 59164 },
+    };
+    await handler(request, response);
+    const parsed = JSON.parse(body);
+    assert.equal(parsed.ok, true);
+    const embedCall = calls.find((call) => call.url.endsWith('/v1/embeddings'));
+    const rerankCall = calls.find((call) => call.url.endsWith('/v1/rerank'));
+    assert.equal(embedCall?.auth, 'Bearer embed-key', JSON.stringify(calls));
+    assert.equal(rerankCall?.auth, 'Bearer rerank-key', JSON.stringify(calls));
+  } finally {
+    globalThis.fetch = originalFetch;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('external endpoint is unconfigured by default and probes use a 5s budget', async () => {
   assert.equal(normalizeExternal({}).baseUrl, '');
   assert.equal(resolveBaseUrl('').api, '');
@@ -4799,6 +4972,19 @@ test('query router sends metrics to SQL and fuzzy questions to vectors', () => {
   assert.equal(translateToSql('哪个方案最多坑'), null);
   assert.equal(translateToSql('哪个分类最多').kind, 'top');
   assert.equal(translateToSql('未确认的模型自述有几条').kind, 'unverified');
+
+  // Knowledge categories, not archive categories. These six used to be
+  // unrecognised, so the filter silently disappeared or always matched zero.
+  assert.equal(categoryOf('工作流规则'), 'workflow_rules');
+  assert.equal(categoryOf('workflow_rules'), 'workflow_rules');
+  assert.equal(categoryOf('工具接口'), 'tools_apis');
+  assert.equal(categoryOf('项目事实'), 'project_facts');
+  assert.equal(categoryOf('action_logs'), null);
+  assert.deepEqual(translateToSql('工作流规则有多少条').params, ['workflow_rules']);
+  assert.deepEqual(translateToSql('工具接口有多少条').params, ['tools_apis']);
+  // `action_logs` is an archive category: it must not become a knowledge filter
+  // that can only ever return zero.
+  assert.deepEqual(translateToSql('action_logs 有多少条').params, []);
 });
 
 test('raw SQL is accepted only as one read-only statement', () => {

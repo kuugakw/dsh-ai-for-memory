@@ -46,8 +46,8 @@ import {
   chat as externalChat,
   describeEndpoint,
   embed as externalEmbed,
+  externalConfigFrom,
   listModels as externalListModels,
-  normalizeExternal,
   probe as externalProbe,
   rerank as externalRerank,
 } from './lib/external.js';
@@ -1015,19 +1015,7 @@ function gatherPromoteSource(store) {
 
 /** Build the external endpoint from the plugin config. */
 function externalEndpointOf(config) {
-  const effective = effectivePluginConfig(config);
-  return normalizeExternal({
-    baseUrl: effective.externalBaseUrl,
-    model: effective.externalModel,
-    embedBaseUrl: effective.externalEmbedBaseUrl,
-    embedModel: effective.externalEmbedModel,
-    rerankBaseUrl: effective.externalRerankBaseUrl,
-    rerankModel: effective.externalRerankModel,
-    apiKey: effective.externalApiKey,
-    embedApiKey: effective.externalEmbedApiKey,
-    rerankApiKey: effective.externalRerankApiKey,
-    timeoutMs: effective.externalTimeoutMs,
-  });
+  return externalConfigFrom(effectivePluginConfig(config));
 }
 
 /**
