@@ -73,7 +73,7 @@ import {
   decodeSeqRanges, encodeSeqRanges, encodeZstdLog, findSessionLogs, formatRepairReport,
   formatScanReport, repairSessionLog, resolveSessionLogTarget, scanSessionLogs, validateSessionEvents,
 } from '../lib/session-repair.js';
-import { installApi, isTrustedRequest } from '../lib/api.js';
+import { installApi, isTrustedRequest, openInFileManager } from '../lib/api.js';
 import { apply, compileParameterSchema, Config, createTools, installContextManagement, memoryContext, normalizeConfig, planPrefixReset, searchWithRag, workspaceOf } from '../index.js';
 
 function tempRoot() {
@@ -1795,6 +1795,45 @@ test('promote reports material updates without queueing them', () => {
     assert.equal(confirmed.text, changedText);
     assert.ok(confirmed.revision > originalRevision);
     assert.equal(store.pendingPromotions().length, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a pending free-text promotion survives the next run', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    const baseText = '以后所有接口请求都必须重试3次，失败后统一记录错误码到日志';
+    const candidateText = '以后所有接口请求都必须重试5次，失败后统一记录错误码到日志';
+    const base = store.remember({
+      text: baseText,
+      category: 'workflow_rules',
+      source: 'user',
+      provenance: 'user',
+      verified: true,
+    }, { confirm: true });
+    const staged = store.stage({ content: candidateText, kind: 'action', verify: 'pass' });
+
+    const first = store.promoteKnowledge();
+    assert.equal(first.pending.length, 1);
+    // Free-text candidates carry a `#N` suffix; the base ledger ref must stay
+    // unconsumed while that proposal is pending.
+    assert.match(first.pending[0].source_ref, /#0$/);
+    assert.equal(
+      Object.hasOwn(store.promotedLedger().refs, `staging:${staged.dedup_id}`),
+      false,
+    );
+    assert.equal(store.documents().find((doc) => doc.doc_id === base.doc_id).text, baseText);
+
+    // The same proposal is reported again instead of vanishing from the queue.
+    const second = store.promoteKnowledge();
+    assert.equal(second.pending.length, 1);
+    assert.equal(second.pending[0].source_ref, first.pending[0].source_ref);
+    assert.equal(
+      Object.hasOwn(store.promotedLedger().refs, `staging:${staged.dedup_id}`),
+      false,
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -4033,6 +4072,98 @@ test('external endpoint config keeps per-kind API keys for panel probes', () => 
   assert.equal(embedEndpoint(config).apiKey, 'embed-key');
   assert.equal(rerankEndpoint(config).apiKey, 'rerank-key');
   assert.equal(config.timeoutMs, 1234);
+});
+
+test('record download cannot escape the knowledge directory', async () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    store.remember({
+      doc_id: '../secret',
+      text: '恶意 id 仍应只读取自己的知识文件',
+      category: 'project_facts',
+      source: 'user',
+      provenance: 'user',
+      verified: true,
+    }, { confirm: true });
+    fs.writeFileSync(path.join(root, 'secret.json'), JSON.stringify({ canary: 'ESCAPED' }), 'utf8');
+
+    const handlers = new Map();
+    const ctx = {
+      inject(_names, callback) {
+        callback({
+          webServer: {
+            register({ path: routePath, handler }) {
+              handlers.set(routePath, handler);
+              return () => {};
+            },
+          },
+          effect(fn) { return fn(); },
+        });
+      },
+    };
+    installApi(ctx, { config: { root }, registryDir: path.join(root, 'registry') });
+    const handler = handlers.get('/ai-for-memory/api/record/download');
+    assert.equal(typeof handler, 'function');
+
+    let body = '';
+    const response = {
+      headersSent: false,
+      statusCode: 0,
+      setHeader() {},
+      writeHead(status) { this.statusCode = status; this.headersSent = true; },
+      end(chunk) { body += chunk ?? ''; },
+    };
+    const query = new URLSearchParams({
+      root,
+      scope: 'shared',
+      kind: 'knowledge',
+      id: '../secret',
+    });
+    const request = {
+      method: 'GET',
+      url: `/ai-for-memory/api/record/download?${query.toString()}`,
+      headers: { host: '127.0.0.1:59164' },
+      socket: { remoteAddress: '127.0.0.1', localPort: 59164 },
+    };
+    await handler(request, response);
+    assert.equal(response.statusCode, 200);
+    assert.equal(body.includes('ESCAPED'), false);
+    assert.equal(JSON.parse(body).doc_id, '../secret');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('file-manager spawn errors resolve as errors instead of crashing', async () => {
+  let handlers = {};
+  const failedChild = {
+    unref() {},
+    once(event, callback) { handlers[event] = callback; },
+  };
+  const failed = openInFileManager('/tmp/memory', () => failedChild);
+  handlers.error(Object.assign(new Error('spawn xdg-open ENOENT'), { code: 'ENOENT' }));
+  assert.deepEqual(await failed, {
+    ok: false,
+    error: `无法打开文件管理器（${process.platform === 'win32' ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open'}）：ENOENT`,
+  });
+
+  let unreffed = false;
+  handlers = {};
+  const okChild = {
+    unref() { unreffed = true; },
+    once(event, callback) { handlers[event] = callback; },
+  };
+  const opened = openInFileManager('/tmp/memory', () => okChild);
+  handlers.spawn();
+  assert.deepEqual(await opened, { ok: true });
+  assert.equal(unreffed, true);
+
+  const thrown = await openInFileManager('/tmp/memory', () => {
+    throw new Error('spawn failed synchronously');
+  });
+  assert.equal(thrown.ok, false);
+  assert.match(thrown.error, /spawn failed synchronously/);
 });
 
 test('panel external probe sends the per-kind API keys', async () => {

@@ -2,6 +2,17 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 未发布
+
+### 安全
+
+- **知识库记录下载 / 打开只用 safeStem 落盘文件**：`recordFile()` 的 knowledge 分支之前把面板传入的原始 `doc_id` 直接拼进 `knowledgeDir`。写入用的是 `safeStem(doc_id)`，于是 `doc_id: '../../secret'` 可以经 `/record/download` 或 `/reveal` 读出记忆目录外的 JSON。现在按写入规则取 `safeStem()`，再用 `path.resolve` + `path.relative` 做目录包含校验；context / snapshot 分支同样校验。
+- **文件管理器启动失败不再终止宿主**：`openInFileManager()` 之前 spawn 后只 `unref()`，缺少 `xdg-open` 时异步 `error` 事件没有监听，Node 会以未捕获异常退出 DSH 进程。现在监听 `spawn` / `error`，失败返回 `{ ok:false, error }`，`/reveal` 返回 500 而不是崩溃；同步 spawn 异常也走同一条错误路径。
+
+### 知识提炼
+
+- **自由文本候选的 base ref 不再提前消费**：`candidatesFromRecord()` 的自由文本候选用 `staging:<id>#N` 作为 `source_ref`，收尾台账却拿 `staging:<id>` 去精确匹配，于是把 base ref 标成已消费。被冲突闸门挡下的提案只报告一次就消失。现在按 `base ref` 前缀归组，只有该条目的所有候选都已入账或在本轮处理完，才消费 base ref；pending 和因预算跳过的候选都会留到下轮。回归用例覆盖自由文本 pending 连续两轮可见。
+
 ## 0.4.4（2026-11-22）
 
 ### 安全
