@@ -298,6 +298,53 @@ test('the retrieval cache key uses revision, not the text length', () => {
   assert.equal(search(after, '超时', { mode: 'bm25' }).length, 0);
 });
 
+test('the retrieval index updates incrementally on rewrite, delete and add', () => {
+  const stamp = '2026-01-01T00:00:00Z';
+  const a = { doc_id: 'inc-a', category: 'ui_facts', text: '网关超时重试三次', updated_at: stamp, revision: 1 };
+  const b = { doc_id: 'inc-b', category: 'ui_facts', text: '设置页通知开关', updated_at: stamp, revision: 1 };
+  assert.deepEqual(search([a, b], '超时', { mode: 'bm25' }).map((hit) => hit.doc_id), ['inc-a']);
+
+  // Rewrite: old postings are removed, new text is searchable, BM25 stats move
+  // with the document (a stale `lengths`/`avgLength` would skew scoring).
+  const a2 = { ...a, text: '缓存失效重试三次', revision: 2 };
+  assert.deepEqual(search([a2, b], '超时', { mode: 'bm25' }), []);
+  assert.deepEqual(search([a2, b], '缓存', { mode: 'bm25' }).map((hit) => hit.doc_id), ['inc-a']);
+
+  // Delete: nothing stale remains in postings or lengths.
+  assert.deepEqual(search([b], '缓存', { mode: 'bm25' }), []);
+  assert.deepEqual(search([b], '通知', { mode: 'bm25' }).map((hit) => hit.doc_id), ['inc-b']);
+
+  // Add back: the same cache entry picks up a new document.
+  const a3 = { ...a, revision: 3 };
+  assert.deepEqual(search([a3, b], '超时', { mode: 'bm25' }).map((hit) => hit.doc_id), ['inc-a']);
+  // `document` mode shares the incremental index; only the library vector map
+  // is skipped, so results stay identical after all of the above.
+  assert.deepEqual(search([a3, b], '超时', { mode: 'bm25', cacheMode: 'document' }).map((hit) => hit.doc_id), ['inc-a']);
+});
+
+test('incremental retrieval caches are scoped per store and category', () => {
+  const stamp = '2026-01-01T00:00:00Z';
+  const docs = [
+    { doc_id: 'scope-a', category: 'ui_facts', text: '网关超时处理', updated_at: stamp },
+    { doc_id: 'scope-b', category: 'errors_fixes', text: '网关超时排查', updated_at: stamp },
+  ];
+  assert.equal(search(docs, '网关超时', { mode: 'bm25', cacheScope: '/root/a' }).length, 2);
+  // A second store with a disjoint library must not remove the first store's
+  // documents from its cached index.
+  const other = [
+    { doc_id: 'scope-c', category: 'ui_facts', text: '网关超时处理', updated_at: stamp },
+  ];
+  assert.deepEqual(search(other, '网关超时', { mode: 'bm25', cacheScope: '/root/b' }).map((hit) => hit.doc_id), ['scope-c']);
+  assert.equal(search(docs, '网关超时', { mode: 'bm25', cacheScope: '/root/a' }).length, 2);
+  // Category-filtered views keep their own index entry.
+  assert.deepEqual(
+    search(docs, '网关超时', { mode: 'bm25', cacheScope: '/root/a', category: 'ui_facts' })
+      .map((hit) => hit.doc_id),
+    ['scope-a'],
+  );
+  assert.equal(search(docs, '网关超时', { mode: 'bm25', cacheScope: '/root/a' }).length, 2);
+});
+
 test('hybrid keeps the keyword channel when every BM25 score ties', () => {
   // Same query term, same term frequency, same document length: BM25 cannot
   // separate these three documents.
