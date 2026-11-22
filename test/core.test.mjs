@@ -3407,12 +3407,25 @@ test('manual clear runs at the next pre-step and keeps the in-flight turn', asyn
     assert.equal(nodes.length, before);
     assert.equal(runtime.pending.has('session-clear'), true);
 
+    // Abort after the pre-step check but before clearNow() mutates anything:
+    // the request must still survive for the next usable boundary.
+    let signalReads = 0;
+    const midClearAbort = {
+      get aborted() {
+        signalReads += 1;
+        return signalReads > 1;
+      },
+    };
+    await preStep({ agent: { session }, signal: midClearAbort }, async () => { nextCalls += 1; });
+    assert.equal(nodes.length, before);
+    assert.equal(runtime.pending.has('session-clear'), true);
+
     const result = await preStep({
       agent: { session },
       signal: new AbortController().signal,
     }, async () => { nextCalls += 1; });
     assert.equal(result, undefined);
-    assert.equal(nextCalls, 2);
+    assert.equal(nextCalls, 3);
     assert.equal(runtime.pending.has('session-clear'), false);
 
     // Old turns are replaced inside the same turn, before the next request.
@@ -5320,6 +5333,22 @@ test('query router sends metrics to SQL and fuzzy questions to vectors', () => {
   const tag = translateToSql('标签项目事实');
   assert.equal(tag.kind, 'tag');
   assert.deepEqual(tag.params, ['%项目事实%']);
+  // The tag has no delimiter from a following question phrase; capture must not
+  // turn "项目事实有多少条" into a literal tag that matches nothing.
+  for (const question of [
+    '标签为项目事实有多少条',
+    '统计标签项目事实的数量',
+    '标签项目事实有多少条',
+  ]) {
+    const plan = translateToSql(question);
+    assert.equal(plan.kind, 'count', question);
+    assert.deepEqual(plan.params, ['%项目事实%'], question);
+    assert.match(plan.sql, /COUNT\(\*\)/);
+  }
+  // "最近" alone means a list, but a count question still asks for COUNT(*).
+  assert.equal(translateToSql('最近 3 条知识').kind, 'recent');
+  assert.equal(translateToSql('最近有多少条').kind, 'count');
+  assert.equal(routeKnowledgeQuery('最近有多少条').route, 'sql');
   // "按标签 X 统计" is a count, not a 20-row tag listing.
   const tagCount = translateToSql('按标签 项目事实 统计');
   assert.equal(tagCount.kind, 'count');
@@ -5357,6 +5386,22 @@ test('raw SQL is accepted only as one read-only statement', () => {
   assert.equal(isSafeSelect('SELECT 1; DELETE FROM knowledge_docs'), false);
   assert.equal(translateToSql("SELECT * FROM knowledge_docs WHERE text LIKE '%delete%'").kind, 'raw');
   assert.equal(translateToSql('DELETE FROM knowledge_docs'), null);
+  // A non-recursive CTE is still one read-only statement.
+  assert.equal(isSafeSelect('WITH x AS (SELECT 1 AS n) SELECT * FROM x'), true);
+  // SQLite accepts a self-referencing CTE even without the RECURSIVE keyword,
+  // and there is no execution step limit on the synchronous path.
+  assert.equal(
+    isSafeSelect('WITH c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c'),
+    false,
+  );
+  assert.equal(
+    isSafeSelect('WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c'),
+    false,
+  );
+  assert.equal(
+    isSafeSelect('SELECT * FROM (WITH c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c)'),
+    false,
+  );
 });
 
 test('SQL route answers counts and groups from the JSON base', (t) => {
@@ -5396,6 +5441,12 @@ test('SQL route answers counts and groups from the JSON base', (t) => {
   const merged = store.documents().map((doc) => ({ ...doc, origin: '本对话' }));
   const mergedTotal = runSqlQuery(merged, '知识一共有多少条');
   assert.equal(mergedTotal.rows[0].n, 3);
+
+  // Raw SQL is the one path where the caller controls the row count; the
+  // iterator stops at the visible budget instead of materializing everything.
+  const wide = runSqlQuery([], `SELECT 1 AS n${' UNION ALL SELECT 1'.repeat(80)}`);
+  assert.equal(wide.ok, true);
+  assert.equal(wide.rows.length, 50);
 });
 
 test('SQL view keeps provenance/changes and counts copies across conversations', (t) => {
@@ -6632,6 +6683,22 @@ test('session repair: an unrecognized orphan event is truncated and closed', asy
     assert.ok(log.length > 0);
     const verified = await repairSessionLog(file, { apply: false });
     assert.equal(verified.valid, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('session repair: POSIX permissions survive backup and write-back', async (t) => {
+  if (process.platform === 'win32') { t.skip('POSIX mode bits are not available on Windows'); return; }
+  if (!zstdAvailable) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
+  const root = tempRoot();
+  try {
+    const { file } = writeSyntheticSessionLog(root, eventsWithMisplacedNotice('harness'));
+    fs.chmodSync(file, 0o600);
+    const applied = await repairSessionLog(file, { apply: true });
+    assert.equal(applied.repaired, true);
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(applied.backupPath).mode & 0o777, 0o600);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

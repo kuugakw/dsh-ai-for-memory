@@ -18,9 +18,11 @@
 ### 上下文压力
 
 - **阈值按原始 token 比较，不再用四舍五入后的百分比**：`exceedsUsageThreshold()` 之前复用 `usagePercentOf()` 的一位小数结果，69950 / 100000 = 69.95% 被舍入成 70，70% 阈值因此提前触发全量清出。现在直接用 `pressureTokens` 与 `contextWindow` 比较，显示仍保留一位小数；回归用例覆盖 69.95%、69.99% 不触发、70.00% 触发。
+- **abort 中的手动立即清理不再丢请求**：`onPreStep` 的 `finally` 无条件 `pending.delete(id)`，而 `runTopicalClear()` 在外部摘要窗口收到 abort 时只是提前返回、没有清理也没有存档，请求因此静默消失。现在 abort 期间保留该请求，留到下一个可用边界；回归用例用中途翻转的 signal 验证 surface 未变且 pending 仍在。
 
 ### 会话日志
 
+- **修复后保留 POSIX 权限位**：`backupFile()` 的 `copyFileSync` 与 `replaceAtomically()` 的 `openSync(temp,'w')` 都按进程 umask 新建文件，原本 0600 的会话日志修复后变成 0644，备份也一样。备份按源文件 mode `chmod`，写回在 rename 前对临时 inode `fchmod`；回归用例在 POSIX 上验证主文件与备份都保持 0600。
 - **zstd 解压上限在分配前检查**：`decodeZstdLog()` 之前先完整解压每一帧，再用 `total > cap` 事后拒绝；几百字节约 128MB 的帧会先分配完整输出。`scanZstdFrames()` 现在解析帧头的 content size，超预算时在解压前抛错；未声明大小的帧把剩余预算作为 `maxOutputLength` 交给 zstd，谎报/缺失大小也无法超量分配。
 - **`sourceEventSeqs` 区间展开有上限**：`decodeSeqRanges()` 之前只校验安全整数，`[[0, 8000000]]` 会先生成 800 万个元素。展开上限设为 1,000,000 项，超限在分配前抛错；回归用例覆盖默认上限、自定义上限与边界。
 - **浅扫描读首帧也受解压上限约束**：`scanSessionLogs(deep:false)` 的 `readHeaderOnly()` 之前不带 `maxOutputLength`、也不看帧头 content size，压缩炸弹在“只读头部”路径上仍会完整分配。现在首帧先按 `maxDecodedBytes` 与 1 MiB 头部上限检查声明大小，解压时再传 `maxOutputLength`；回归用例用 8 MiB 的合法头部验证 1024 字节上限在解析 JSON 前生效。
@@ -42,6 +44,9 @@
 - **标签名不再被分隔符正则吞字**：`标签[^\w]*` 的分隔符类会连中文一起吃掉，`标签项目事实` 只剩 `实`，查询变成 `LIKE '%实%'`。现在分隔符只匹配非中文标点/空白，标签名完整保留。
 - **按标签统计返回 count**：`按标签 项目事实 统计` 之前命中标签列表分支，返回 20 条明细；现在带“多少/几条/数量/总数/统计”等计数意图时生成 `COUNT(*)` + `tags LIKE ?`。
 - **只读 SQL 检查忽略字符串字面量与注释**：`isSafeSelect("SELECT ... LIKE '%delete%'")` 之前被关键字扫描误杀。现在先把单/双/反引号字符串、方括号标识符、行注释和块注释替换为空格，再检查分号与写关键字；未闭合的引号或注释直接拒绝。字符串里的 `;` 不再被当成第二条语句。
+- **标签后的计数短语不再并入标签**：`标签为项目事实有多少条` 之前被贪婪捕获成 `项目事实有多少条`，`LIKE '%项目事实有多少条%'` 恒为 0。现在只剥离已知的尾部问句形式（`有多少条` / `的数量` / `的统计` 等），标签本身保留；回归用例覆盖三种问法都生成 `COUNT(*)` 且参数为 `%项目事实%`。
+- **“最近多少条”按计数处理**：`latest && wantsList` 在通用计数分支之前，`最近有多少条` 被当成列表取 10 行。现在同时出现计数词时跳过列表分支，回到 `COUNT(*)`；`最近 3 条知识` 仍返回列表。
+- **递归 CTE 在只读检查阶段拒绝，结果按行预算迭代**：`isSafeSelect()` 之前只检查首关键字，`WITH RECURSIVE c(x) AS (...)` 能通过；SQLite 甚至允许省略 `RECURSIVE` 的自引用 CTE，同步执行没有步数上限。现在解析每个 `WITH` 的 CTE 列表，拒绝 `RECURSIVE`、自引用和无法解析的定义；执行端改用 `StatementSync.iterate()`，到 50 行即停止，不再先物化全部结果。回归用例覆盖带/不带 `RECURSIVE`、嵌套在 `SELECT` 里的 CTE，以及 81 行原始 SQL 只返回 50 行。
 
 ### 检索预览
 

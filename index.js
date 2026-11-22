@@ -3707,8 +3707,10 @@ export function installContextManagement(ctx, config, deps, runtime) {
       });
     } finally {
       // Only consume the exact request this handler started with; a newer
-      // manual request queued meanwhile must survive.
-      if (pending.get(id) === request) pending.delete(id);
+      // manual request queued meanwhile must survive. If this step aborted
+      // while the clear was running, keep the request for the next usable
+      // boundary instead of silently dropping it.
+      if (payload.signal?.aborted !== true && pending.get(id) === request) pending.delete(id);
     }
     await maybeAnchorRequest(session, payload);
     return proceed();
