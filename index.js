@@ -3938,7 +3938,14 @@ export function installContextManagement(ctx, config, deps, runtime) {
     anchorState.delete(id);
     // A disposed session will never emit its turn/end; drop it so a per-turn
     // stop is not blocked forever by a stale active-turn entry.
-    activeTurns.delete(id);
+    const wasActive = activeTurns.delete(id);
+    // Closing the last main session is an idle moment exactly like turn/end:
+    // without this, a `turn`-started engine would stay resident until some
+    // unrelated turn ended or DSH exited, and nothing explained the VRAM.
+    if (wasActive && !session?.header?.parentSession
+      && config.engineLifecycle === 'turn' && activeTurns.size === 0) {
+      scheduleTurnIdleStop();
+    }
   }));
   ctx.effect(() => ctx.on('session/created', (session) => {
     if (!session || Boolean(session.header?.parentSession)) return;
