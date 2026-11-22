@@ -6572,6 +6572,37 @@ test('session repair: the zstd cap is checked before inflating a frame', async (
   assert.equal(decoded.text.length, payload.length);
 });
 
+test('session repair: shallow scans cap the header frame before inflating it', async (t) => {
+  if (!zstdSupported()) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
+  const root = tempRoot();
+  try {
+    // A valid 8 MiB header line is a compressed bomb to a shallow scan: it
+    // only needs one line, but the old readHeaderOnly() inflated the whole
+    // first frame before parsing it.
+    const header = {
+      type: 'session',
+      version: 4,
+      id: 'session-bomb',
+      createdAt: 1795173530790,
+      cwd: 'C:\\work',
+      isSeeded: false,
+      pad: 'a'.repeat(8 * 1024 * 1024),
+    };
+    const sessionDir = path.join(root, '--C-work--', 'session-bomb');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sessionDir, 'session.v4.jsonl.zstd'),
+      encodeZstdLog([`${JSON.stringify(header)}\n`]),
+    );
+    const report = await scanSessionLogs(root, { maxDecodedBytes: 1024 });
+    assert.equal(report.logs.length, 1);
+    assert.equal(report.logs[0].status, 'unreadable');
+    assert.match(report.logs[0].error, /1024 字节上限/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('session repair: find/resolve a synthetic artifact by id, prefix and path', async (t) => {
   if (!zstdAvailable) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
   const root = tempRoot();

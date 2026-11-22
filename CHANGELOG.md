@@ -21,6 +21,7 @@
 
 - **zstd 解压上限在分配前检查**：`decodeZstdLog()` 之前先完整解压每一帧，再用 `total > cap` 事后拒绝；几百字节约 128MB 的帧会先分配完整输出。`scanZstdFrames()` 现在解析帧头的 content size，超预算时在解压前抛错；未声明大小的帧把剩余预算作为 `maxOutputLength` 交给 zstd，谎报/缺失大小也无法超量分配。
 - **`sourceEventSeqs` 区间展开有上限**：`decodeSeqRanges()` 之前只校验安全整数，`[[0, 8000000]]` 会先生成 800 万个元素。展开上限设为 1,000,000 项，超限在分配前抛错；回归用例覆盖默认上限、自定义上限与边界。
+- **浅扫描读首帧也受解压上限约束**：`scanSessionLogs(deep:false)` 的 `readHeaderOnly()` 之前不带 `maxOutputLength`、也不看帧头 content size，压缩炸弹在“只读头部”路径上仍会完整分配。现在首帧先按 `maxDecodedBytes` 与 1 MiB 头部上限检查声明大小，解压时再传 `maxOutputLength`；回归用例用 8 MiB 的合法头部验证 1024 字节上限在解析 JSON 前生效。
 
 ### 请求锚点
 
