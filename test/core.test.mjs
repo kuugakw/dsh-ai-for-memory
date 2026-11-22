@@ -1937,6 +1937,37 @@ test('a pending context-turn proposal survives the next run', () => {
   }
 });
 
+test('forgetting a mined fact lets its source item be mined again', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    const staged = store.stage({
+      content: '以后统一用 pwsh 跑测试，不要用 bash',
+      kind: 'action',
+      verify: 'pass',
+    });
+    const baseRef = `staging:${staged.dedup_id}`;
+    const first = store.promoteKnowledge();
+    assert.equal(first.added.length, 1);
+    const doc = store.documents()[0];
+    assert.equal(Object.hasOwn(store.promotedLedger().refs, baseRef), true);
+    assert.equal(Object.hasOwn(store.promotedLedger().refs, `${baseRef}#0`), true);
+
+    // Deleting the document must also drop the empty-doc_id base entry; the
+    // old code removed only `${baseRef}#0` and left the item blocked forever.
+    assert.equal(store.forgetKnowledge(doc.doc_id).deleted, true);
+    const afterForget = store.promotedLedger().refs;
+    assert.equal(Object.hasOwn(afterForget, baseRef), false);
+    assert.equal(Object.hasOwn(afterForget, `${baseRef}#0`), false);
+
+    const again = store.promoteKnowledge();
+    assert.equal(again.added.length, 1);
+    assert.equal(again.added[0].doc_id, doc.doc_id);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('an explicit doc_id needs confirmation and confirm=true overwrites the body', () => {
   const root = tempRoot();
   try {
