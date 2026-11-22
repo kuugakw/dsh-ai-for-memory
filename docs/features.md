@@ -356,7 +356,7 @@ text_truncated 是否截断
 
 摘要定位优先使用多字词/中文二元组，避免被单个汉字拉到文档开头。
 
-`applyDisclosure` 是幂等的：对已经是摘要的结果再次调用，不会把 `text_chars` 改成摘要长度，也不会把 `text_truncated` 永久变成 false。
+`applyDisclosure` 只做降级：`search()` 与它共用同一份 `summarizeHits`，对已经是摘要的结果幂等；`detail: 'full'` 是直通——摘要里只有 preview 和 `text_chars`，无法还原全文，需要全文时用 `search(..., { detail: 'full' })`。
 
 ### 6.3 缓存
 

@@ -25,6 +25,12 @@
 - **缓存键带库根与分类**：不同 MemoryStore 或分类各用各的索引，互不覆盖；`cacheMode: 'document'` 也复用增量倒排（只跳过库级向量表），注释与实现一致。
 - 回归用例：改写/删除/新增文档后 BM25 结果与统计正确；不同 store/category 的索引互不污染。
 
+### 检索摘要
+
+- **摘要只保留一份实现**：`search()` 与 `applyDisclosure()` 共用 `summarizeHits`，不再各写一套截断逻辑，改 `snippetOf` 语义只需改一处。
+- **`applyDisclosure(detail: 'full')` 明确为直通**：摘要条目只剩 preview 与 `text_chars`，无法还原全文；要全文请用 `search(..., { detail: 'full' })`。注释写明了这个边界，不再假装能“升级”。
+- 回归用例：`search()` 的摘要与 `applyDisclosure(full)` 逐字段相等。
+
 ## 0.4.1（2026-11-22）
 
 - **冲突日志**：被知识冲突闸门拦下的写入记入 `knowledge/conflicts.jsonl`（只做审计，不是队列，不参与检索）；`aim_memory status` 报未确认数，面板知识库页显示最近冲突，确认覆盖后自动标记为已确认。

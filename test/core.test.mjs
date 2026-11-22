@@ -393,6 +393,17 @@ test('applyDisclosure is idempotent on a search summary', () => {
   assert.equal(disclosed[0].text_truncated, true);
 });
 
+test('search summaries and applyDisclosure share one implementation', () => {
+  const docs = [
+    { doc_id: 'dedupe-one', category: 'errors_fixes', text: `超时处理步骤：${'先重试再记录错误。'.repeat(80)}` },
+    { doc_id: 'dedupe-two', category: 'ui_facts', text: '网关超时是三十秒' },
+  ];
+  const full = search(docs, '超时处理', { mode: 'hybrid', topK: 5, detail: 'full' });
+  const viaSearch = search(docs, '超时处理', { mode: 'hybrid', topK: 5 });
+  const viaDisclosure = applyDisclosure(full, '超时处理');
+  assert.deepEqual(viaSearch, viaDisclosure);
+});
+
 test('knowledge search supports bm25, vector and hybrid', () => {
   const docs = [
     { doc_id: 'err_timeout', category: 'errors_fixes', text: 'API 超时时重试三次，记录错误日志，仍失败则通知用户' },
