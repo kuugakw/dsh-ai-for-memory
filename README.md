@@ -1,11 +1,11 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.4.1-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.4.1-lightgrey.svg)](package.json)
+[![Status](https://img.shields.io/badge/status-stable%200.4.2-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.4.2-lightgrey.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.4.1 是知识冲突可见性与决策层清理更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版把被冲突闸门拦下的写入记成可审计的冲突日志（面板与 `status` 可见），给每轮自动活动记录加了 90 天默认保留，并修了 fsync 与 RAG 索引缓存两处稳定性问题。
+> **0.4.2 是检索与本地引擎的生命周期修复版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版把倒排索引改为原地增量更新、四个检索缓存统一为 LRU，摘要只保留一份实现；`turn` 模式的引擎停止改为空闲释放，关闭最后一个会话也会触发；端点能力探测先验证真实能力，只配 chat 端点时不再压住本地引擎。
 >
 > 升级前请备份记忆目录。
 
@@ -191,7 +191,7 @@ aim_memory action=status
 
 ## 更新内容
 
-当前版本 **0.4.1**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.4.2**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
