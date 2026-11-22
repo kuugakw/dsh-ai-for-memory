@@ -1715,6 +1715,10 @@ window.__ModuleLoader__.load({
       const [knowledgeStatus, setKnowledgeStatus] = React.useState('all');
       const [knowledgeSort, setKnowledgeSort] = React.useState('updated');
       const [selectedKnowledge, setSelectedKnowledge] = React.useState(() => new Set());
+      // doc_id is only unique inside one conversation: the same knowledge id can
+      // appear in several sessions. Include the scope/session in the selection
+      // key so checking one row never checks its namesake elsewhere.
+      const knowledgeSelectionKey = (doc) => `${doc?.session_scope ?? ''}:${doc?.session_key ?? ''}:${doc?.doc_id ?? ''}`;
       const [knowledgeBusy, setKnowledgeBusy] = React.useState('');
       // Log lists collapse: `openRows` holds the row keys the user opened and
       // `listLimit` how many rows each list shows before "show more".
@@ -1853,6 +1857,9 @@ window.__ModuleLoader__.load({
       }, [catalog]);
 
       const scopeRef = React.useRef(null);
+      // Monotonic request id for /state: a slower response for the previous
+      // scope must not overwrite the newer scope's data when it lands.
+      const stateRequestSeq = React.useRef(0);
       const [scope, setScopeState] = React.useState(null);
       const applyScope = React.useCallback((next) => {
         scopeRef.current = next;
@@ -1860,6 +1867,8 @@ window.__ModuleLoader__.load({
       }, []);
 
       const load = React.useCallback(async (root, nextScope) => {
+        const requestId = stateRequestSeq.current + 1;
+        stateRequestSeq.current = requestId;
         setBusy(true);
         try {
           const active = nextScope ?? scopeRef.current;
@@ -1869,6 +1878,7 @@ window.__ModuleLoader__.load({
           params.set('scope', kind);
           if (kind === 'session' && active?.key) params.set('session', active.key);
           const payload = await callApi(`/state?${params.toString()}`);
+          if (stateRequestSeq.current !== requestId) return null;
           setData(payload);
           setError(null);
           if (typeof payload.fixedRoot === 'string') setFormRoot(payload.fixedRoot);
@@ -1943,10 +1953,11 @@ window.__ModuleLoader__.load({
           });
           return payload;
         } catch (fetchError) {
+          if (stateRequestSeq.current !== requestId) return null;
           setError(String(fetchError?.message ?? fetchError));
           return null;
         } finally {
-          setBusy(false);
+          if (stateRequestSeq.current === requestId) setBusy(false);
         }
       }, [applyScope]);
 
@@ -2542,7 +2553,7 @@ window.__ModuleLoader__.load({
       };
 
       const verifySelectedKnowledge = async () => {
-        const chosen = (data?.knowledge ?? []).filter((doc) => selectedKnowledge.has(doc.doc_id));
+        const chosen = (data?.knowledge ?? []).filter((doc) => selectedKnowledge.has(knowledgeSelectionKey(doc)));
         if (chosen.length === 0) return;
         setKnowledgeBusy('verify');
         setNotice(null);
@@ -3396,9 +3407,10 @@ window.__ModuleLoader__.load({
               disabled: knowledge.length === 0,
               onClick: () => setSelectedKnowledge((prev) => {
                 const next = new Set(prev);
-                const allSelected = knowledge.every((doc) => next.has(doc.doc_id));
+                const allSelected = knowledge.every((doc) => next.has(knowledgeSelectionKey(doc)));
                 for (const doc of knowledge) {
-                  if (allSelected) next.delete(doc.doc_id); else next.add(doc.doc_id);
+                  const key = knowledgeSelectionKey(doc);
+                  if (allSelected) next.delete(key); else next.add(key);
                 }
                 return next;
               }),
@@ -3596,6 +3608,7 @@ window.__ModuleLoader__.load({
             : h('div', { style: styles.list },
               ...knowledge.slice(0, listLimit).map((doc) => {
                 const key = keyOf(doc.session_key, doc.doc_id);
+                const selectionKey = knowledgeSelectionKey(doc);
                 const modelClaim = doc.provenance === 'model' && doc.verified !== true;
                 return h(LogRow, {
                   key,
@@ -3604,11 +3617,11 @@ window.__ModuleLoader__.load({
                   onToggle: toggleRow,
                   leading: h('input', {
                     type: 'checkbox',
-                    checked: selectedKnowledge.has(doc.doc_id),
+                    checked: selectedKnowledge.has(selectionKey),
                     onClick: (event) => event.stopPropagation(),
                     onChange: (event) => setSelectedKnowledge((prev) => {
                       const next = new Set(prev);
-                      if (event.target.checked) next.add(doc.doc_id); else next.delete(doc.doc_id);
+                      if (event.target.checked) next.add(selectionKey); else next.delete(selectionKey);
                       return next;
                     }),
                   }),

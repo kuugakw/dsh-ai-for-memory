@@ -313,6 +313,23 @@ test('decision retention leaves auto-logged turn activity to its own pruner', ()
   }
 });
 
+test('a 241-char body is marked truncated even when preview length matches', () => {
+  const value = 'x'.repeat(241);
+  const [hit] = applyDisclosure([{
+    doc_id: 'edge', text: value, text_chars: value.length, text_truncated: false,
+  }], '', 'summary');
+  // The preview is 240 chars plus one ellipsis: exactly the original length.
+  assert.equal(hit.text.length, 241);
+  assert.equal(hit.text_chars, 241);
+  assert.equal(hit.text_truncated, true);
+  const exact = 'x'.repeat(240);
+  const [exactHit] = applyDisclosure([{
+    doc_id: 'edge-exact', text: exact, text_chars: exact.length, text_truncated: false,
+  }], '', 'summary');
+  assert.equal(exactHit.text, exact);
+  assert.equal(exactHit.text_truncated, false);
+});
+
 test('knowledge search defaults to snippets and full text is explicit', () => {
   const long = `超时处理步骤：${'先重试再记录错误。'.repeat(80)}TAIL_MARKER`;
   const docs = [{ doc_id: 'long', category: 'errors_fixes', text: long }];
@@ -2237,9 +2254,15 @@ test('panel wiring keeps knowledge filters, batch confirm and cap disclosure', (
     'knowledgeCategory', 'knowledgeSource', 'knowledgeStatus', 'knowledgeSort',
     'selectedKnowledge', 'verifySelectedKnowledge', 'knowledgeLimited',
     'cappedNotice', 'verifyUndo', 'retentionConfirm', 'localModelStopConfirm',
+    'knowledgeSelectionKey', 'stateRequestSeq',
   ]) {
     assert.ok(source.includes(needle), `panel wiring is missing ${needle}`);
   }
+  assert.ok(!source.includes('selectedKnowledge.has(doc.doc_id)'),
+    'selection must not use a bare doc_id across conversations');
+  assert.ok(source.includes('next.add(selectionKey)'));
+  assert.ok(source.includes('if (stateRequestSeq.current !== requestId) return null;'),
+    'a stale /state response must be ignored before it mutates panel state');
 });
 
 test('new conversations get their own folder, title and access default', () => {
@@ -5198,6 +5221,17 @@ test('query router sends metrics to SQL and fuzzy questions to vectors', () => {
   assert.equal(translateToSql('哪个方案最多坑'), null);
   assert.equal(translateToSql('哪个分类最多').kind, 'top');
   assert.equal(translateToSql('未确认的模型自述有几条').kind, 'unverified');
+  // Tag names are not greedy Chinese prefixes: "标签项目事实" used to capture
+  // only "实" and search for '%实%'.
+  const tag = translateToSql('标签项目事实');
+  assert.equal(tag.kind, 'tag');
+  assert.deepEqual(tag.params, ['%项目事实%']);
+  // "按标签 X 统计" is a count, not a 20-row tag listing.
+  const tagCount = translateToSql('按标签 项目事实 统计');
+  assert.equal(tagCount.kind, 'count');
+  assert.deepEqual(tagCount.params, ['%项目事实%']);
+  assert.match(tagCount.sql, /COUNT\(\*\)/);
+  assert.equal(routeKnowledgeQuery('按标签 项目事实 统计').route, 'sql');
 
   // Knowledge categories, not archive categories. These six used to be
   // unrecognised, so the filter silently disappeared or always matched zero.
@@ -5219,6 +5253,15 @@ test('raw SQL is accepted only as one read-only statement', () => {
   assert.equal(isSafeSelect('DELETE FROM knowledge_docs'), false);
   assert.equal(isSafeSelect('SELECT 1; DROP TABLE knowledge_docs'), false);
   assert.equal(isSafeSelect('SELECT * FROM knowledge_docs;'), true);
+  // Keywords and semicolons inside literals/comments are not SQL structure.
+  assert.equal(isSafeSelect("SELECT * FROM knowledge_docs WHERE text LIKE '%delete%'"), true);
+  assert.equal(isSafeSelect("SELECT ';' AS semi"), true);
+  assert.equal(isSafeSelect('SELECT 1 -- delete\n'), true);
+  assert.equal(isSafeSelect('SELECT 1 /* drop */'), true);
+  assert.equal(isSafeSelect("SELECT 'unterminated"), false);
+  assert.equal(isSafeSelect('SELECT 1 /* unterminated'), false);
+  assert.equal(isSafeSelect('SELECT 1; DELETE FROM knowledge_docs'), false);
+  assert.equal(translateToSql("SELECT * FROM knowledge_docs WHERE text LIKE '%delete%'").kind, 'raw');
   assert.equal(translateToSql('DELETE FROM knowledge_docs'), null);
 });
 
