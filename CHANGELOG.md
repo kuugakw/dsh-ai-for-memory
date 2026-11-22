@@ -2,6 +2,13 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 未发布
+
+### 端点探测
+
+- **`/props` 快路径恢复生效**：`createEndpointGate` 的 `request()` 为释放 socket 无条件读取 `response.arrayBuffer()`，而 `propsOf()` 随后还要 `response.json()`；Fetch 的 body 只能读一次，第二次抛 `Body is unusable: Body has already been read` 被吞掉，`has_embeddings` / `has_reranking` 永远读不到，所有端点都退化为发真实推理请求。现在只有状态探测才排空 body，读取 `/props` 的请求保留 body。
+- 回归用例：真实 HTTP 服务返回 `has_embeddings:true` 时只请求一次 `/props`，不再发 `/v1/embeddings`；mock 响应也改成单次消费的 body（`arrayBuffer` + `json` 共享 used 标记），避免同类问题再次被 mock 掩盖。测试 170 项。
+
 ## 0.4.3（2026-11-22）
 
 ### 会话日志修复

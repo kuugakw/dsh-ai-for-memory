@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import http from 'node:http';
 import net from 'node:net';
 import zlib from 'node:zlib';
 import { execFileSync, spawn } from 'node:child_process';
@@ -2354,13 +2355,30 @@ test('engine gate ignores a chat-only endpoint when choosing the local fallback'
   assert.equal(configuredEndpointIsDedicated({ externalEmbedBaseUrl: 'http://e:1' }, 'embedding'), true);
   assert.equal(configuredEndpointIsDedicated({ externalBaseUrl: 'http://main:9' }, 'embedding'), false);
 
+  // A realistic response body is single-use: draining it in request() would make
+  // the later response.json() throw, which is exactly the regression guarded
+  // here. (`arrayBuffer` used to be missing from these mocks.)
+  const propsResponse = (props) => {
+    let used = false;
+    const read = () => {
+      if (used) throw new Error('Body is unusable: Body has already been read');
+      used = true;
+      return props;
+    };
+    return {
+      ok: true,
+      arrayBuffer: async () => { read(); return new ArrayBuffer(0); },
+      json: async () => read(),
+    };
+  };
+
   // A chat-only service answers /v1/models and /props (has_embeddings=false)
   // but 404s /v1/embeddings. It must not suppress a runnable local GGUF.
   const chatOnly = createEndpointGate({
     timeoutMs: 100,
     fetchImpl: async (url) => {
       if (url.endsWith('/v1/models')) return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) };
-      if (url.endsWith('/props')) return { ok: true, json: async () => ({ has_embeddings: false }) };
+      if (url.endsWith('/props')) return propsResponse({ has_embeddings: false });
       if (url.endsWith('/v1/embeddings')) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
       throw new Error('no such route');
     },
@@ -2383,7 +2401,7 @@ test('engine gate ignores a chat-only endpoint when choosing the local fallback'
   const propsSaysYes = createEndpointGate({
     timeoutMs: 100,
     fetchImpl: async (url) => {
-      if (url.endsWith('/props')) return { ok: true, json: async () => ({ has_embeddings: true }) };
+      if (url.endsWith('/props')) return propsResponse({ has_embeddings: true });
       throw new Error('no inference expected');
     },
   });
@@ -2503,6 +2521,42 @@ test('engine gate ignores a chat-only endpoint when choosing the local fallback'
     fetchImpl: async () => { throw new Error('must not probe an unconfigured endpoint'); },
   });
   assert.equal(await unconfigured.configuredEndpointReachable('embedding', {}), false);
+});
+
+test('engine gate settles on a real llama.cpp /props response', async () => {
+  let propsHits = 0;
+  let inferenceHits = 0;
+  const server = http.createServer((request, response) => {
+    if (request.url === '/props') {
+      propsHits += 1;
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ has_embeddings: true, has_reranking: false }));
+      return;
+    }
+    if (request.url === '/v1/embeddings') {
+      inferenceHits += 1;
+      response.writeHead(500, { 'content-type': 'text/plain' });
+      response.end('model not loaded');
+      return;
+    }
+    response.writeHead(404);
+    response.end();
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const { port } = server.address();
+  try {
+    const gate = createEndpointGate({ timeoutMs: 2000, ttlMs: 0 });
+    assert.equal(await gate.configuredEndpointReachable('embedding', {
+      externalBaseUrl: `http://127.0.0.1:${port}`,
+    }), true);
+    assert.equal(propsHits, 1);
+    assert.equal(inferenceHits, 0, '/props=true must settle the probe without a real inference request');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test('auto-start skips are recorded for the panel and cleared when resolved', () => {
