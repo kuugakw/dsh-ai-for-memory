@@ -5442,6 +5442,28 @@ test('raw SQL is accepted only as one read-only statement', () => {
     isSafeSelect('SELECT * FROM (WITH c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c)'),
     false,
   );
+  // Quoted identifiers must not hide the self-reference: sqlWithoutLiterals()
+  // blanks them, so the CTE check has to tokenize the original text.
+  assert.equal(
+    isSafeSelect('WITH c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM "c") SELECT count(*) FROM c LIMIT 5'),
+    false,
+  );
+  assert.equal(
+    isSafeSelect('WITH c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM `c`) SELECT count(*) FROM c'),
+    false,
+  );
+  assert.equal(
+    isSafeSelect('WITH c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM [c]) SELECT count(*) FROM c'),
+    false,
+  );
+  assert.equal(
+    isSafeSelect('WITH "c"(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM "c") SELECT count(*) FROM "c"'),
+    false,
+  );
+  // Quoted columns and strings in a non-recursive CTE are still ordinary data.
+  assert.equal(isSafeSelect('WITH "c" AS (SELECT 1) SELECT * FROM "c"'), true);
+  assert.equal(isSafeSelect('WITH x AS (SELECT "text" AS t FROM knowledge_docs) SELECT * FROM x'), true);
+  assert.equal(isSafeSelect("WITH x AS (SELECT 'FROM \"c\"' AS t) SELECT * FROM x"), true);
 });
 
 test('SQL route answers counts and groups from the JSON base', (t) => {
