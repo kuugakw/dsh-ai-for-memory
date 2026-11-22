@@ -449,6 +449,7 @@ window.__ModuleLoader__.load({
         stagingRetentionDays: '过程记录保留天数（只删已归档）',
         contextRetentionDays: '上下文存档保留天数（0=永不删）',
         decisionRetentionDays: '决策记录保留天数（0=永不删）',
+        autoDecisionRetentionDays: '自动活动记录保留天数（只删每轮自动记录，0=永不删）',
         requestAnchor: '系统检查点请求锚点',
         retentionNever: '0 = 永不自动删除',
         storageUsed: '当前记忆目录占用',
@@ -1000,6 +1001,7 @@ window.__ModuleLoader__.load({
         stagingRetentionDays: 'Process log retention days (archived only)',
         contextRetentionDays: 'Context archive retention days (0 = never)',
         decisionRetentionDays: 'Decision retention days (0 = never)',
+        autoDecisionRetentionDays: 'Auto activity retention days (routine records only, 0 = never)',
         requestAnchor: 'Harness checkpoint request anchor',
         retentionNever: '0 = never auto-delete',
         storageUsed: 'Current memory directory usage',
@@ -1754,6 +1756,7 @@ window.__ModuleLoader__.load({
       const [formStagingRetention, setFormStagingRetention] = React.useState(30);
       const [formContextRetention, setFormContextRetention] = React.useState(0);
       const [formDecisionRetention, setFormDecisionRetention] = React.useState(0);
+      const [formAutoDecisionRetention, setFormAutoDecisionRetention] = React.useState(90);
       const [formRequestAnchor, setFormRequestAnchor] = React.useState(true);
       // RAG is mounted on the knowledge layer: the switch decides whether
       // aim_search uses the vector index; building the index is a separate click.
@@ -1908,6 +1911,7 @@ window.__ModuleLoader__.load({
           if (Number.isInteger(payload.stagingRetentionDays)) setFormStagingRetention(payload.stagingRetentionDays);
           if (Number.isInteger(payload.contextRetentionDays)) setFormContextRetention(payload.contextRetentionDays);
           if (Number.isInteger(payload.decisionRetentionDays)) setFormDecisionRetention(payload.decisionRetentionDays);
+          if (Number.isInteger(payload.autoDecisionRetentionDays)) setFormAutoDecisionRetention(payload.autoDecisionRetentionDays);
           if (typeof payload.requestAnchor === 'boolean') setFormRequestAnchor(payload.requestAnchor);
           if (typeof payload.externalBaseUrl === 'string') setFormExternalBase(payload.externalBaseUrl);
           if (typeof payload.externalModel === 'string') setFormExternalModel(payload.externalModel);
@@ -2162,6 +2166,7 @@ window.__ModuleLoader__.load({
           stagingRetentionDays: Number(formStagingRetention) || 0,
           contextRetentionDays: Number(formContextRetention) || 0,
           decisionRetentionDays: Number(formDecisionRetention) || 0,
+          autoDecisionRetentionDays: Number(formAutoDecisionRetention) || 0,
           requestAnchor: formRequestAnchor,
           externalBaseUrl: formExternalBase.trim(),
           externalModel: formExternalModel.trim(),
@@ -2215,6 +2220,7 @@ window.__ModuleLoader__.load({
           && payload.stagingRetentionDays === body.stagingRetentionDays
           && payload.contextRetentionDays === body.contextRetentionDays
           && payload.decisionRetentionDays === body.decisionRetentionDays
+          && payload.autoDecisionRetentionDays === body.autoDecisionRetentionDays
           && payload.requestAnchor === body.requestAnchor
           && payload.externalBaseUrl === body.externalBaseUrl
           && payload.externalModel === body.externalModel
@@ -5411,7 +5417,10 @@ window.__ModuleLoader__.load({
               h('input', { style: styles.input, type: 'number', min: 0, max: 3650, value: formContextRetention, onChange: (event) => setFormContextRetention(event.target.value) })),
             h('label', { style: styles.label },
               t.decisionRetentionDays,
-              h('input', { style: styles.input, type: 'number', min: 0, max: 3650, value: formDecisionRetention, onChange: (event) => setFormDecisionRetention(event.target.value) }))),
+              h('input', { style: styles.input, type: 'number', min: 0, max: 3650, value: formDecisionRetention, onChange: (event) => setFormDecisionRetention(event.target.value) })),
+            h('label', { style: styles.label },
+              t.autoDecisionRetentionDays,
+              h('input', { style: styles.input, type: 'number', min: 0, max: 3650, value: formAutoDecisionRetention, onChange: (event) => setFormAutoDecisionRetention(event.target.value) }))),
           h('p', { style: styles.hint }, t.retentionNever),
           h('p', { style: styles.hint },
             `${t.storageUsed}: ${formatBytes(data?.storage?.totalBytes ?? 0)}｜`

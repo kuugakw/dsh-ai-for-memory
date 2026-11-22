@@ -326,6 +326,7 @@ form = notice
 - `stagingRetentionDays`：删除已归档的旧过程记录文件；
 - `contextRetentionDays`：上下文存档保留天数，0=不自动删除；
 - `decisionRetentionDays`：决策记录保留天数；
+- `autoDecisionRetentionDays`：只删除 `decision_auto_*` 每轮自动活动记录（默认 90 天），审查记录不受影响；
 - 保留清理每天检查一次，即使自动整理关闭也会执行。
 
 ---

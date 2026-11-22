@@ -2231,6 +2231,9 @@ test('config validator bounds auto settings', () => {
   assert.ok(validator({ contextUsagePercent: 0 }).issues);
   assert.ok(validator({ contextUsagePercent: 101 }).issues);
   assert.ok(validator({ contextUsagePercent: 70.5 }).issues);
+  assert.equal(validator({ autoDecisionRetentionDays: 120 }).value.autoDecisionRetentionDays, 120);
+  assert.ok(validator({ autoDecisionRetentionDays: 4000 }).issues);
+  assert.ok(validator({ autoDecisionRetentionDays: 90.5 }).issues);
   assert.ok(validator({ maxContextChars: 500 }).issues);
   assert.ok(validator({ keepRecentTurns: 0 }).issues);
   assert.ok(validator({ keepRecentTurns: 2.5 }).issues);
@@ -2328,6 +2331,8 @@ test('config validator accepts defaults and rejects wrong types', () => {
   assert.equal(validator({}).stagingRetentionDays, 30);
   assert.equal(validator({}).contextRetentionDays, 0);
   assert.equal(validator({}).decisionRetentionDays, 0);
+  assert.equal(validator({}).autoDecisionRetentionDays, 90);
+  assert.equal(normalizeConfig({ autoDecisionRetentionDays: 0 }).autoDecisionRetentionDays, 0);
   assert.equal(validator({}).requestAnchor, true);
   assert.equal(validator({ mcpEnabled: false }).mcpEnabled, false);
   assert.equal(validator({ mcpToken: 'secret' }).mcpToken, 'secret');
@@ -3130,6 +3135,38 @@ test('cache views invalidate across store instances and retention is archive-saf
     fs.utimesSync(contextFile, old, old);
     assert.equal(first.pruneContexts(30), 1);
     assert.equal(first.listContexts().length, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('auto activity retention removes only old decision_auto records', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(path.join(root, 'memory'));
+    const old = new Date(Date.now() - 100 * 86400000);
+    store.recordDecision({
+      decision_id: 'decision_auto_t1_aaaaaaaa', decision: '常规活动', outcome: 'observed', kind: 'activity',
+    });
+    store.recordDecision({
+      decision_id: 'decision_auto_t2_bbbbbbbb', decision: '最近的常规活动', outcome: 'observed', kind: 'activity',
+    });
+    store.recordDecision({
+      decision_id: 'decision_abcd1234', decision: '用户审查过的决定', outcome: 'approved', kind: 'review',
+    });
+    const autoOld = path.join(store.decisionDir, 'decision_auto_t1_aaaaaaaa.json');
+    const reviewOld = path.join(store.decisionDir, 'decision_abcd1234.json');
+    fs.utimesSync(autoOld, old, old);
+    fs.utimesSync(reviewOld, old, old);
+
+    const removed = store.pruneRetention();
+    assert.equal(removed.autoDecisions, 1);
+    assert.equal(removed.decisions, 0);
+    assert.equal(fs.existsSync(autoOld), false);
+    // An old reviewed decision and a recent auto record both survive.
+    assert.equal(fs.existsSync(reviewOld), true);
+    assert.equal(fs.existsSync(path.join(store.decisionDir, 'decision_auto_t2_bbbbbbbb.json')), true);
+    assert.equal(store.decisionStats().total, 2);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

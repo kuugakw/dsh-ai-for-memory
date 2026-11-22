@@ -174,6 +174,10 @@ const DEFAULTS = Object.freeze({
   stagingRetentionDays: 30,
   contextRetentionDays: 0,
   decisionRetentionDays: 0,
+  // Routine turn activity (`decision_auto_*`) is instrumentation, not an audit
+  // conclusion: keep three months by default so the decision scan stays bounded.
+  // Reviewed aim_decide records are covered only by decisionRetentionDays.
+  autoDecisionRetentionDays: 90,
   // When a harness checkpoint (time/schema/reload notice) arrives without a
   // new user request in this same step, append a short anchor so the model does
   // not answer an older topic. A real incoming request always wins. Off only
@@ -209,6 +213,7 @@ const NUMERIC_BOUNDS = Object.freeze({
   stagingRetentionDays: [0, 3650],
   contextRetentionDays: [0, 3650],
   decisionRetentionDays: [0, 3650],
+  autoDecisionRetentionDays: [0, 3650],
   autoKnowledgeLimit: [1, 100],
   similarityThreshold: [0.01, 0.95, 'float'],
   externalTimeoutMs: [1000, 600000],
@@ -379,6 +384,7 @@ function storeOptions(config) {
     stagingRetentionDays: config.stagingRetentionDays,
     contextRetentionDays: config.contextRetentionDays,
     decisionRetentionDays: config.decisionRetentionDays,
+    autoDecisionRetentionDays: config.autoDecisionRetentionDays,
   };
 }
 
@@ -2236,7 +2242,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             `自动整理：${config.autoEnabled ? `开启（每 ${config.autoEveryRounds} 轮按相似度；上下文占用到 ${config.contextUsagePercent}% 时全量重置）` : '关闭'}`,
             ...(context.gitignore?.warning ? [`⚠ ${context.gitignore.warning}`] : []),            `保留策略：staging ${config.stagingRetentionDays ?? 30} 天（仅已归档文件）；`
               + `contexts ${config.contextRetentionDays > 0 ? `${config.contextRetentionDays} 天` : '不自动删除'}；`
-              + `decisions ${config.decisionRetentionDays > 0 ? `${config.decisionRetentionDays} 天` : '不自动删除'}`,            (() => {
+              + `decisions ${config.decisionRetentionDays > 0 ? `${config.decisionRetentionDays} 天` : '不自动删除'}`
+            + `｜自动活动记录 ${config.autoDecisionRetentionDays > 0 ? `${config.autoDecisionRetentionDays} 天` : '不自动删除'}`,            (() => {
               const meter = deps.getService?.('tokenMeter');
               let pressure = null;
               if (meter && typeof meter.contextPressure === 'function' && session) {
@@ -3689,7 +3696,8 @@ export function installContextManagement(ctx, config, deps, runtime) {
       // on or the user manually archived something.
       if ((Number.isFinite(config.stagingRetentionDays) ? config.stagingRetentionDays : 30) > 0
         || (Number.isFinite(config.contextRetentionDays) ? config.contextRetentionDays : 0) > 0
-        || (Number.isFinite(config.decisionRetentionDays) ? config.decisionRetentionDays : 0) > 0) {
+        || (Number.isFinite(config.decisionRetentionDays) ? config.decisionRetentionDays : 0) > 0
+        || (Number.isFinite(config.autoDecisionRetentionDays) ? config.autoDecisionRetentionDays : 90) > 0) {
         try {
           const context = memoryContext(config, { agent: { session } }, deps, runtime);
           const store = writeSource(context, 'session').store;

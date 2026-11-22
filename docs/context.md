@@ -67,7 +67,8 @@
 
 - `stagingRetentionDays` 默认 30 天：只删除“整份都已归档”的旧过程记录文件，未归档内容永不因保留策略丢失；
 - `contextRetentionDays` 默认 0：不自动删除上下文存档，因为它是 restore 的来源；
-- `decisionRetentionDays` 默认 0：不自动删除决策审计。
+- `decisionRetentionDays` 默认 0：不自动删除决策审计；
+- `autoDecisionRetentionDays` 默认 90 天：只删除 `decision_auto_*` 这类每轮自动活动记录，让决策扫描有界；`aim_decide` 的审查记录不归它管，仍由上面那条控制。
 
 保留策略**不依赖自动整理开关**：每个对话每天第一次 `turn/end` 时检查一次；即使自动整理关闭，staging 的 30 天清理也会执行。归档操作本身不再重复重建全量去重集合，分类文件的去重集合按文件签名增量维护。
 
