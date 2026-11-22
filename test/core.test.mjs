@@ -1479,7 +1479,7 @@ test('knowledge candidates come from verified records, decisions and user rules 
   // Only the user's own words are mined from a context turn.
   const fromUser = candidatesFromTurn({ turn: 3, user: '记住：以后统一用 0.1 版本号。其他都不动' }, 'ctx1');
   assert.equal(fromUser.length, 1);
-  assert.equal(fromUser[0].source_ref, 'context:ctx1#turn3');
+  assert.equal(fromUser[0].source_ref, 'context:ctx1#turn3#0');
   assert.equal(fromUser[0].category, 'workflow_rules');
   assert.equal(candidatesFromTurn({ turn: 4, assistant: '模型自己说的话不算事实' }, 'ctx1').length, 0);
 
@@ -1869,6 +1869,69 @@ test('a pending free-text promotion survives the next run', () => {
       Object.hasOwn(store.promotedLedger().refs, `staging:${staged.dedup_id}`),
       false,
     );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a pending context-turn proposal survives the next run', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    const rule1 = '以后所有接口请求都必须重试3次，失败后统一记录错误码到日志';
+    const rule2Before = '部署脚本必须先跑3个测试，通过后统一发布到主分支';
+    const rule2After = '部署脚本必须先跑5个测试，通过后统一发布到主分支';
+    store.remember({
+      text: rule1,
+      category: 'workflow_rules',
+      source: 'user',
+      provenance: 'user',
+      verified: true,
+    }, { confirm: true });
+    store.remember({
+      text: rule2Before,
+      category: 'workflow_rules',
+      source: 'user',
+      provenance: 'user',
+      verified: true,
+    }, { confirm: true });
+    const context = store.saveContext({
+      label: 'manual',
+      sessionId: 's1',
+      turnFrom: 1,
+      turnTo: 1,
+      // One turn, two rules: the first is already known, the second changes a
+      // number and must stay pending until the user confirms it.
+      turns: [{ turn: 1, user: `${rule1}。${rule2After}`, assistant: '好的' }],
+      text: 'x',
+      chars: 1,
+    });
+    const baseRef = `context:${context.context_id}#turn1`;
+
+    const first = store.promoteKnowledge();
+    assert.equal(first.pending.length, 1);
+    assert.equal(first.pending[0].source_ref, `${baseRef}#1`);
+    assert.equal(Object.hasOwn(store.promotedLedger().refs, baseRef), false);
+
+    // The sibling that merged must not mark the shared turn consumed: the
+    // pending rule has to be reported again on the next run.
+    const second = store.promoteKnowledge();
+    assert.equal(second.pending.length, 1);
+    assert.equal(second.pending[0].source_ref, first.pending[0].source_ref);
+    assert.equal(Object.hasOwn(store.promotedLedger().refs, baseRef), false);
+
+    // Once the update is explicitly confirmed, every candidate is a no-op
+    // merge and only then is the turn base consumed.
+    store.remember({
+      text: rule2After,
+      category: 'workflow_rules',
+      source: 'user',
+      provenance: 'user',
+      verified: true,
+    }, { confirm: true });
+    const third = store.promoteKnowledge();
+    assert.equal(third.pending.length, 0);
+    assert.equal(Object.hasOwn(store.promotedLedger().refs, baseRef), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -12,6 +12,7 @@
 ### 知识提炼
 
 - **自由文本候选的 base ref 不再提前消费**：`candidatesFromRecord()` 的自由文本候选用 `staging:<id>#N` 作为 `source_ref`，收尾台账却拿 `staging:<id>` 去精确匹配，于是把 base ref 标成已消费。被冲突闸门挡下的提案只报告一次就消失。现在按 `base ref` 前缀归组，只有该条目的所有候选都已入账或在本轮处理完，才消费 base ref；pending 和因预算跳过的候选都会留到下轮。回归用例覆盖自由文本 pending 连续两轮可见。
+- **同一 turn 的候选各自有 ref**：`candidatesFromTurn()` 之前让一个 turn 的所有候选共用 `context:<id>#turnN`。第一条候选成功写入就把整条 ref 记进台账，同 turn 里因数值变更进入 pending 的兄弟候选下一轮被当成已提炼而消失。现在每个候选带 `#N` 后缀，turn ref 作为 base，按前缀等到所有候选都解析后才消费；回归用例覆盖“一条已存在 + 一条数值变更”的 turn 连续两轮可见 pending，确认后才消费 base。
 
 ### 上下文压力
 
