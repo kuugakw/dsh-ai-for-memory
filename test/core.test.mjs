@@ -5523,11 +5523,22 @@ test('SQL route answers counts and groups from the JSON base', (t) => {
   assert.equal(wide.ok, true);
   assert.equal(wide.rows.length, 50);
 
-  // Row count is not a memory bound: a wide blob must be rejected before it is
-  // accumulated (50 x 3 MiB would otherwise be 150 MiB).
-  const oversized = runSqlQuery([], 'SELECT randomblob(3145728) AS blob');
+  // Row count is not a memory bound, and the driver materializes the scalar
+  // before the post-row check; the bounded constructor must reject 128 MiB
+  // before allocating it.
+  const oversized = runSqlQuery([], 'SELECT randomblob(134217728) AS blob');
   assert.equal(oversized.ok, false);
-  assert.match(oversized.error, /单行超过/);
+  assert.match(oversized.error, /randomblob 请求 134217728 字节/);
+  const zeroBlob = runSqlQuery([], 'SELECT zeroblob(134217728) AS blob');
+  assert.equal(zeroBlob.ok, false);
+  assert.match(zeroBlob.error, /zeroblob 请求 134217728 字节/);
+  // printf/format can expand a short format string into an arbitrarily large
+  // string; reject them during validation, before SQLite prepares the query.
+  const printfHuge = runSqlQuery([], "SELECT printf('%134217728s', '') AS text");
+  assert.equal(printfHuge.ok, false);
+  assert.equal(isSafeSelect("SELECT printf('%134217728s', '')"), false);
+  assert.equal(isSafeSelect("SELECT format('%134217728s', '')"), false);
+  assert.equal(isSafeSelect(`SELECT "printf"('%134217728s', '')`), false);
   const smallBlob = runSqlQuery([], 'SELECT randomblob(1024) AS blob');
   assert.equal(smallBlob.ok, true);
   assert.equal(smallBlob.rows[0].blob.length, 1024);
