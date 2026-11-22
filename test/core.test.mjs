@@ -52,7 +52,7 @@ import {
 } from '../lib/git-sync.js';
 import { collectTurnDigest } from '../lib/auto.js';
 import { buildContextSnapshot, collectTurns, formatContextMarkdown, formatRestoreContext, snapshotOfTurns } from '../lib/context.js';
-import { handleMcpMessage, MCP_PATH, mcpToolNames } from '../lib/mcp.js';
+import { handleMcpMessage, MCP_MAX_BATCH, MCP_PATH, mcpToolNames } from '../lib/mcp.js';
 import { packageVersion } from '../lib/version.js';
 import { ensureMcpToken, mcpTokenPath } from '../lib/mcp-token.js';
 import { contentTokens, lexicalOverlap, selectTurnsByTopic, topicSimilarity } from '../lib/similarity.js';
@@ -3196,6 +3196,27 @@ test('MCP egress lists and routes root-scoped memory tools', async () => {
     assert.equal(notice, null);
     const unknown = await handleMcpMessage({ jsonrpc: '2.0', id: 6, method: 'nope' }, deps);
     assert.equal(unknown.error.code, -32601);
+
+    // One batch is fanned out with Promise.all, so its size is capped before any
+    // tool runs; an oversized batch must not multiply the per-call budget.
+    const callsBeforeBatch = calls.length;
+    const tooMany = Array.from({ length: MCP_MAX_BATCH + 1 }, (_, index) => ({
+      jsonrpc: '2.0',
+      id: 100 + index,
+      method: 'tools/call',
+      params: { name: 'aim_search', arguments: { query: '发布', root: roots[0].root } },
+    }));
+    const overflow = await handleMcpMessage(tooMany, deps);
+    assert.equal(overflow.error.code, -32600);
+    assert.match(overflow.error.message, /批次最多/);
+    assert.equal(calls.length, callsBeforeBatch);
+
+    // Nested batches are not valid JSON-RPC and would recurse around the cap.
+    const nested = await handleMcpMessage([[
+      { jsonrpc: '2.0', id: 200, method: 'ping' },
+    ]], deps);
+    assert.equal(nested.length, 1);
+    assert.equal(nested[0].error.code, -32600);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -4254,6 +4275,25 @@ test('blocked writes are logged and a confirmed rewrite resolves the report', ()
     assert.equal(after.items[0].resolved, true);
     assert.equal(store.documents()[0].text, '合并代码前不需要跑完整测试套件');
     assert.equal(store.status().knowledge.conflicts.open, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('panel conflict count covers the whole log, not just the 50 visible rows', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(path.join(root, 'memory'));
+    for (let index = 0; index < 55; index += 1) {
+      store.reportConflict({
+        needs_confirm: true,
+        pending: { text: `未确认的写入 ${index}`, category: 'project_facts' },
+        conflicts: [{ doc_id: 'k_existing', text: '已有事实', category: 'project_facts' }],
+      });
+    }
+    const ui = buildUiState(store);
+    assert.equal(ui.knowledgeConflicts.length, 50);
+    assert.equal(ui.knowledgeConflictOpen, 55);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -8,6 +8,7 @@
 
 - **知识库记录下载 / 打开只用 safeStem 落盘文件**：`recordFile()` 的 knowledge 分支之前把面板传入的原始 `doc_id` 直接拼进 `knowledgeDir`。写入用的是 `safeStem(doc_id)`，于是 `doc_id: '../../secret'` 可以经 `/record/download` 或 `/reveal` 读出记忆目录外的 JSON。现在按写入规则取 `safeStem()`，再用 `path.resolve` + `path.relative` 做目录包含校验；context / snapshot 分支同样校验。
 - **文件管理器启动失败不再终止宿主**：`openInFileManager()` 之前 spawn 后只 `unref()`，缺少 `xdg-open` 时异步 `error` 事件没有监听，Node 会以未捕获异常退出 DSH 进程。现在监听 `spawn` / `error`，失败返回 `{ ok:false, error }`，`/reveal` 返回 500 而不是崩溃；同步 spawn 异常也走同一条错误路径。
+- **MCP JSON-RPC 批次有上限且禁止嵌套**：`handleMcpMessage()` 对数组直接 `Promise.all`，一条无上限的 batch 可并发数百次 `aim_search`；嵌套 batch 还能绕过外层计数。现在单批最多 20 条，超限在调用任何工具前返回 `-32600`，批次项本身是数组也按非法请求拒绝。
 
 ### 知识提炼
 
@@ -56,6 +57,9 @@
 
 - **知识勾选键包含 scope/session**：批量选择之前只用 `doc.doc_id`，两个对话存在同 id 知识时会一起被勾选/确认。现在选择键为 `scope:session_key:doc_id`，全选、单行勾选和批量确认共用同一个键。
 - **`/state` 加载增加请求序号**：慢响应可能在切换 scope 后覆盖新数据。现在每次 `load()` 递增 `stateRequestSeq`，只有最新请求能写入 `data`、错误和 busy 状态。
+- **llama 表单不再被任意 `/state` 重载重置**：同步 effect 依赖 `data.localModels`，保存、启动、停止或任何面板刷新都会把未保存的 ctx/端口/pooling 等字段改回服务端值。现在按所选模型的存储配置生成 key，只有配置真正变化或切换模型时才回填。
+- **冲突未解决数按完整日志统计**：`buildUiState()` 之前从截断到 50 条的 `conflictLog(50).items` 计数，超过 50 条未解决冲突时面板最多显示 50。现在累加 `conflictLog(50).open`（由完整日志算出），列表仍只返回 50 行。
+- **上下文行去掉重复的恢复按钮**：折叠头部和展开内容各有一个“恢复”，展开后同一行出现两个相同操作。现在只保留头部按钮。
 
 ## 0.4.4（2026-11-22）
 

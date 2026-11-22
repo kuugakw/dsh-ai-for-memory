@@ -1809,6 +1809,7 @@ window.__ModuleLoader__.load({
       const [localModelBusy, setLocalModelBusy] = React.useState('');
       const [localCtxDrafts, setLocalCtxDrafts] = React.useState({});
       const [llamaModelId, setLlamaModelId] = React.useState('');
+      const lastLlamaConfigKey = React.useRef('');
       const [llamaCtx, setLlamaCtx] = React.useState(2048);
       const [llamaPort, setLlamaPort] = React.useState(0);
       const [llamaPooling, setLlamaPooling] = React.useState('');
@@ -1993,16 +1994,32 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         if (llamaModelId === '' && llamaModels.length > 0) setLlamaModelId(llamaModels[0].id);
       }, [llamaModelId, localModelRows.length]);
+      // Sync the editable fields only when the selected model's stored config
+      // actually changes. Depending on `data.localModels` reset the form on every
+      // /state reload, discarding edits that had not been saved yet.
+      const llamaConfigKey = llamaSelected ? [
+        llamaSelected.id,
+        llamaSelected.ctxSize,
+        llamaSelected.port,
+        llamaSelected.pooling ?? '',
+        llamaSelected.startupTimeoutMs,
+        llamaSelected.binary ?? '',
+        Array.isArray(llamaSelected.extraArgs) ? llamaSelected.extraArgs.join('\n') : '',
+      ].join('\u0000') : '';
       React.useEffect(() => {
-        const model = llamaModels.find((row) => row.id === llamaModelId);
-        if (!model) return;
-        setLlamaCtx(model.ctxSize > 0 ? model.ctxSize : 2048);
-        setLlamaPort(model.port > 0 ? model.port : 0);
-        setLlamaPooling(model.pooling ?? '');
-        setLlamaTimeout(model.startupTimeoutMs > 0 ? model.startupTimeoutMs : 120000);
-        setLlamaBinary(model.binary ?? '');
-        setLlamaExtra(Array.isArray(model.extraArgs) ? model.extraArgs.join('\n') : '');
-      }, [llamaModelId, data?.localModels]);
+        if (!llamaSelected) {
+          lastLlamaConfigKey.current = '';
+          return;
+        }
+        if (lastLlamaConfigKey.current === llamaConfigKey) return;
+        lastLlamaConfigKey.current = llamaConfigKey;
+        setLlamaCtx(llamaSelected.ctxSize > 0 ? llamaSelected.ctxSize : 2048);
+        setLlamaPort(llamaSelected.port > 0 ? llamaSelected.port : 0);
+        setLlamaPooling(llamaSelected.pooling ?? '');
+        setLlamaTimeout(llamaSelected.startupTimeoutMs > 0 ? llamaSelected.startupTimeoutMs : 120000);
+        setLlamaBinary(llamaSelected.binary ?? '');
+        setLlamaExtra(Array.isArray(llamaSelected.extraArgs) ? llamaSelected.extraArgs.join('\n') : '');
+      }, [llamaConfigKey]);
       const roots = Array.isArray(data?.roots) ? data.roots : [];
       const gitignoreWarning = typeof data?.gitignore?.warning === 'string' ? data.gitignore.warning : '';
       const gitignoreState = data?.gitignore?.state ?? '';
@@ -3908,17 +3925,6 @@ window.__ModuleLoader__.load({
                       style: { ...styles.button, textDecoration: 'none' },
                       onClick: (event) => event.stopPropagation(),
                     }, t.contextExportMarkdown)),
-                  h('button', {
-                    key: 'restore',
-                    type: 'button',
-                    className: 'aim-btn',
-                    style: styles.primary,
-                    disabled: toolBusy === `context:${row.context_id}`,
-                    onClick: (event) => {
-                      event.stopPropagation();
-                      void restoreContextRow(row);
-                    },
-                  }, toolBusy === `context:${row.context_id}` ? t.searching : t.contextRestore),
                 ],
               });
             }),
