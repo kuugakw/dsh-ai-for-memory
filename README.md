@@ -198,7 +198,7 @@ aim_memory action=status
 - **知识冲突日志**：被冲突闸门拦下的写入记入 `knowledge/conflicts.jsonl`（只做审计，不是队列，不参与检索）；`aim_memory status` 报未确认数，面板知识库页显示最近冲突，确认覆盖后自动标记为已确认；
 - **自动活动记录保留**：新增 `autoDecisionRetentionDays`（默认 90 天），只清理 `decision_auto_*` 每轮自动记录，`aim_decide` 审查记录仍默认永不自动删除；
 - **稳定性**：用户数据写入 fsync；RAG 索引缓存按 manifest 内容识别代际，避免跨实例读到旧索引；
-- **本地引擎运行方式**：设置页可选常闭 / 常开 / 每轮开关；自动拉起前先探测已配置的 Embedding/Rerank 端点，能连上就跳过，不重复起进程；
+- **本地引擎运行方式**：设置页可选常闭 / 常开 / 每轮开关；自动拉起前先探测已配置的 Embedding/Rerank 端点，能连上就跳过，不重复起进程；`turn` 在轮末不立即杀进程，空闲约 2 分钟后才释放，短轮次不会把加载中的模型记成启动失败；
 - **决策层拆分**：每轮工具活动自动记成「常规」，`aim_decide` 的审查保留在「风险」，面板与 `aim_memory status` 分开计数；
 - **诊断/用量页**：运行环境、知识命中与权重、对话磁盘占用、批量开放/关闭和面板操作审计集中在一页；
 - 知识页支持**分类/来源/确认状态筛选**、**时间/置信度/命中次数/权重排序**、**批量确认**与**撤销确认**；
@@ -223,7 +223,7 @@ aim_memory action=status
 
 要求 Node.js 20+。会话日志体检/修复依赖 Node 的 zstd，需要 Node 22.15+；在 Node 20 上插件其余功能正常，诊断页会明确标记这一项不可用，而不是等用户点下去才报错。
 
-测试共 159 项；Node 20 上 13 项依赖 `node:sqlite`、zstd 或 git 的用例按运行时能力跳过（146 pass / 13 skip），Node 22.15+ 全量通过。CI 覆盖 Linux / Windows / macOS × Node 20 / 22。“全绿”指没有失败，不等于每个平台都跑满 159 项。
+测试共 160 项；Node 20 上 13 项依赖 `node:sqlite`、zstd 或 git 的用例按运行时能力跳过（147 pass / 13 skip），另有 1 项模拟慢加载的引擎用例只在 POSIX 上运行（Windows 上 146 pass / 14 skip）。Node 22.15+ 全量通过（Windows 上 159 pass / 1 skip）。CI 覆盖 Linux / Windows / macOS × Node 20 / 22。“全绿”指没有失败，不等于每个平台都跑满 160 项。
 
 ```bash
 npm test

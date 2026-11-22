@@ -42,7 +42,7 @@ import { applyDisclosure, RRF_K, reciprocalRankFusion, search, snippetOf, tokeni
 import { BoundedCache, CATEGORIES, appendJsonLine, dshHome, hourKey, listJsonlFiles, writeJson } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
-import { buildServerArgs, findModelFile, missingLocalEngineKinds, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig } from '../lib/local-engine.js';
+import { buildServerArgs, findModelFile, localEngineStatus, missingLocalEngineKinds, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig } from '../lib/local-engine.js';
 import { configuredEndpointBase, createEndpointGate } from '../lib/engine-gate.js';
 import {
   commitSync, initSync, pullSync, pushSync, readSyncConfig, syncStatus, writeSyncConfig,
@@ -3408,6 +3408,49 @@ test('the local engine reminder only names runnable llama.cpp kinds that are not
   );
   // Cloud-only setups have no local models: stay silent.
   assert.deepEqual(missingLocalEngineKinds({ categories: [] }, []), []);
+});
+
+test('cancelling a starting engine reports cancellation, not a crash', async (t) => {
+  // A POSIX shebang wrapper is the portable way to simulate a slow model load;
+  // Windows has no equivalent that spawn() can execute without a shell.
+  if (process.platform === 'win32') {
+    t.skip('needs an executable shell wrapper');
+    return;
+  }
+  const root = tempRoot();
+  try {
+    const models = path.join(root, 'models');
+    const modelDir = path.join(models, 'Embedding', 'slow');
+    fs.mkdirSync(modelDir, { recursive: true });
+    fs.writeFileSync(path.join(modelDir, 'slow.gguf'), '');
+    const binary = path.join(modelDir, 'slow-engine.sh');
+    fs.writeFileSync(binary, '#!/bin/sh\nexec sleep 5\n');
+    fs.chmodSync(binary, 0o755);
+    fs.writeFileSync(path.join(modelDir, 'model.json'), JSON.stringify({
+      binary,
+      startupTimeoutMs: 60000,
+    }));
+
+    const pending = startLocalEngine({ modelsRoot: models, modelId: 'Embedding/slow' });
+    let starting = false;
+    for (let attempt = 0; attempt < 100 && !starting; attempt += 1) {
+      starting = localEngineStatus().some((row) => row.id === 'Embedding/slow' && row.starting === true);
+      if (!starting) await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(starting, true, 'engine never entered the starting state');
+
+    // An explicit stop while the weights are still loading must cancel cleanly.
+    const stopped = await stopLocalEngine('Embedding/slow', { cancelStart: true });
+    assert.equal(stopped.ok, true, stopped.error);
+    const started = await pending;
+    assert.equal(started.ok, false);
+    assert.equal(started.cancelled, true, JSON.stringify(started));
+    assert.equal(started.error, '启动已取消');
+    assert.ok(!localEngineStatus().some((row) => row.id === 'Embedding/slow'));
+  } finally {
+    await stopAllLocalEngines();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('a live llama-server from the previous plugin process is adopted', async () => {

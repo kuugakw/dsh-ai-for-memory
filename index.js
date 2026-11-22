@@ -2728,6 +2728,28 @@ export function installContextManagement(ctx, config, deps, runtime) {
   const ENGINE_START_COOLDOWN_MS = 60000;
   const engineStartFailures = new Map();
   const engineTurnStarted = new Set();
+  // `turn` keeps engines warm across consecutive turns instead of killing a
+  // model that may still be reading weights when a short turn ends. The idle
+  // window also makes the mode do what it is actually good for: release VRAM
+  // after a quiet period, not cold-start 1.3 GB between every two turns.
+  const TURN_IDLE_STOP_MS = 120000;
+  let turnIdleStopTimer = null;
+  const clearTurnIdleStop = () => {
+    if (turnIdleStopTimer !== null) {
+      clearTimeout(turnIdleStopTimer);
+      turnIdleStopTimer = null;
+    }
+  };
+  const scheduleTurnIdleStop = () => {
+    clearTurnIdleStop();
+    turnIdleStopTimer = setTimeout(() => {
+      turnIdleStopTimer = null;
+      if (config.engineLifecycle !== 'turn' || activeTurns.size > 0) return;
+      void stopTurnLocalEngines();
+    }, TURN_IDLE_STOP_MS);
+    // A pending idle stop must never keep the plugin process alive.
+    turnIdleStopTimer.unref?.();
+  };
   // Main-session turns currently running. A per-turn stop waits until this is
   // empty so one conversation ending cannot kill an engine another one uses.
   const activeTurns = new Set();
@@ -2782,9 +2804,16 @@ export function installContextManagement(ctx, config, deps, runtime) {
         continue;
       }
       // Record before the async start: if the turn ends while the model is
-      // still loading, the turn-end stop must know it owns that process.
+      // still loading, the idle release must know it owns that process.
       if (mode === 'turn') engineTurnStarted.add(id);
       void startLocalEngine({ modelId: id }).then((result) => {
+        if (result?.cancelled === true) {
+          // A stop that raced the load (explicit panel stop) must not leave a
+          // cooldown or a scary warning behind: it was never a startup failure.
+          engineStartFailures.delete(id);
+          engineTurnStarted.delete(id);
+          return;
+        }
         if (result?.ok === true) {
           engineStartFailures.delete(id);
           // An adopted process (left over from before this plugin load) is not
@@ -2812,7 +2841,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
       try {
         await stopLocalEngine(id);
         // eslint-disable-next-line no-console
-        console.log(`[ai-for-memory] 每轮模式：已停止本地引擎 ${id}`);
+        console.log(`[ai-for-memory] 每轮模式空闲，已释放本地引擎 ${id}`);
       } catch (error) {
         // eslint-disable-next-line no-console
         console.warn(`[ai-for-memory] 每轮模式停止本地引擎失败：${id}：${error?.message ?? error}`);
@@ -3669,6 +3698,9 @@ export function installContextManagement(ctx, config, deps, runtime) {
     if (event.type === 'turn/start') {
       if (!isSubagent) {
         activeTurns.add(id);
+        // A new turn cancels the idle release; consecutive short turns keep one
+        // warm model instead of cold-starting it again after every turn.
+        clearTurnIdleStop();
         void ensureLocalEngines(config.engineLifecycle);
       }
       return;
@@ -3676,12 +3708,14 @@ export function installContextManagement(ctx, config, deps, runtime) {
     if (event.type !== 'turn/end') return;
     if (!isSubagent) activeTurns.delete(id);
 
-    // `turn`: stop exactly the engines this mode started for this turn. A model
-    // the user started by hand (or one adopted from a previous DSH process) is
-    // not in `engineTurnStarted`, so switching modes never kills a manual run.
-    // The stop is deferred while another main conversation is still running.
+    // `turn`: release the engines this mode started only after the conversation
+    // has been quiet for TURN_IDLE_STOP_MS. Stopping at turn/end would SIGTERM
+    // models that are still loading (short turns) and burn a cold start between
+    // every two turns. A model the user started by hand (or one adopted from a
+    // previous DSH process) is not in `engineTurnStarted`, so switching modes
+    // never kills a manual run.
     if (!isSubagent && config.engineLifecycle === 'turn' && activeTurns.size === 0) {
-      void stopTurnLocalEngines();
+      scheduleTurnIdleStop();
     }
 
     // Conversations are the unit of independence, so activity is recorded for
