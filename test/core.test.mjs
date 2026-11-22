@@ -404,6 +404,25 @@ test('search summaries and applyDisclosure share one implementation', () => {
   assert.deepEqual(viaSearch, viaDisclosure);
 });
 
+test('hybrid search drops hash-collision noise with no shared tokens', () => {
+  const docs = [
+    { doc_id: 'collision-relevant', category: 'errors_fixes', text: '测试流程先跑单元测试再打包' },
+    { doc_id: 'collision-noise', category: 'ui_facts', text: '完全无关的话题关于天气预报和烹饪' },
+  ];
+  // A document with no shared token still landed on a query dimension by
+  // FNV-1a collision, giving cosine ~0.19 and a positive RRF contribution.
+  for (const mode of ['hybrid', 'vector']) {
+    const hits = search(docs, '测试', { mode, topK: 10 });
+    const ids = hits.map((hit) => hit.doc_id);
+    assert.ok(ids.includes('collision-relevant'), `${mode}: relevant doc missing`);
+    assert.ok(!ids.includes('collision-noise'), `${mode}: collision noise entered results`);
+  }
+  // The single-character query is the worst case: it has exactly one vector
+  // dimension, so any colliding dimension used to look like a match.
+  const single = search(docs, '测', { mode: 'hybrid', topK: 10 });
+  assert.deepEqual(single.map((hit) => hit.doc_id), ['collision-relevant']);
+});
+
 test('knowledge search supports bm25, vector and hybrid', () => {
   const docs = [
     { doc_id: 'err_timeout', category: 'errors_fixes', text: 'API 超时时重试三次，记录错误日志，仍失败则通知用户' },
