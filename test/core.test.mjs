@@ -39,7 +39,7 @@ import { knowledgeDatabasePath, sqliteAvailable } from '../lib/knowledge-sqlite.
 import {
   formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
 } from '../lib/knowledge-query.js';
-import { applyDisclosure, RRF_K, reciprocalRankFusion, search, snippetOf, tokenize } from '../lib/retrieval.js';
+import { applyDisclosure, buildIndex, RRF_K, reciprocalRankFusion, search, snippetOf, tokenize } from '../lib/retrieval.js';
 import { BoundedCache, CATEGORIES, appendJsonLine, dshHome, hourKey, listJsonlFiles, writeJson } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
@@ -403,6 +403,28 @@ test('search summaries and applyDisclosure share one implementation', () => {
   const viaSearch = search(docs, '超时处理', { mode: 'hybrid', topK: 5 });
   const viaDisclosure = applyDisclosure(full, '超时处理');
   assert.deepEqual(viaSearch, viaDisclosure);
+});
+
+test('search and buildIndex keep one entry per doc_id when docs repeat it', () => {
+  const first = { doc_id: 'dup', category: 'errors_fixes', text: 'alpha first' };
+  const replacement = { doc_id: 'dup', category: 'errors_fixes', text: 'alpha replacement extra' };
+  const other = { doc_id: 'other', category: 'errors_fixes', text: 'beta alpha' };
+  const expected = search([replacement, other], 'alpha', { mode: 'bm25', topK: 10 });
+  const duplicated = search([first, replacement, other], 'alpha', { mode: 'bm25', topK: 10 });
+
+  // Last occurrence wins, exactly like the incremental index's `current` map.
+  assert.deepEqual(duplicated.map((hit) => hit.doc_id), expected.map((hit) => hit.doc_id));
+  assert.deepEqual(duplicated.map((hit) => hit.score), expected.map((hit) => hit.score));
+  assert.equal(duplicated.find((hit) => hit.doc_id === 'dup').text, 'alpha replacement extra');
+  assert.equal(new Set(duplicated.map((hit) => hit.doc_id)).size, 2);
+
+  const duplicatedIndex = buildIndex([first, replacement, other]);
+  assert.equal(duplicatedIndex.n, 2);
+  assert.equal(duplicatedIndex.avgLength, buildIndex([replacement, other]).avgLength);
+
+  // Hybrid: the keyword and vector channels see one row per id too.
+  const hybrid = search([first, replacement, other], 'alpha', { mode: 'hybrid', topK: 10 });
+  assert.equal(hybrid.filter((hit) => hit.doc_id === 'dup').length, 1);
 });
 
 test('hybrid search drops hash-collision noise with no shared tokens', () => {
