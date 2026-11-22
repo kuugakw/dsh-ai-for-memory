@@ -630,6 +630,20 @@ test('decision review gates on reversibility, not on reason length', () => {
     irreversible: true,
   }, { reviewHighRiskOnly: false });
   assert.equal(mediumReviewed.outcome, 'rejected');
+
+  // `risk in RISK_MULTIPLIER` used to accept every Object.prototype name and
+  // store it as a legal risk level.
+  for (const risk of ['toString', 'constructor', '__proto__', 'hasOwnProperty']) {
+    assert.throws(
+      () => evaluateDecision({ decision: '原型属性不是风险等级', risk }),
+      /risk 必须是 low \/ medium \/ high/,
+      risk,
+    );
+  }
+  assert.throws(
+    () => evaluateDecision({ decision: '数字也不是', risk: 1 }),
+    /risk 必须是 low \/ medium \/ high/,
+  );
 });
 
 test('turn activity becomes one observed decision with tools, failures and files', () => {
@@ -3034,6 +3048,11 @@ test('audit log is append-only, bounded and newest first', () => {
     assert.equal(rows[0].action, 'context.clear');
     assert.equal(rows[1].action, 'knowledge.verify');
     assert.equal(readAudit(root, 1).length, 1);
+    // An explicit 0 means "no rows", not the 200-row default.
+    assert.equal(readAudit(root, 0).length, 0);
+    assert.equal(readAudit(root, -5).length, 0);
+    assert.equal(readAudit(root, 1.9).length, 1);
+    assert.equal(readAudit(root, 1000).length, 2);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

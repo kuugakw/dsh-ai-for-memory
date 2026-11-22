@@ -24,6 +24,14 @@
 
 - **`pruneDecisions` 不再误删自动活动记录**：该函数现在跳过 `decision_auto_*`；这些每轮记录由 `pruneAutoDecisions` 的独立保留期处理。用户开启 `decisionRetentionDays` 不会再把自动活动日志一起清掉。
 
+### 决策审查
+
+- **`risk` 校验不再接受原型属性**：`evaluateDecision` 之前用 `risk in RISK_MULTIPLIER` 判断，`toString` / `constructor` / `__proto__` 等原型链属性会被当成合法等级写进审查记录。现在要求 `risk` 是字符串且为表的自有属性（`Object.hasOwn`），回归用例覆盖原型属性与数字。
+
+### 审计日志
+
+- **`readAudit(..., 0)` 不再返回 200 条**：limit 表达式用 `||` 回退默认值，显式 0 被当成“未指定”。现在显式 0 或负数返回空数组，有限值向下取整并夹在 0..200；缺失或非数字才用默认 200。回归用例覆盖 0、负数、小数与超上限。
+
 ### 端点探测
 
 - **`/props` 快路径恢复生效**：`createEndpointGate` 的 `request()` 为释放 socket 无条件读取 `response.arrayBuffer()`，而 `propsOf()` 随后还要 `response.json()`；Fetch 的 body 只能读一次，第二次抛 `Body is unusable: Body has already been read` 被吞掉，`has_embeddings` / `has_reranking` 永远读不到，所有端点都退化为发真实推理请求。现在只有状态探测才排空 body，读取 `/props` 的请求保留 body。
