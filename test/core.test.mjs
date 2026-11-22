@@ -70,8 +70,9 @@ import {
 import { defaultRegistryDir, listRootRows, readRoots, rememberRoot, resolveRegisteredRoot } from '../lib/registry.js';
 import { appendAudit, readAudit } from '../lib/audit.js';
 import {
-  decodeSeqRanges, encodeSeqRanges, encodeZstdLog, findSessionLogs, formatRepairReport,
-  formatScanReport, repairSessionLog, resolveSessionLogTarget, scanSessionLogs, validateSessionEvents,
+  decodeSeqRanges, decodeZstdLog, encodeSeqRanges, encodeZstdLog, findSessionLogs, formatRepairReport,
+  formatScanReport, repairSessionLog, resolveSessionLogTarget, scanSessionLogs, scanZstdFrames,
+  validateSessionEvents, zstdAvailable as zstdSupported,
 } from '../lib/session-repair.js';
 import { installApi, isTrustedRequest, openInFileManager } from '../lib/api.js';
 import { apply, compileParameterSchema, Config, createTools, installContextManagement, memoryContext, normalizeConfig, planPrefixReset, searchWithRag, workspaceOf } from '../index.js';
@@ -351,6 +352,23 @@ test('the retrieval cache key uses revision, not the text length', () => {
   // stale key would reuse the first document's tokens and miss "重试".
   assert.equal(search(after, '重试', { mode: 'bm25' }).length, 1);
   assert.equal(search(after, '超时', { mode: 'bm25' }).length, 0);
+});
+
+test('the retrieval cache key includes the body, not only metadata', () => {
+  const stamp = '2026-01-01T00:00:00Z';
+  const scope = '/root/docversion-body';
+  const alpha = [{
+    doc_id: 'docversion-body', category: 'ui_facts', text: '网关超时处理', updated_at: stamp, revision: 1,
+  }];
+  const beta = [{
+    doc_id: 'docversion-body', category: 'ui_facts', text: '缓存失效回退', updated_at: stamp, revision: 1,
+  }];
+  assert.equal(alpha[0].text.length, beta[0].text.length);
+  assert.deepEqual(search(alpha, '超时', { mode: 'bm25', cacheScope: scope }).map((hit) => hit.doc_id), ['docversion-body']);
+  // Same id, timestamp and revision: only the body distinguishes these. The
+  // old version key reused alpha's postings and kept returning alpha.
+  assert.deepEqual(search(beta, '缓存', { mode: 'bm25', cacheScope: scope }).map((hit) => hit.doc_id), ['docversion-body']);
+  assert.deepEqual(search(beta, '超时', { mode: 'bm25', cacheScope: scope }), []);
 });
 
 test('the retrieval index updates incrementally on rewrite, delete and add', () => {
@@ -2711,6 +2729,12 @@ test('context pressure triggers only when measured usage reaches the threshold',
   assert.equal(exceedsUsageThreshold(measured, 70), true);
   assert.equal(exceedsUsageThreshold(measured, 70.1), false);
   assert.equal(exceedsUsageThreshold({ pressureTokens: 30000, contextWindow: 100000 }, 70), false);
+  // 69.95% displays as 70.0 after one-decimal rounding, but the real usage is
+  // below the threshold; the clear must not fire until the raw ratio reaches it.
+  const justBelow = { pressureTokens: 69950, contextWindow: 100000 };
+  assert.equal(usagePercentOf(justBelow), 70);
+  assert.equal(exceedsUsageThreshold(justBelow, 70), false);
+  assert.equal(exceedsUsageThreshold({ pressureTokens: 69999, contextWindow: 100000 }, 70), false);
   // Unmeasured sessions must never look like 0% or trigger a clear.
   assert.equal(usagePercentOf(null), null);
   assert.equal(usagePercentOf({}), null);
@@ -3860,6 +3884,58 @@ test('cancelling a starting engine reports cancellation, not a crash', async (t)
     assert.equal(started.error, '启动已取消');
     assert.ok(!localEngineStatus().some((row) => row.id === 'Embedding/slow'));
   } finally {
+    await stopAllLocalEngines();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('concurrent dynamic-port starts spawn only one llama-server', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('needs an executable shell wrapper');
+    return;
+  }
+  const root = tempRoot();
+  let pids = [];
+  try {
+    const models = path.join(root, 'models');
+    const modelDir = path.join(models, 'Embedding', 'concurrent');
+    fs.mkdirSync(modelDir, { recursive: true });
+    fs.writeFileSync(path.join(modelDir, 'concurrent.gguf'), '');
+    const spawnLog = path.join(modelDir, 'spawns.txt');
+    const binary = path.join(modelDir, 'slow-engine.sh');
+    // Dynamic port (no port in model.json) is the window: startLocalEngine
+    // awaits freePort() before it can create an engines entry.
+    fs.writeFileSync(binary, `#!/bin/sh\necho $$ >> "${spawnLog}"\nexec sleep 5\n`);
+    fs.chmodSync(binary, 0o755);
+    fs.writeFileSync(path.join(modelDir, 'model.json'), JSON.stringify({
+      binary,
+      startupTimeoutMs: 60000,
+    }));
+
+    const first = startLocalEngine({ modelsRoot: models, modelId: 'Embedding/concurrent' });
+    const second = startLocalEngine({ modelsRoot: models, modelId: 'Embedding/concurrent' });
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      pids = fs.existsSync(spawnLog)
+        ? fs.readFileSync(spawnLog, 'utf8').split(/\r?\n/).filter(Boolean)
+        : [];
+      if (pids.length > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    // Give a racing second start enough time to reach spawn() as well.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    pids = fs.readFileSync(spawnLog, 'utf8').split(/\r?\n/).filter(Boolean);
+    assert.equal(pids.length, 1, `spawned ${pids.length} servers: ${pids.join(', ')}`);
+
+    await stopLocalEngine('Embedding/concurrent', { cancelStart: true });
+    const results = await Promise.allSettled([first, second]);
+    assert.equal(results[0].status, 'fulfilled');
+    assert.equal(results[1].status, 'fulfilled');
+    assert.equal(results[0].value.ok, false);
+    assert.equal(results[1].value.ok, false);
+  } finally {
+    for (const pid of pids) {
+      try { process.kill(Number(pid), 'SIGKILL'); } catch { /* already gone */ }
+    }
     await stopAllLocalEngines();
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -5655,6 +5731,22 @@ test('harness checkpoints get a current-request anchor, not a repeated answer', 
       signal: new AbortController().signal,
     }, () => {});
     assert.equal(appended.length, 1);
+    // A reminder block followed by a real request is a real request. The old
+    // prefix check marked the whole message as harness text and anchored the
+    // previous request instead.
+    const reminderSession = { ...session, id: 'session-anchor-reminder-request' };
+    await preStep({
+      agent: { session: reminderSession },
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: '<system-reminder>\nThe skill catalog changed.\n</system-reminder>\n新请求：修复登录 bug',
+        }],
+      }],
+      signal: new AbortController().signal,
+    }, () => {});
+    assert.equal(appended.length, 1);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -6413,6 +6505,28 @@ test('session repair: sourceEventSeqs storage ranges round-trip', () => {
   assert.deepEqual(encodeSeqRanges([5]), [5]);
   assert.deepEqual(decodeSeqRanges([[1, 3], 7]), [1, 2, 3, 7]);
   assert.deepEqual(decodeSeqRanges([]), []);
+  // An 11-byte range used to expand to eight million numbers before anything
+  // checked the result. Reject the expansion up front instead of allocating it.
+  assert.throws(() => decodeSeqRanges([[0, 8000000]]), /展开后超过 1000000 项上限/);
+  assert.throws(() => decodeSeqRanges([[0, 11]], { maxEntries: 10 }), /展开后超过 10 项上限/);
+  assert.deepEqual(decodeSeqRanges([[0, 9]], { maxEntries: 10 }).length, 10);
+});
+
+test('session repair: the zstd cap is checked before inflating a frame', async (t) => {
+  if (!zstdSupported()) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
+  // 8 MiB of one byte compresses to a few hundred bytes. The old decoder
+  // inflated all of it and only then compared the result with the cap.
+  const payload = Buffer.alloc(8 * 1024 * 1024, 'a');
+  const artifact = zlib.zstdCompressSync(payload);
+  assert.ok(artifact.length < 4096, `compressed=${artifact.length}`);
+  const [frame] = scanZstdFrames(artifact).frames;
+  assert.equal(frame.contentSize, payload.length);
+  await assert.rejects(
+    decodeZstdLog(artifact, { maxDecodedBytes: 1024 }),
+    /解压后的日志超过 1024 字节上限/,
+  );
+  const decoded = await decodeZstdLog(artifact, { maxDecodedBytes: payload.length });
+  assert.equal(decoded.text.length, payload.length);
 });
 
 test('session repair: find/resolve a synthetic artifact by id, prefix and path', async (t) => {

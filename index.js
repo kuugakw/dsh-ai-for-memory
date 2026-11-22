@@ -2891,7 +2891,9 @@ export function installContextManagement(ctx, config, deps, runtime) {
    */
   const isHarnessText = (text) => {
     const value = String(text ?? '');
-    if (/^\s*<system-reminder>/i.test(value)) return true;
+    // Strip reminder blocks first: a real request can arrive immediately after
+    // a <system-reminder> prefix, and an early prefix check treated the whole
+    // message as harness text, letting the previous request become the anchor.
     const stripped = value.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, ' ').trim();
     if (stripped === '') return true;
     const lines = stripped.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);

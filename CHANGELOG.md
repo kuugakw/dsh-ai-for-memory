@@ -13,6 +13,27 @@
 
 - **自由文本候选的 base ref 不再提前消费**：`candidatesFromRecord()` 的自由文本候选用 `staging:<id>#N` 作为 `source_ref`，收尾台账却拿 `staging:<id>` 去精确匹配，于是把 base ref 标成已消费。被冲突闸门挡下的提案只报告一次就消失。现在按 `base ref` 前缀归组，只有该条目的所有候选都已入账或在本轮处理完，才消费 base ref；pending 和因预算跳过的候选都会留到下轮。回归用例覆盖自由文本 pending 连续两轮可见。
 
+### 上下文压力
+
+- **阈值按原始 token 比较，不再用四舍五入后的百分比**：`exceedsUsageThreshold()` 之前复用 `usagePercentOf()` 的一位小数结果，69950 / 100000 = 69.95% 被舍入成 70，70% 阈值因此提前触发全量清出。现在直接用 `pressureTokens` 与 `contextWindow` 比较，显示仍保留一位小数；回归用例覆盖 69.95%、69.99% 不触发、70.00% 触发。
+
+### 会话日志
+
+- **zstd 解压上限在分配前检查**：`decodeZstdLog()` 之前先完整解压每一帧，再用 `total > cap` 事后拒绝；几百字节约 128MB 的帧会先分配完整输出。`scanZstdFrames()` 现在解析帧头的 content size，超预算时在解压前抛错；未声明大小的帧把剩余预算作为 `maxOutputLength` 交给 zstd，谎报/缺失大小也无法超量分配。
+- **`sourceEventSeqs` 区间展开有上限**：`decodeSeqRanges()` 之前只校验安全整数，`[[0, 8000000]]` 会先生成 800 万个元素。展开上限设为 1,000,000 项，超限在分配前抛错；回归用例覆盖默认上限、自定义上限与边界。
+
+### 请求锚点
+
+- **`<system-reminder>` 前缀后的真实请求不再被当作 harness 文本**：`isHarnessText()` 遇到提醒前缀直接返回 true，跳过了“剥离提醒后再判断”的逻辑；提醒块后跟着新请求时，锚点仍注入上一轮的旧请求。现在先剥离提醒块，再判断剩余文本是否全为 harness 内容。回归用例覆盖“提醒块 + 新请求”不做旧请求锚点。
+
+### 检索缓存
+
+- **文档版本包含正文指纹**：`docVersion()` 之前只用 `updated_at + revision`，公开 `search()` / `buildIndex()` 传入同时间戳、同 revision 但正文不同的文档时会复用旧倒排索引/向量，搜新正文为空、搜旧正文仍命中。现在版本键加入正文长度与 FNV-1a 哈希；回归用例覆盖同 id、同时间戳、同 revision 的正文替换。
+
+### 本地引擎
+
+- **动态端口启动增加同步占位**：两个并发 `startLocalEngine()` 在 `engines` 尚无条目时都能通过检查，随后各自 `await freePort()`，再各自 spawn，第二个 `engines.set()` 覆盖第一个，留下孤儿 llama-server。现在在第一个 await 之前用 `startLocks` 占用模型，后来者直接复用同一个启动 Promise。回归用例在 POSIX 上用慢启动包装脚本并发启动两次，断言只 spawn 一次。
+
 ## 0.4.4（2026-11-22）
 
 ### 安全
