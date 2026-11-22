@@ -42,8 +42,8 @@ import { applyDisclosure, RRF_K, reciprocalRankFusion, search, snippetOf, tokeni
 import { BoundedCache, CATEGORIES, appendJsonLine, dshHome, hourKey, listJsonlFiles, writeJson } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
-import { buildServerArgs, findModelFile, localEngineStatus, missingLocalEngineKinds, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig } from '../lib/local-engine.js';
-import { configuredEndpointBase, createEndpointGate } from '../lib/engine-gate.js';
+import { buildServerArgs, findModelFile, localEngineStatus, missingLocalEngineKinds, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig, autoStartSkips, clearAutoStartSkip, noteAutoStartSkip } from '../lib/local-engine.js';
+import { configuredEndpointBase, configuredEndpointIsDedicated, createEndpointGate } from '../lib/engine-gate.js';
 import {
   commitSync, initSync, pullSync, pushSync, readSyncConfig, syncStatus, writeSyncConfig,
   parseGitRemote, probeHost,
@@ -2245,13 +2245,89 @@ test('config validator bounds auto settings', () => {
   assert.ok(validator({ topicalClear: 'yes' }).issues);
 });
 
-test('engine gate suppresses auto-start only when the configured endpoint answers', async () => {
+test('engine gate ignores a chat-only endpoint when choosing the local fallback', async () => {
   // Kind-specific endpoint wins; the main endpoint is the documented fallback.
   assert.equal(configuredEndpointBase({ externalEmbedBaseUrl: 'http://127.0.0.1:1111' }, 'embedding'), 'http://127.0.0.1:1111');
   assert.equal(configuredEndpointBase({ externalBaseUrl: 'http://main:9999' }, 'embedding'), 'http://main:9999');
   assert.equal(configuredEndpointBase({ externalRerankBaseUrl: 'http://r:1', externalBaseUrl: 'http://main:9' }, 'rerank'), 'http://r:1');
   assert.equal(configuredEndpointBase({}, 'embedding'), '');
+  assert.equal(configuredEndpointIsDedicated({ externalEmbedBaseUrl: 'http://e:1' }, 'embedding'), true);
+  assert.equal(configuredEndpointIsDedicated({ externalBaseUrl: 'http://main:9' }, 'embedding'), false);
 
+  // A chat-only service answers /v1/models and /props (has_embeddings=false)
+  // but 404s /v1/embeddings. It must not suppress a runnable local GGUF.
+  const chatOnly = createEndpointGate({
+    timeoutMs: 100,
+    fetchImpl: async (url) => {
+      if (url.endsWith('/v1/models')) return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) };
+      if (url.endsWith('/props')) return { ok: true, json: async () => ({ has_embeddings: false }) };
+      if (url.endsWith('/v1/embeddings')) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
+      throw new Error('no such route');
+    },
+  });
+  assert.equal(await chatOnly.configuredEndpointReachable('embedding', {
+    externalBaseUrl: 'http://chat:9999',
+  }), false);
+  // The same base explicitly named for embeddings is trusted, and its cache
+  // entry must not be shared with the fallback probe.
+  assert.equal(await chatOnly.configuredEndpointReachable('embedding', {
+    externalEmbedBaseUrl: 'http://chat:9999',
+  }), true);
+  assert.equal(await chatOnly.configuredEndpointReachable('embedding', {
+    externalBaseUrl: 'http://chat:9999',
+  }), false);
+
+  // llama.cpp /props is enough for a capability verdict: no model runs.
+  const propsSaysYes = createEndpointGate({
+    timeoutMs: 100,
+    fetchImpl: async (url) => {
+      if (url.endsWith('/props')) return { ok: true, json: async () => ({ has_embeddings: true }) };
+      throw new Error('no inference expected');
+    },
+  });
+  assert.equal(await propsSaysYes.configuredEndpointReachable('embedding', {
+    externalBaseUrl: 'http://llama:9999',
+  }), true);
+
+  // A non-llama.cpp endpoint proves the capability with one real request; the
+  // per-kind key travels with it.
+  let seenAuth = '';
+  const embedOk = createEndpointGate({
+    timeoutMs: 100,
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/v1/embeddings') && init?.method === 'POST') {
+        seenAuth = init.headers?.authorization ?? '';
+        return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) };
+      }
+      if (url.endsWith('/props')) return { ok: false, status: 404 };
+      throw new Error('no such route');
+    },
+  });
+  assert.equal(await embedOk.configuredEndpointReachable('embedding', {
+    externalBaseUrl: 'http://cloud:9999', externalEmbedApiKey: 'ek',
+  }), true);
+  assert.equal(seenAuth, 'Bearer ek');
+
+  // A dedicated /health-only rerank server still counts as reachable.
+  const healthOnly = createEndpointGate({
+    timeoutMs: 100,
+    fetchImpl: async (url) => {
+      if (url.endsWith('/health')) return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) };
+      throw new Error('ECONNREFUSED');
+    },
+  });
+  assert.equal(await healthOnly.configuredEndpointReachable('rerank', {
+    externalRerankBaseUrl: 'http://127.0.0.1:54393',
+  }), true);
+
+  // An explicitly configured rerank endpoint that answers but does not expose
+  // rerank is still trusted only when it is dedicated; the fallback asks for
+  // the capability and gets a 404.
+  assert.equal(await chatOnly.configuredEndpointReachable('rerank', {
+    externalBaseUrl: 'http://chat:9999',
+  }), false);
+
+  // Cache: the second check does not probe again.
   const liveCalls = [];
   const live = createEndpointGate({
     timeoutMs: 100,
@@ -2270,18 +2346,6 @@ test('engine gate suppresses auto-start only when the configured endpoint answer
   }), true);
   assert.equal(liveCalls.length, beforeCache, 'second check must be served from the cache');
 
-  // A server that only answers /health still counts as reachable.
-  const healthOnly = createEndpointGate({
-    timeoutMs: 100,
-    fetchImpl: async (url) => {
-      if (url.endsWith('/health')) return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) };
-      throw new Error('ECONNREFUSED');
-    },
-  });
-  assert.equal(await healthOnly.configuredEndpointReachable('rerank', {
-    externalRerankBaseUrl: 'http://127.0.0.1:54393',
-  }), true);
-
   // Nothing listening: unreachable, so the local engine is allowed to start.
   const dead = createEndpointGate({
     timeoutMs: 100,
@@ -2296,6 +2360,19 @@ test('engine gate suppresses auto-start only when the configured endpoint answer
     fetchImpl: async () => { throw new Error('must not probe an unconfigured endpoint'); },
   });
   assert.equal(await unconfigured.configuredEndpointReachable('embedding', {}), false);
+});
+
+test('auto-start skips are recorded for the panel and cleared when resolved', () => {
+  noteAutoStartSkip('Embedding/skip', {
+    kind: 'embedding', base: 'http://chat:9999', reason: '检测到已配置的 Embedding 端点 http://chat:9999 可用，已跳过本地自动启动',
+  });
+  const rows = autoStartSkips();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, 'Embedding/skip');
+  assert.equal(rows[0].base, 'http://chat:9999');
+  assert.match(rows[0].reason, /已跳过本地自动启动/);
+  clearAutoStartSkip('Embedding/skip');
+  assert.deepEqual(autoStartSkips(), []);
 });
 
 test('context pressure triggers only when measured usage reaches the threshold', () => {

@@ -10,6 +10,13 @@
 - **显式停止立即取消**：面板点停止会取消进行中的加载，返回「启动已取消」而不是崩溃；启动链路识别取消结果，不写失败冷却。
 - 回归用例：模拟慢加载的引擎在 `starting` 状态被停止时返回 `cancelled`（POSIX 运行，Windows 跳过）。
 
+### 端点探测
+
+- **只配 chat 端点不再压住本地引擎**：`externalEmbedBaseUrl` / `externalRerankBaseUrl` 显式命名时，端点能应答即视为可用；只有 `externalBaseUrl` 兜底时才验证真实能力——llama.cpp 读 `/props` 的 `has_embeddings` / `has_reranking`，其他服务向 `/embeddings` 或 `/rerank` 发一个最小请求，2xx 才算可用。401/404 不再被当成「embedding 已就绪」。
+- **跳过原因可见**：被端点抑制的模型写入 `/state` 的 `localEngineSkips`，面板模型行直接显示「检测到已配置的 … 端点 … 可用，已跳过本地自动启动」，并只记一次日志。
+- **探测缓存 30s → 5s**：端点挂掉后最多 5 秒就允许本地引擎启动，而不是半分钟内所有 turn 都不尝试。
+- 回归用例：chat-only 端点（`/props` 报 `has_embeddings:false` 或 `/v1/embeddings` 404）不抑制本地启动；显式 Embedding 端点仍抑制；`/props` 为真时无需推理；兜底探测携带对应 kind 的 Bearer key。
+
 ## 0.4.1（2026-11-22）
 
 - **冲突日志**：被知识冲突闸门拦下的写入记入 `knowledge/conflicts.jsonl`（只做审计，不是队列，不参与检索）；`aim_memory status` 报未确认数，面板知识库页显示最近冲突，确认覆盖后自动标记为已确认。

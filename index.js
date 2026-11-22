@@ -27,10 +27,10 @@ import { evaluateDecision } from './lib/decision.js';
 import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
 import { defaultRegistryDir, listRootRows, rememberRoot } from './lib/registry.js';
 import { installApi } from './lib/api.js';
-import { createEndpointGate } from './lib/engine-gate.js';
+import { createEndpointGate, configuredEndpointBase, configuredEndpointIsDedicated } from './lib/engine-gate.js';
 import { listLocalModelsCached } from './lib/model-catalog.js';
 import {
-  localEngineStatus, restoreLocalEngines, startLocalEngine, stopLocalEngine,
+  clearAutoStartSkip, localEngineStatus, noteAutoStartSkip, restoreLocalEngines, startLocalEngine, stopLocalEngine,
 } from './lib/local-engine.js';
 import { ensureMcpToken } from './lib/mcp-token.js';
 import { summarizeTurnActivity } from './lib/turn-activity.js';
@@ -2727,6 +2727,9 @@ export function installContextManagement(ctx, config, deps, runtime) {
   // turn.
   const ENGINE_START_COOLDOWN_MS = 60000;
   const engineStartFailures = new Map();
+  // Last base URL that made us skip a model, so the "why didn't it start?"
+  // notice is logged once per reason instead of every turn.
+  const engineSkipLogged = new Map();
   const engineTurnStarted = new Set();
   // `turn` keeps engines warm across consecutive turns instead of killing a
   // model that may still be reading weights when a short turn ends. The idle
@@ -2796,13 +2799,35 @@ export function installContextManagement(ctx, config, deps, runtime) {
     const statuses = new Map(localEngineStatus().map((engine) => [engine.id, engine]));
     for (const { id, kind } of models) {
       const status = statuses.get(id);
-      if (status?.ready === true || status?.starting === true) continue;
-      if ((engineStartFailures.get(id) ?? 0) > Date.now()) continue;
-      if (await endpointGate.configuredEndpointReachable(kind, config)) {
-        // The service the user configured already answers; do not start a
-        // second one just because a runnable GGUF exists on disk.
+      if (status?.ready === true || status?.starting === true) {
+        // Already up (or coming up): any old "skipped" note is stale.
+        clearAutoStartSkip(id);
+        engineSkipLogged.delete(id);
         continue;
       }
+      if ((engineStartFailures.get(id) ?? 0) > Date.now()) continue;
+      if (await endpointGate.configuredEndpointReachable(kind, config)) {
+        // The configured service already serves this kind; do not start a
+        // second one. Record why, so a model that stays down can explain itself
+        // in the panel instead of looking broken.
+        const base = configuredEndpointBase(config, kind);
+        const label = kind === 'embedding' ? 'Embedding' : 'Rerank';
+        const reason = `检测到已配置的 ${label} 端点 ${base} 可用，已跳过本地自动启动`;
+        noteAutoStartSkip(id, {
+          kind,
+          base,
+          dedicated: configuredEndpointIsDedicated(config, kind),
+          reason,
+        });
+        if (engineSkipLogged.get(id) !== base) {
+          engineSkipLogged.set(id, base);
+          // eslint-disable-next-line no-console
+          console.log(`[ai-for-memory] ${reason}：${id}`);
+        }
+        continue;
+      }
+      clearAutoStartSkip(id);
+      engineSkipLogged.delete(id);
       // Record before the async start: if the turn ends while the model is
       // still loading, the idle release must know it owns that process.
       if (mode === 'turn') engineTurnStarted.add(id);

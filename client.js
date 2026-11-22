@@ -12,6 +12,11 @@ window.__ModuleLoader__.load({
     const React = require('react');
     const h = React.createElement;
 
+    /** Why the lifecycle skipped auto-start for a runnable model, if known. */
+    function engineSkipFor(data, id) {
+      return (data?.localEngineSkips ?? []).find((row) => row.id === id) || null;
+    }
+
     const API = '/ai-for-memory/api';
     const PANEL_ID = 'ai-for-memory';
     const lang = (() => {
@@ -4861,7 +4866,7 @@ window.__ModuleLoader__.load({
                       : (data?.localEngines ?? []).find((engine) => engine.id === model.id)?.adopted
                         ? t.localModelAdopted
                         : t.localModelEngineRunning}：${(data?.localEngines ?? []).find((engine) => engine.id === model.id)?.baseUrl ?? ''}`
-                    : t.localModelGguf)
+                    : (engineSkipFor(data, model.id)?.reason ?? t.localModelGguf))
                   : (model.configured ? t.localModelReady : (model.error || t.localModelUnconfigured))),
               (model.runnable || model.configured)
                 && (['Embedding', 'Rerank'].includes(category.name) || category.name === 'Loose')
