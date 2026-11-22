@@ -2,7 +2,7 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
-## 未发布
+## 0.4.1（2026-11-22）
 
 - **冲突日志**：被知识冲突闸门拦下的写入记入 `knowledge/conflicts.jsonl`（只做审计，不是队列，不参与检索）；`aim_memory status` 报未确认数，面板知识库页显示最近冲突，确认覆盖后自动标记为已确认。
 - **自动活动记录保留**：新增 `autoDecisionRetentionDays`（默认 90 天），只清理 `decision_auto_*` 每轮自动记录；`aim_decide` 审查记录仍由 `decisionRetentionDays` 控制（默认 0=永不删）。决策层的日常增长不再无界。
