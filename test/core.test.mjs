@@ -5509,6 +5509,15 @@ test('SQL route answers counts and groups from the JSON base', (t) => {
   const wide = runSqlQuery([], `SELECT 1 AS n${' UNION ALL SELECT 1'.repeat(80)}`);
   assert.equal(wide.ok, true);
   assert.equal(wide.rows.length, 50);
+
+  // Row count is not a memory bound: a wide blob must be rejected before it is
+  // accumulated (50 x 3 MiB would otherwise be 150 MiB).
+  const oversized = runSqlQuery([], 'SELECT randomblob(3145728) AS blob');
+  assert.equal(oversized.ok, false);
+  assert.match(oversized.error, /单行超过/);
+  const smallBlob = runSqlQuery([], 'SELECT randomblob(1024) AS blob');
+  assert.equal(smallBlob.ok, true);
+  assert.equal(smallBlob.rows[0].blob.length, 1024);
 });
 
 test('SQL view keeps provenance/changes and counts copies across conversations', (t) => {
