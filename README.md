@@ -1,11 +1,11 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.4.3-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.4.3-lightgrey.svg)](package.json)
+[![Status](https://img.shields.io/badge/status-stable%200.4.4-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.4.4-lightgrey.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.4.3 是检索与诊断的修复版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版让 hybrid/vector 检索不再收哈希碰撞噪音，显式 Embedding/Rerank 端点返回 401 时不再被误判为可用，会话日志修复在写回前按内容指纹复核（文件被追加就放弃，不用旧快照覆盖新事件）并拒绝仍在生成中的对话；同时修掉公开 `search()`/`buildIndex()` 在重复 `doc_id` 上虚高 BM25 的问题。
+> **0.4.4 是安全与正确性修复版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版封住快照/上下文 id 的路径穿越（越界读取与删除），修正知识分类统计与检索缓存的跨对话污染，补齐面板探测的分类型 API Key，避免决策保留期误删自动活动；同时拒绝 `risk` 的原型属性绕过，并让 `readAudit(..., 0)` 返回空结果。
 >
 > 升级前请备份记忆目录。
 
@@ -191,7 +191,7 @@ aim_memory action=status
 
 ## 更新内容
 
-当前版本 **0.4.3**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.4.4**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
