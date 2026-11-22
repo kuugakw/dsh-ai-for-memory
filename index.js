@@ -22,7 +22,7 @@ import path from 'node:path';
 import { MemoryScopes, sessionKey, shortSessionId } from './lib/scopes.js';
 import { findDuplicate, withTokens } from './lib/knowledge.js';
 import { ensureDefaultMemoryDirIgnored } from './lib/gitignore.js';
-import { markActivity } from './lib/activity.js';
+import { isSessionActive, markActivity } from './lib/activity.js';
 import { evaluateDecision } from './lib/decision.js';
 import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
 import { defaultRegistryDir, listRootRows, rememberRoot } from './lib/registry.js';
@@ -2508,10 +2508,14 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         if (action !== 'repair' && action !== 'compact') throw new Error(`未知 action：${String(action)}`);
         const target = resolveSessionLogTarget(sessionsDir, args?.session);
         const live = sessionOf(exec);
-        if (args?.apply === true && live !== ''
-          && target.id.replace(/^session-/, '') === live.replace(/^session-/, '')) {
-          return '拒绝对当前正在进行的对话执行写回：它仍被 DSH 打开，改写会破坏正在追加的日志。'
-            + '请先切换到其他对话，或在面板里修复后重新打开它。';
+        // The current conversation is always refused; a conversation streaming
+        // in another tab is refused too, because repairing it would overwrite
+        // events DSH appends after our read.
+        const sameAsCurrent = live !== ''
+          && target.id.replace(/^session-/, '') === live.replace(/^session-/, '');
+        if (args?.apply === true && (isSessionActive(runtime, target.id) || sameAsCurrent)) {
+          return '拒绝对仍在进行中的对话执行写回：DSH 正在向它的日志追加事件（可能就在另一个标签页）。'
+            + '请等该对话结束后重试；只做预演（apply=false）不受影响。';
         }
         const report = await repairSessionLog(target.file, {
           strategy: typeof args?.strategy === 'string' ? args.strategy : 'auto',
@@ -2756,6 +2760,10 @@ export function installContextManagement(ctx, config, deps, runtime) {
   // Main-session turns currently running. A per-turn stop waits until this is
   // empty so one conversation ending cannot kill an engine another one uses.
   const activeTurns = new Set();
+  // The panel API shares this runtime; exposing the live set lets it refuse a
+  // repair for a conversation streaming in another tab, not just the newest
+  // finished one.
+  if (runtime && typeof runtime === 'object') runtime.activeTurns = activeTurns;
 
   /**
    * A configured endpoint that already answers wins over auto-start: the local

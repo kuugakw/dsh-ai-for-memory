@@ -13,6 +13,7 @@ import { MemoryScopes, sessionKey } from '../lib/scopes.js';
 import { decodeWorkspaceBucket, dshSessionsDir, encodeWorkspace, resolveWorkspacePath, workspaceIndex } from '../lib/dsh-workspace.js';
 import { userModelsDir } from '../lib/model-paths.js';
 import { summarizeTurnActivity } from '../lib/turn-activity.js';
+import { isSessionActive } from '../lib/activity.js';
 import {
   chat, embed, listModels, normalizeExternal, parseEmbeddingResponse, parseRerankResponse,
   probe, resolveBaseUrl, embedEndpoint, rerankEndpoint, buildRequest, PROBE_TIMEOUT_MS,
@@ -6069,6 +6070,92 @@ test('session repair: compact re-frames a valid log without changing events', as
     const recheck = await repairSessionLog(file, { apply: false });
     assert.equal(recheck.valid, true);
     assert.equal(recheck.before.events, events.length);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('repair guards see a conversation streaming in another tab', () => {
+  const runtime = { activeTurns: new Set(['session-aaa']) };
+  assert.equal(isSessionActive(runtime, 'session-aaa'), true);
+  assert.equal(isSessionActive(runtime, 'aaa'), true);
+  assert.equal(isSessionActive(runtime, 'session-bbb'), false);
+  assert.equal(isSessionActive({}, 'session-aaa'), false);
+  runtime.activeTurns.delete('session-aaa');
+  assert.equal(isSessionActive(runtime, 'session-aaa'), false);
+});
+
+test('session repair: a log appended after the planning read is not overwritten', async (t) => {
+  if (!zstdAvailable) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
+  const root = tempRoot();
+  try {
+    const { file } = writeSyntheticSessionLog(root, eventsWithMisplacedNotice());
+    const original = fs.readFileSync(file);
+    let hooked = '';
+    const applied = await repairSessionLog(file, {
+      apply: true,
+      _beforeWrite: (target) => {
+        hooked = target;
+        // Simulate DSH appending one committed batch while the plan is built.
+        fs.appendFileSync(target, Buffer.from('concurrent-append'));
+      },
+    });
+    assert.equal(hooked, file);
+    assert.equal(applied.ok, false);
+    assert.equal(applied.conflict, true);
+    assert.match(applied.error, /未被改动/);
+    assert.match(formatRepairReport(applied), /修复失败/);
+    // The newer bytes survive and no backup of them was taken.
+    const after = fs.readFileSync(file);
+    assert.equal(after.length, original.length + 'concurrent-append'.length);
+    assert.equal(after.subarray(0, original.length).equals(original), true);
+    assert.equal(
+      fs.readdirSync(path.dirname(file)).some((name) => name.includes('.bak-')),
+      false,
+      'a conflict detected before the backup must not leave one',
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('session compact: a log appended after the planning read is not re-framed', async (t) => {
+  if (!zstdAvailable) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
+  const root = tempRoot();
+  try {
+    const events = [];
+    let seq = 0;
+    for (let turn = 1; turn <= 40; turn += 1) {
+      events.push({ type: 'turn/start', seq: seq++, time: turn, data: { turn } });
+      events.push({ type: 'step/start', seq: seq++, time: turn, data: { turn, step: 1 } });
+      events.push({
+        type: 'user/message', seq: seq++, time: turn, surfaceOp: 'append',
+        data: {
+          id: `u${turn}`, role: 'user', source: { kind: 'user' },
+          content: [{ type: 'text', text: `request ${turn} `.repeat(20) }],
+        },
+      });
+      events.push({ type: 'step/end', seq: seq++, time: turn, data: { turn, step: 1 } });
+      events.push({ type: 'turn/end', seq: seq++, time: turn, data: { turn, reason: { kind: 'completed' } } });
+    }
+    const { file } = writeSyntheticSessionLog(root, events);
+    const original = fs.readFileSync(file);
+    const marker = Buffer.from('concurrent-append');
+    const applied = await repairSessionLog(file, {
+      compact: true,
+      apply: true,
+      _beforeWrite: (target) => fs.appendFileSync(target, marker),
+    });
+    assert.equal(applied.ok, false);
+    assert.equal(applied.conflict, true);
+    assert.equal(applied.repaired, false);
+    const after = fs.readFileSync(file);
+    assert.equal(after.length, original.length + marker.length);
+    assert.equal(after.subarray(0, original.length).equals(original), true);
+    assert.equal(
+      fs.readdirSync(path.dirname(file)).some((name) => name.includes('.bak-')),
+      false,
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

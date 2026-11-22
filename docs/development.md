@@ -47,7 +47,7 @@ node --test test/core.test.mjs
 
 当前测试覆盖六层读写、对话隔离、上下文清理/恢复、知识冲突、模型自述确认、事故记录、SQL 路由、RAG 构建、导出、面板数据组装，以及本地引擎的 GGUF 发现和 llama.cpp 启动参数等。
 
-全套 165 个用例。Node 20 上 13 项依赖 `node:sqlite`、zstd 或 git 的用例会 skip（152 pass / 13 skip），另有 1 项模拟慢加载的引擎用例只在 POSIX 上运行（Windows 上 151 pass / 14 skip）；Node 22.15+ 全量。CI 同时跑 Node 20 与 22。新用例若依赖运行时能力，用 `t.skip()` 标注原因，保持这条边界可核对。
+全套 168 个用例。Node 20 上 15 项依赖 `node:sqlite`、zstd 或 git 的用例会 skip（153 pass / 15 skip），另有 1 项模拟慢加载的引擎用例只在 POSIX 上运行（Windows 上 152 pass / 16 skip）；Node 22.15+ 全量。CI 同时跑 Node 20 与 22。新用例若依赖运行时能力，用 `t.skip()` 标注原因，保持这条边界可核对。
 
 主要代码：
 
