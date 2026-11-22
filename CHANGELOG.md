@@ -4,6 +4,11 @@
 
 ## 未发布
 
+### 端点探测
+
+- **显式端点返回 401 不再算「可用」**：`externalEmbedBaseUrl` / `externalRerankBaseUrl` 之前只做存活探测，任何 HTTP 响应（含 401）都被当成已就绪；key 配错或经过鉴权代理时本地引擎被压住，RAG 每轮 embedding 实际返回 401，且没有本地后备。现在显式命名与 `externalBaseUrl` 兜底使用同一套能力验证：llama.cpp 看 `/props` 的 `has_embeddings` / `has_reranking`，其他服务向真实端点发最小请求，2xx 才算可用。
+- 回归用例：返回 401 的显式 Embedding 端点不再抑制本地启动；只答 `/health` 的端点同样不够；显式 Rerank 端点 2xx 时仍抑制，并携带 per-kind Bearer key。
+
 ### 检索
 
 - **hybrid / vector 不再收哈希碰撞噪音**：TF 向量在 128 维 FNV-1a 空间里，无关文档只要有一维撞上查询就会得到正余弦（30 token 量级约 0.19），在 RRF 里拿到 `0.4/(60+rank)` 的分数并进入结果；0.05 的余弦下限挡不住这个量级。现在向量通道只给与查询至少共享一个 token 的文档打分，纯碰撞文档保持 0 分，不会进入 hybrid / vector 结果。

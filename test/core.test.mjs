@@ -2345,11 +2345,13 @@ test('engine gate ignores a chat-only endpoint when choosing the local fallback'
   assert.equal(await chatOnly.configuredEndpointReachable('embedding', {
     externalBaseUrl: 'http://chat:9999',
   }), false);
-  // The same base explicitly named for embeddings is trusted, and its cache
-  // entry must not be shared with the fallback probe.
+  // Naming the base for embeddings does not weaken the proof: /props says
+  // has_embeddings=false, so the endpoint is still not usable and the local
+  // engine remains the fallback. The two probes must also not share a cache
+  // entry: one is the fallback, one is dedicated.
   assert.equal(await chatOnly.configuredEndpointReachable('embedding', {
     externalEmbedBaseUrl: 'http://chat:9999',
-  }), true);
+  }), false);
   assert.equal(await chatOnly.configuredEndpointReachable('embedding', {
     externalBaseUrl: 'http://chat:9999',
   }), false);
@@ -2385,7 +2387,8 @@ test('engine gate ignores a chat-only endpoint when choosing the local fallback'
   }), true);
   assert.equal(seenAuth, 'Bearer ek');
 
-  // A dedicated /health-only rerank server still counts as reachable.
+  // A dedicated endpoint that only answers /health but never proves the kind
+  // is not usable either: liveness alone does not suppress the local engine.
   const healthOnly = createEndpointGate({
     timeoutMs: 100,
     fetchImpl: async (url) => {
@@ -2395,11 +2398,48 @@ test('engine gate ignores a chat-only endpoint when choosing the local fallback'
   });
   assert.equal(await healthOnly.configuredEndpointReachable('rerank', {
     externalRerankBaseUrl: 'http://127.0.0.1:54393',
+  }), false);
+
+  // A dedicated endpoint with a wrong key answers 401 on the real route. That
+  // used to count as "alive", suppressing the local engine with no fallback.
+  const dedicated401 = createEndpointGate({
+    timeoutMs: 100,
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/props')) return { ok: false, status: 404 };
+      if (url.endsWith('/v1/models')) return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) };
+      if (url.endsWith('/v1/embeddings') && init?.method === 'POST') {
+        return { ok: false, status: 401, arrayBuffer: async () => new ArrayBuffer(0) };
+      }
+      throw new Error('unexpected route');
+    },
+  });
+  assert.equal(await dedicated401.configuredEndpointReachable('embedding', {
+    externalEmbedBaseUrl: 'http://127.0.0.1:9999',
+    externalEmbedApiKey: 'wrong',
+  }), false);
+
+  // A dedicated rerank endpoint that really serves rerank still suppresses the
+  // local engine, and the per-kind key travels with the probe.
+  let rerankAuth = '';
+  const dedicatedRerankOk = createEndpointGate({
+    timeoutMs: 100,
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/props')) return { ok: false, status: 404 };
+      if (url.endsWith('/v1/rerank') && init?.method === 'POST') {
+        rerankAuth = init.headers?.authorization ?? '';
+        return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) };
+      }
+      throw new Error('unexpected route');
+    },
+  });
+  assert.equal(await dedicatedRerankOk.configuredEndpointReachable('rerank', {
+    externalRerankBaseUrl: 'http://127.0.0.1:54394',
+    externalRerankApiKey: 'rk',
   }), true);
+  assert.equal(rerankAuth, 'Bearer rk');
 
   // An explicitly configured rerank endpoint that answers but does not expose
-  // rerank is still trusted only when it is dedicated; the fallback asks for
-  // the capability and gets a 404.
+  // rerank is not usable — dedicated or fallback, the capability is the test.
   assert.equal(await chatOnly.configuredEndpointReachable('rerank', {
     externalBaseUrl: 'http://chat:9999',
   }), false);
@@ -2408,9 +2448,12 @@ test('engine gate ignores a chat-only endpoint when choosing the local fallback'
   const liveCalls = [];
   const live = createEndpointGate({
     timeoutMs: 100,
-    fetchImpl: async (url) => {
+    fetchImpl: async (url, init) => {
       liveCalls.push(url);
-      if (url.endsWith('/v1/models')) return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) };
+      if (url.endsWith('/props')) return { ok: false, status: 404 };
+      if (url.endsWith('/v1/embeddings') && init?.method === 'POST') {
+        return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) };
+      }
       throw new Error('no such route');
     },
   });
