@@ -2,6 +2,12 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 未发布
+
+### 知识查询
+
+- **逗号分隔的 FROM 表不再绕过递归 CTE 检查**：`bodyReferencesCte()` 之前只检查 `FROM` / `JOIN` 后的第一个表，`WITH c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM knowledge_docs, c)` 因此通过检查并可能无限递归。现在按 FROM 列表扫描：逗号后的表、`JOIN` 后的表、`FROM (a, b)` 括号表组和 schema 限定名都会比对 CTE 名，并正确跳过子查询、函数参数和别名；回归用例覆盖逗号、`AS` 别名、括号表组和安全的逗号列表。
+
 ## 0.4.5（2026-11-22）
 
 ### 安全

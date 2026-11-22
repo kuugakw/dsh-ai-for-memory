@@ -5460,9 +5460,22 @@ test('raw SQL is accepted only as one read-only statement', () => {
     isSafeSelect('WITH "c"(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM "c") SELECT count(*) FROM "c"'),
     false,
   );
+  // A self-reference does not have to be the first table in the FROM list.
+  const commaRecursive = 'WITH c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM knowledge_docs, c) SELECT count(*) FROM c';
+  assert.equal(isSafeSelect(commaRecursive), false);
+  assert.equal(translateToSql(commaRecursive), null);
+  assert.equal(
+    isSafeSelect('WITH c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM knowledge_docs AS a, c AS b) SELECT count(*) FROM c'),
+    false,
+  );
+  assert.equal(
+    isSafeSelect('WITH c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM (knowledge_docs, c)) SELECT count(*) FROM c'),
+    false,
+  );
   // Quoted columns and strings in a non-recursive CTE are still ordinary data.
   assert.equal(isSafeSelect('WITH "c" AS (SELECT 1) SELECT * FROM "c"'), true);
   assert.equal(isSafeSelect('WITH x AS (SELECT "text" AS t FROM knowledge_docs) SELECT * FROM x'), true);
+  assert.equal(isSafeSelect('WITH x AS (SELECT * FROM knowledge_docs, other) SELECT * FROM x'), true);
   assert.equal(isSafeSelect("WITH x AS (SELECT 'FROM \"c\"' AS t) SELECT * FROM x"), true);
 });
 
