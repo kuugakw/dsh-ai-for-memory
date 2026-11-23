@@ -7,7 +7,7 @@
 
 > **0.5.3 是功能与维护更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版新增：会话存储体检 `aim_repair action=doctor`、对话可「只对指定对话开放」、上下文自动整理默认开启；并修正 npm 包内测试与 README 链接。
 >
-> **npm 发布从 0.5.1 开始，当前版本之后的版本会继续发；早期版本只在 GitHub。** npm 上只保留 0.5.1 及之后发布的版本（当前 0.5.3），0.5.0 及更早的版本只发布在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)，npm 不补发历史版本；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
+> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.3）。插件索引这类新渠道从当前版本（0.5.3）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
 >
 > 升级前请备份记忆目录。
 

@@ -7,7 +7,7 @@
 ### 发布渠道
 
 - **新增官方插件索引**：`market/index.json` + `market/icons/`，托管在 GitHub Pages（`https://kuugakw.github.io/dsh-ai-for-memory/index.json`），由 tag 触发的 `market` workflow 自动重建；DSH 里在「插件 → 实验性插件 → Custom plugin indexes → 发现 → 添加索引源」填入即可浏览和一键安装 0.5.1 及之后的版本。
-- **README 写明发布范围**：npm 上只有 0.5.1 及之后发布的版本（当前最新版），0.5.0 及更早的版本只在 GitHub Releases。
+- **README 写明发布范围**：0.5.0 及更早只在 GitHub Releases；npm 是早期渠道（从 0.5.1 起）；插件索引从当前版本起收录，之后版本继续更新。
 
 ## 0.5.3（2026-11-23）
 
