@@ -2,6 +2,13 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 未发布
+
+### 发布渠道
+
+- **新增官方插件索引**：`market/index.json` + `market/icons/`，托管在 GitHub Pages（`https://kuugakw.github.io/dsh-ai-for-memory/index.json`），由 tag 触发的 `market` workflow 自动重建；DSH 里在「插件 → 实验性插件 → Custom plugin indexes → 发现 → 添加索引源」填入即可浏览和一键安装 0.5.1 及之后的版本。
+- **README 写明发布范围**：npm 上只有 0.5.1 及之后发布的版本（当前最新版），0.5.0 及更早的版本只在 GitHub Releases。
+
 ## 0.5.3（2026-11-23）
 
 ### 发布与包元数据

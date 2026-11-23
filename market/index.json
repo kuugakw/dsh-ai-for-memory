@@ -1,0 +1,97 @@
+{
+  "format": 1,
+  "title": {
+    "en": "AI for Memory",
+    "zh": "AI for Memory 插件索引"
+  },
+  "description": {
+    "en": "Layered project memory for DeepSeek Harness: context cleanup and restore, knowledge search, risk-reviewed decisions, and a Web panel.",
+    "zh": "面向 DeepSeek Harness 的项目级记忆插件：上下文清理与恢复、知识检索、风险决策审查和 Web 面板。"
+  },
+  "metadata": {
+    "categories": {
+      "memory": {
+        "title": {
+          "en": "Memory & context",
+          "zh": "记忆与上下文"
+        }
+      }
+    },
+    "labels": {
+      "context": {
+        "title": {
+          "en": "Context",
+          "zh": "上下文"
+        }
+      },
+      "repair": {
+        "title": {
+          "en": "Data repair",
+          "zh": "数据修复"
+        }
+      },
+      "panel": {
+        "title": {
+          "en": "Web panel",
+          "zh": "面板"
+        }
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "dsh-ai-for-memory",
+      "title": {
+        "en": "AI for Memory",
+        "zh": "AI for Memory"
+      },
+      "description": {
+        "en": "Layered project memory for DSH: six memory layers, context cleanup/restore, BM25/SQL/RAG search, risk-reviewed decisions, and an optional Web panel.",
+        "zh": "面向 DSH 的六层项目记忆：上下文清理与恢复、BM25/SQL/RAG 检索、风险决策审查、可选 Web 面板。"
+      },
+      "icon": "icons/ai-for-memory.svg",
+      "author": "kuugakw",
+      "homepage": "https://github.com/kuugakw/dsh-ai-for-memory#readme",
+      "repository": {
+        "url": "git+https://github.com/kuugakw/dsh-ai-for-memory.git"
+      },
+      "metadata": {
+        "category": "memory",
+        "labels": [
+          "context",
+          "repair",
+          "panel"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.5.3",
+          "publishTimestamp": 1795442498,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.0-rc.1 <0.3.0"
+          }
+        },
+        {
+          "version": "0.5.2",
+          "publishTimestamp": 1795438042,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.0-rc.1 <0.3.0"
+          }
+        },
+        {
+          "version": "0.5.1",
+          "publishTimestamp": 1795437188,
+          "source": {
+            "type": "npm"
+          }
+        }
+      ]
+    }
+  ]
+}

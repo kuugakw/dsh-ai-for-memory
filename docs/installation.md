@@ -36,6 +36,14 @@ dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.3
 
 也可以在 DSH 的 **设置 → 插件 → 添加插件** 中直接填 npm 包名 `dsh-ai-for-memory` 安装。
 
+**从插件索引安装**（DSH 实验特性）：在 **插件 → 实验性插件** 里开启 **Custom plugin indexes**，进入 **发现 → 添加索引源**，填入：
+
+```text
+https://kuugakw.github.io/dsh-ai-for-memory/index.json
+```
+
+索引里列出 0.5.1 及之后的全部版本，选中版本确认即可安装，不用手输包名。索引文件本身在仓库的 `market/` 目录，由 tag 触发的 `market` workflow 自动更新并发布到 GitHub Pages。
+
 本地开发或离线安装仍然可以用目录：
 
 ```text
