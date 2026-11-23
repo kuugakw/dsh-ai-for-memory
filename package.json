@@ -1,7 +1,6 @@
 {
   "name": "dsh-ai-for-memory",
   "version": "0.5.0",
-  "private": true,
   "type": "module",
   "description": "面向 DSH 的项目级记忆插件：按对话隔离的六层项目记忆、共享层、可检索知识库、可恢复上下文、风险决策审查，以及可选的 SQL/RAG/本地 llama.cpp 检索增强。",
   "exports": {
@@ -14,7 +13,10 @@
     "index.js",
     "client.js",
     "lib",
-    "models",
+    "models/README.md",
+    "models/Embedding/README.md",
+    "models/Rerank/README.md",
+    "models/Routing/README.md",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
@@ -37,8 +39,13 @@
     }
   },
   "scripts": {
-    "test": "node --test test/core.test.mjs"
+    "test": "node --test test/core.test.mjs",
+    "prepublishOnly": "npm test"
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "kuugakw",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kuugakw/dsh-ai-for-memory.git"

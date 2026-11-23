@@ -35,6 +35,14 @@ Release 标题**只写版本号**（如 `0.1.1`），不写「第 N 个正式版
 4. 创建对应的 Git tag 和 GitHub Release；
 5. 推送提交与 tag。
 
+### npm 发布
+
+npm 上的包名是 `dsh-ai-for-memory`；`package.json` 已移除 `private`，并限制 `files` 只打包入口、lib、文档、locale、示例模型 README 和许可证，`models/.engine.lock` 不会被发布。
+
+首次发布必须由有 npm 账号和 2FA 的维护者手动完成：`npm login` 后先跑 `npm publish --dry-run` 检查包内容，再 `npm publish`。npm 不支持为尚不存在的包预配置 Trusted Publisher，所以第一步不能直接交给 CI。
+
+首版成功后，在 npm 包设置里配置 GitHub Actions Trusted Publisher（仓库 `kuugakw/dsh-ai-for-memory`，workflow 文件名 `publish-npm.yml`，允许 `npm publish`），后续版本即可用 OIDC 无 token 发布并自动生成 provenance。要求 npm CLI 11.5.1+、Node 22.14+、公开仓库和匹配的 `repository`；发布 workflow 需要 `id-token: write`，不需要 `NODE_AUTH_TOKEN`。本地或 CI 直接发布时都必须满足 npm 的 2FA 要求。
+
 ## 开发与测试
 
 要求 Node.js 20+。

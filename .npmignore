@@ -1,0 +1,3 @@
+# Runtime engine journals contain local PIDs/ports and must never ship.
+models/.engine.lock
+models/**/.engine.lock
