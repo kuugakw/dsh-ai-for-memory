@@ -1,11 +1,11 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.5.0-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.5.0-lightgrey.svg)](package.json)
+[![Status](https://img.shields.io/badge/status-stable%200.5.1-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.5.1-lightgrey.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.5.0 是功能更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版把本地 llama.cpp 的模型参数搬进面板高级设置（类型、权重路径、ctx-size、端口、pooling、超时、binary、extraArgs），补齐自动活动开关和模型配置 API；同时修正引擎接管失败删锁、停止不升级 SIGKILL、孤儿进程不可见等生命周期问题。
+> **0.5.1 是修复更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版修正本地引擎的 profile/PID 归属与 dispose 误杀、自动活动命令风险误报、`WITH` 别名误拒，以及 `..` 开头模型目录被误判越界。
 >
 > 升级前请备份记忆目录。
 
@@ -191,9 +191,11 @@ aim_memory action=status
 
 ## 更新内容
 
-当前版本 **0.5.0**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.5.1**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
+
+- **0.5.1 修复**：引擎只认本 profile 的锁和本进程直接 spawn 的进程，dispose 不再杀接管来的 survivor；停止前按命令行/PID 身份复核，PID 被回收时不误杀；自动活动命令风险按命令位置识别；`SELECT 1 AS with` 与 `models/..cache` 不再被误判；
 
 - **知识冲突日志**：被冲突闸门拦下的写入记入 `knowledge/conflicts.jsonl`（只做审计，不是队列，不参与检索）；`aim_memory status` 报未确认数，面板知识库页显示最近冲突，确认覆盖后自动标记为已确认；
 - **自动活动记录保留**：新增 `autoDecisionRetentionDays`（默认 90 天），只清理 `decision_auto_*` 每轮自动记录，`aim_decide` 审查记录仍默认永不自动删除；
