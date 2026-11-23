@@ -1,11 +1,11 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.5.1-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.5.1-lightgrey.svg)](package.json)
+[![Status](https://img.shields.io/badge/status-stable%200.5.2-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.5.2-lightgrey.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.5.1 是修复更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版修正本地引擎的 profile/PID 归属与 dispose 误杀、自动活动命令风险误报、`WITH` 别名误拒，以及 `..` 开头模型目录被误判越界。
+> **0.5.2 是发布与安装更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版补齐 npm 安装文档、GitHub Actions 发布工作流与 provenance、包元数据兼容声明；功能与 0.5.1 相同。
 >
 > 升级前请备份记忆目录。
 
@@ -114,10 +114,17 @@ verified: false
 
 ## 快速开始
 
+```bash
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.2
+```
+
+也可以在 DSH **设置 → 插件 → 添加插件** 中填 `dsh-ai-for-memory`。本地开发用目录安装：
+
 ```text
 plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
-aim_memory action=status
 ```
+
+也可以安装后在会话里运行 `aim_memory action=status` 验证。
 
 安装、`.gitignore` 排除、升级和第一次使用示例见 [安装与首次使用](docs/installation.md)。
 
@@ -191,11 +198,11 @@ aim_memory action=status
 
 ## 更新内容
 
-当前版本 **0.5.1**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.5.2**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
-- **0.5.1 修复**：引擎只认本 profile 的锁和本进程直接 spawn 的进程，dispose 不再杀接管来的 survivor；停止前按命令行/PID 身份复核，PID 被回收时不误杀；自动活动命令风险按命令位置识别；`SELECT 1 AS with` 与 `models/..cache` 不再被误判；
+- **0.5.2 发布更新**：安装文档改为 npm / `dsh plugin` 优先；新增 tag 触发的 GitHub Actions 发布工作流、npm OIDC provenance、`dsh.compatibility` 和 `engines.dsh`，并补齐 `context`、`compaction`、`repair` 关键词；
 
 - **知识冲突日志**：被冲突闸门拦下的写入记入 `knowledge/conflicts.jsonl`（只做审计，不是队列，不参与检索）；`aim_memory status` 报未确认数，面板知识库页显示最近冲突，确认覆盖后自动标记为已确认；
 - **自动活动记录保留**：新增 `autoDecisionRetentionDays`（默认 90 天），只清理 `decision_auto_*` 每轮自动记录，`aim_decide` 审查记录仍默认永不自动删除；

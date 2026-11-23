@@ -1,6 +1,6 @@
 {
   "name": "dsh-ai-for-memory",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "type": "module",
   "description": "面向 DSH 的项目级记忆插件：按对话隔离的六层项目记忆、共享层、可检索知识库、可恢复上下文、风险决策审查，以及可选的 SQL/RAG/本地 llama.cpp 检索增强。",
   "exports": {
@@ -26,7 +26,8 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20",
+    "dsh": ">=0.2.0-rc.1 <0.3.0"
   },
   "dsh": {
     "bundle": {
@@ -36,6 +37,9 @@
       "platform": "web",
       "immediately": true,
       "inject": []
+    },
+    "compatibility": {
+      "dsh": ">=0.2.0-rc.1 <0.3.0"
     }
   },
   "scripts": {
@@ -43,7 +47,8 @@
     "prepublishOnly": "npm test"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "author": "kuugakw",
   "repository": {
@@ -66,7 +71,10 @@
     "embeddings",
     "rerank",
     "sqlite",
-    "text-to-sql"
+    "text-to-sql",
+    "context",
+    "compaction",
+    "repair"
   ],
   "license": "MIT"
 }

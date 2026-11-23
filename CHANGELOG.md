@@ -2,6 +2,14 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 0.5.2（2026-11-23）
+
+### 发布与安装
+
+- **安装文档改为 npm 优先**：`dsh plugin --profile <profile> add dsh-ai-for-memory@<version>`，DSH 设置里的「添加插件」也可直接填包名；本地目录 `install_bundle` 保留为开发/离线方式，升级与卸载都有 npm 命令。
+- **tag 触发的 GitHub Actions 发布**：新增 `.github/workflows/publish.yml`，推送 `v*` tag 后跑测试，并通过 npm Trusted Publisher OIDC 执行 `npm publish --provenance --access public`；发布使用 `id-token: write`，不需要 `NODE_AUTH_TOKEN`，`publishConfig.provenance` 也已开启。
+- **包元数据补齐**：`engines.dsh` 与 `dsh.compatibility.dsh` 声明兼容 `>=0.2.0-rc.1 <0.3.0`；keywords 增加 `context`、`compaction`、`repair`。
+
 ## 0.5.1（2026-11-23）
 
 ### 本地引擎

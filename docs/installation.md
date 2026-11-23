@@ -26,7 +26,17 @@ git check-ignore -v .ai-for-memory/
 
 ### 2. 安装 bundle
 
-在 DSH 中执行：
+推荐从 npm 安装：
+
+```bash
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.2
+```
+
+`<profile>` 换成你的 DSH profile（例如 `desktop`）。安装后重启 DSH；工具、侧栏入口和面板由 bundle 自动加载。
+
+也可以在 DSH 的 **设置 → 插件 → 添加插件** 中直接填 npm 包名 `dsh-ai-for-memory` 安装。
+
+本地开发或离线安装仍然可以用目录：
 
 ```text
 plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
@@ -41,6 +51,7 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 环境要求：
 
 - **Node.js 20+** 可以运行插件和本地记忆；
+- **DSH 0.2.x**（`>=0.2.0-rc.1 <0.3.0`）；
 - **SQL 查询和 SQLite 镜像**需要运行时有 `node:sqlite`（Node 22.5+ 起内置）；
 - RAG 需要配置外部 Embedding 和 Rerank 服务，不需要 `node:sqlite`。
 
@@ -54,11 +65,22 @@ aim_memory action=status
 
 ### 4. 升级与卸载
 
-升级前先备份整个记忆目录。建议移除旧 bundle、重新安装，然后重新加载插件，不要只替换文件。
+升级前先备份整个记忆目录。
 
-```text
-plugin_manager action=remove_bundle target=dsh-ai-for-memory
+```bash
+# 升级到当前 npm 最新版
+dsh plugin --profile <profile> add dsh-ai-for-memory@latest
 ```
+
+安装后重启 DSH。旧 bundle 也可以先在「设置 → 插件」里移除，再重新安装；不建议只替换文件。
+
+卸载：
+
+```bash
+dsh plugin --profile <profile> remove dsh-ai-for-memory
+```
+
+用 `plugin_manager` 安装的本地目录，仍用 `plugin_manager action=remove_bundle target=dsh-ai-for-memory` 卸载。
 
 旧的根目录数据会留在共享层；旧对话目录会在下次使用或下一轮结束时补上元数据。旧版 RAG 单文件索引不再读取，需要重新建立。
 
