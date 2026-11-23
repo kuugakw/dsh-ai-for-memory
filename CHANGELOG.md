@@ -8,10 +8,15 @@
 
 - **只认自己 profile 的锁和进程**：`discoverLiveEngines()` 之前只要可执行文件名以 `llama-server` 开头、权重在当前 models 根目录下就认领，两个 DSH profile 共用 models 目录或用户手起过 `llama-server` 时，都会把别人的进程写进本实例的内存 map 和锁，之后停止/清理就可能 SIGKILL 它。现在锁记录带当前 DSH profile 的 `owner`，owner 不匹配的锁不探测、不改写、不删除；锁文件丢失时也只扫描 `ppid === process.pid` 的直接子进程。`stopAllLocalEngines()` 也只会停当前进程自己 spawn、仍有 child handle 的实例，接管来的 survivor 不参与 dispose。跨 DSH 重启且锁丢失的孤儿进程不再自动认领，宁可留给人处理，也不把未知进程变成可停止实例。回归用例覆盖其他 profile 的锁、无 owner 的旧锁，以及当前/非当前父进程判定。
 - **PID 不再当作进程身份**：锁里只有 PID 时，系统回收 PID 后可能把旧记录指向无关进程；接管探测失败路径和停止路径现在都会先核对命令行里的可执行文件、`-m` 模型路径和 `--port`，核对不上就只清理过期锁，不发信号。健康检查通过的引擎仍可停，自定义 binary 不依赖进程名。`process.once('exit')` 也只杀当前进程自己 spawn 的 child，不再对 map 里的裸 PID 发 SIGKILL。回归用例用 `sleep`/Node 进程模拟 PID 回收，确认 restore 与 stop 都不会杀掉它。
+- **`..` 开头的目录名不再被当成越界**：`modelIdFromPath()` 用 `relative.startsWith('..')` 判断是否离开 models 根目录，`models/..cache/x.gguf` 这类合法路径会被误判；现在只把 `..` 本身和 `..${path.sep}` 前缀视为越界，仍保留 `path.isAbsolute()` 检查。
 
 ### 自动活动记录
 
 - **命令行风险按命令位置判断**：`DESTRUCTIVE_COMMAND` 之前是裸子串正则，`git log --format=...`、`grep -rn "rm" .`、`grep -rn format src/` 都会被判成 high，自动活动记录和面板风险徽标因此失真。现在先按 shell 分隔符切段、按引号分词，只看每段的执行命令和关键子命令；参数里的 `format`、`rm`、`kill` 不再命中，`rm`、`git rm`、`git mv`、`git reset --hard`、`Remove-Item`、`taskkill`、`bash -c 'rm ...'`、`xargs rm` 等命令位置仍会判 high。回归用例覆盖只读命令、复合命令和 PowerShell 写法。
+
+### 知识查询
+
+- **`WITH` 别名校验不再误伤**：`hasUnsafeCte()` 之前扫描语句里每个 `WITH` token，`SELECT 1 AS with` 会被当成 CTE 起始并拒绝；现在只有语句开头或 `(` 后的 `WITH` 才按 CTE 解析，`AS with` / `AS "with"` 这类合法别名放行。递归 CTE、子查询 CTE 和原有的 `WITH RECURSIVE` 拦截保持不变。
 
 ## 0.5.0（2026-11-23）
 

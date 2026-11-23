@@ -44,7 +44,7 @@ import { applyDisclosure, buildIndex, RRF_K, reciprocalRankFusion, search, snipp
 import { BoundedCache, CATEGORIES, appendJsonLine, dshHome, hourKey, listJsonlFiles, writeJson } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
-import { ENGINE_OWNER, isCurrentDshChild, buildServerArgs, findModelFile, localEngineStatus, missingLocalEngineKinds, parseLlamaServerCommandLine, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig, autoStartSkips, clearAutoStartSkip, noteAutoStartSkip } from '../lib/local-engine.js';
+import { ENGINE_OWNER, isCurrentDshChild, buildServerArgs, findModelFile, localEngineStatus, missingLocalEngineKinds, modelIdFromPath, parseLlamaServerCommandLine, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig, autoStartSkips, clearAutoStartSkip, noteAutoStartSkip } from '../lib/local-engine.js';
 import { configuredEndpointBase, configuredEndpointIsDedicated, createEndpointGate } from '../lib/engine-gate.js';
 import {
   commitSync, initSync, pullSync, pushSync, readSyncConfig, syncStatus, writeSyncConfig,
@@ -4355,6 +4355,16 @@ test('a live llama-server from the previous plugin process is adopted', async ()
   }
 });
 
+test('model path mapping accepts dot-prefixed folders but rejects parent escapes', () => {
+  const root = path.join(tempRoot(), 'models');
+  assert.deepEqual(modelIdFromPath(root, path.join(root, '..cache', 'x.gguf')), {
+    id: '..cache/x.gguf',
+    category: '..cache',
+  });
+  assert.equal(modelIdFromPath(root, path.join(root, '..', 'escape.gguf')), null);
+  assert.equal(modelIdFromPath(root, root), null);
+});
+
 test('engine ownership is scoped to this DSH profile, not a shared models root', async () => {
   assert.equal(isCurrentDshChild({ ppid: process.pid }), true);
   assert.equal(isCurrentDshChild({ ppid: process.pid + 1 }), false);
@@ -5681,6 +5691,8 @@ test('raw SQL is accepted only as one read-only statement', () => {
   // Keywords and semicolons inside literals/comments are not SQL structure.
   assert.equal(isSafeSelect("SELECT * FROM knowledge_docs WHERE text LIKE '%delete%'"), true);
   assert.equal(isSafeSelect("SELECT ';' AS semi"), true);
+  assert.equal(isSafeSelect('SELECT 1 AS with'), true);
+  assert.equal(isSafeSelect('SELECT 1 AS "with"'), true);
   assert.equal(isSafeSelect('SELECT 1 -- delete\n'), true);
   assert.equal(isSafeSelect('SELECT 1 /* drop */'), true);
   assert.equal(isSafeSelect("SELECT 'unterminated"), false);

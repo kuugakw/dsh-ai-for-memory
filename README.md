@@ -224,7 +224,7 @@ aim_memory action=status
 
 要求 Node.js 20+。会话日志体检/修复依赖 Node 的 zstd，需要 Node 22.15+；在 Node 20 上插件其余功能正常，诊断页会明确标记这一项不可用，而不是等用户点下去才报错。
 
-测试共 192 项；Node 20 上 13 项依赖 `node:sqlite` 或 zstd 的用例按运行时能力跳过（179 pass / 13 skip），另有 2 项使用 shell 包装器的引擎用例只在 POSIX 上运行（Windows 上 177 pass / 15 skip）。Node 22 在 Linux / macOS 全过，Windows 上 189 pass / 3 skip。CI 覆盖 Linux / Windows / macOS × Node 20 / 22。“全绿”指没有失败，不等于每个平台都跑满 192 项。
+测试共 193 项；Node 20 上 13 项依赖 `node:sqlite` 或 zstd 的用例按运行时能力跳过（180 pass / 13 skip），另有 2 项使用 shell 包装器的引擎用例只在 POSIX 上运行（Windows 上 178 pass / 15 skip）。Node 22 在 Linux / macOS 全过，Windows 上 190 pass / 3 skip。CI 覆盖 Linux / Windows / macOS × Node 20 / 22。“全绿”指没有失败，不等于每个平台都跑满 193 项。
 
 ```bash
 npm test
