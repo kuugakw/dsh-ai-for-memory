@@ -5549,6 +5549,18 @@ test('SQL route answers counts and groups from the JSON base', (t) => {
   assert.equal(isSafeSelect("SELECT printf('%134217728s', '')"), false);
   assert.equal(isSafeSelect("SELECT format('%134217728s', '')"), false);
   assert.equal(isSafeSelect(`SELECT "printf"('%134217728s', '')`), false);
+  // hex() doubles its input and group_concat() can aggregate every row; both
+  // must be rejected before SQLite allocates their output. substr() only slices
+  // an already-bounded value, so it stays available.
+  const hexBlob = runSqlQuery([], 'SELECT hex(randomblob(1048576)) AS text');
+  assert.equal(hexBlob.ok, false);
+  assert.equal(isSafeSelect('SELECT hex(randomblob(1048576))'), false);
+  const groupConcat = runSqlQuery([], 'SELECT group_concat(text) AS text FROM knowledge_docs');
+  assert.equal(groupConcat.ok, false);
+  assert.equal(isSafeSelect('SELECT group_concat(text) FROM knowledge_docs'), false);
+  assert.equal(isSafeSelect('SELECT string_agg(text, \',\') FROM knowledge_docs'), false);
+  assert.equal(isSafeSelect(`SELECT "group_concat"(text) FROM knowledge_docs`), false);
+  assert.equal(isSafeSelect("SELECT substr('abc', 1, 2)"), true);
   const smallBlob = runSqlQuery([], 'SELECT randomblob(1024) AS blob');
   assert.equal(smallBlob.ok, true);
   assert.equal(smallBlob.rows[0].blob.length, 1024);

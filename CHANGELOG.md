@@ -10,7 +10,7 @@
 
 ### 知识查询
 
-- **单行大对象在 SQLite 分配前拒绝**：`SQL_MAX_ROW_BYTES` 只能在 `iterate()` 拿到行之后检查，`randomblob(134217728)` 仍会先让 RSS 上涨 128 MB。现在为临时库注册有上限的 `randomblob` / `zeroblob` 实现，超过 2 MiB 在分配前抛错；`printf` / `format` 可通过短格式串放大出任意长度的字符串，在只读 SQL 校验和 authorizer 两层直接拒绝。回归用例用 128 MiB 参数验证错误路径，实测 RSS 只增加约 1 MiB。
+- **单行大对象在 SQLite 分配前拒绝**：`SQL_MAX_ROW_BYTES` 只能在 `iterate()` 拿到行之后检查，`randomblob(134217728)` 仍会先让 RSS 上涨 128 MB。现在在暴露 `db.limits` 的 Node 上把 SQLite `SQLITE_LIMIT_LENGTH` 设为 2 MiB，SQLite 在构造超限值时就报 `string or blob too big`，不会先产出再检查；同时为临时库注册有上限的 `randomblob` / `zeroblob` 实现，超过 2 MiB 在分配前抛错。`printf`、`format`、`hex`、`quote`、`json_quote`、`replace`、`concat` / `concat_ws`、`group_concat` / `string_agg`、`json_group_*` 等可放大或跨行聚合的函数在只读 SQL 校验和 authorizer 层拒绝；`substr` 只截取已有值，保留可用。回归用例覆盖 `hex(randomblob(1048576))`、`group_concat`、带引号函数名和 128 MiB Blob，实测 RSS 只增加约 1 MiB。
 - **逗号分隔的 FROM 表不再绕过递归 CTE 检查**：`bodyReferencesCte()` 之前只检查 `FROM` / `JOIN` 后的第一个表，`WITH c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM knowledge_docs, c)` 因此通过检查并可能无限递归。现在按 FROM 列表扫描：逗号后的表、`JOIN` 后的表、`FROM (a, b)` 括号表组和 schema 限定名都会比对 CTE 名，并正确跳过子查询、函数参数和别名；回归用例覆盖逗号、`AS` 别名、括号表组和安全的逗号列表。
 
 ## 0.4.5（2026-11-22）
