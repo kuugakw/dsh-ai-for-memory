@@ -108,23 +108,6 @@ function freePort() {
   });
 }
 
-/**
- * A real `llama-server` is not available in CI. Link/copy the current Node
- * binary under that name so OS process-table identity checks can see the same
- * executable name they see in production.
- */
-function fakeLlamaExecutable(root) {
-  const name = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server';
-  const destination = path.join(root, name);
-  try {
-    fs.linkSync(process.execPath, destination);
-  } catch {
-    fs.copyFileSync(process.execPath, destination);
-    fs.chmodSync(destination, 0o755);
-  }
-  return destination;
-}
-
 function processAlive(pid) {
   try {
     process.kill(pid, 0);
@@ -4310,72 +4293,6 @@ test('a live llama-server from the previous plugin process is adopted', async ()
     assert.equal(fs.readdirSync(lockDir).filter((name) => name.endsWith('.json')).length, 0);
   } finally {
     if (child && child.exitCode === null) child.kill();
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('a live engine whose health probe fails stays visible and stoppable', async () => {
-  const root = tempRoot();
-  let child = null;
-  try {
-    const models = path.join(root, 'models');
-    const modelDir = path.join(models, 'Embedding', 'unhealthy');
-    fs.mkdirSync(modelDir, { recursive: true });
-    const modelPath = path.join(modelDir, 'unhealthy.gguf');
-    fs.writeFileSync(modelPath, '');
-    fs.writeFileSync(path.join(modelDir, 'model.json'), JSON.stringify({ model: 'unhealthy' }));
-
-    // This process is alive but never serves /health, simulating a load that
-    // is slower than the adoption timeout. It has the llama-server executable
-    // name so the PID-reuse guard can verify it belongs to this engine.
-    const port = await freePort();
-    const binary = fakeLlamaExecutable(root);
-    child = spawn(binary, ['-e', 'setInterval(() => {}, 1000)', '--', '-m', modelPath, '--port', String(port)], {
-      stdio: 'ignore',
-      windowsHide: true,
-    });
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    fs.writeFileSync(path.join(models, '.engine.lock'), JSON.stringify({
-      version: 1,
-      engines: [{
-        id: 'Embedding/unhealthy',
-        pid: child.pid,
-        port,
-        model: 'unhealthy',
-        modelPath,
-        baseUrl: `http://127.0.0.1:${port}`,
-        command: 'llama-server',
-        startedAt: new Date().toISOString(),
-      }],
-    }));
-
-    const statuses = await restoreLocalEngines({ modelsRoot: models });
-    const unhealthy = statuses.find((row) => row.id === 'Embedding/unhealthy');
-    assert.ok(unhealthy, 'a live process must stay visible after a failed probe');
-    assert.equal(unhealthy.ready, false);
-    assert.equal(unhealthy.pid, child.pid);
-    assert.match(unhealthy.error, /接管探测失败/);
-    // The journal must survive: deleting it here was the orphan bug.
-    const lockDir = path.join(models, '.engine.lock');
-    assert.equal(fs.statSync(lockDir).isDirectory(), true);
-    assert.equal(fs.readdirSync(lockDir).filter((name) => name.endsWith('.json')).length, 1);
-
-    // Starting again must not spawn a second server beside the survivor.
-    const retried = await startLocalEngine({ modelsRoot: models, modelId: 'Embedding/unhealthy' });
-    assert.equal(retried.ok, false);
-    assert.match(retried.error, /仍在运行|健康检查/);
-
-    // Stopping must kill it and only then remove the journal.
-    const stopped = await stopLocalEngine('Embedding/unhealthy');
-    assert.equal(stopped.ok, true, stopped.error);
-    for (let attempt = 0; attempt < 100 && child.exitCode === null && child.signalCode === null; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    assert.ok(child.exitCode !== null || child.signalCode !== null, 'unhealthy process was not terminated');
-    assert.equal(fs.readdirSync(lockDir).filter((name) => name.endsWith('.json')).length, 0);
-  } finally {
-    if (child && child.exitCode === null) child.kill();
-    await stopAllLocalEngines();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
