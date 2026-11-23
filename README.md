@@ -200,6 +200,7 @@ aim_memory action=status
 - **稳定性**：用户数据写入 fsync；RAG 索引缓存按 manifest 内容识别代际，避免跨实例读到旧索引；
 - **本地引擎运行方式**：设置页可选常闭 / 常开 / 每轮开关；自动拉起前先探测已配置的 Embedding/Rerank 端点，能连上就跳过，不重复起进程；`turn` 在轮末不立即杀进程，空闲约 2 分钟后才释放，短轮次不会把加载中的模型记成启动失败；
 - **决策层拆分**：每轮工具活动自动记成「常规」，`aim_decide` 的审查保留在「风险」，面板与 `aim_memory status` 分开计数；
+- **自动活动风险分级**：命令行只按命令位置识别删除/移动/终止操作，`git log --format`、`grep "rm"` 等只读参数不会被误标成 high；
 - **诊断/用量页**：运行环境、知识命中与权重、对话磁盘占用、批量开放/关闭和面板操作审计集中在一页；
 - 知识页支持**分类/来源/确认状态筛选**、**时间/置信度/命中次数/权重排序**、**批量确认**与**撤销确认**；
 - 知识、上下文和快照条目可直接**打开 JSON / 下载全文**；context 可**导出 Markdown**，快照可**恢复/并排对比**；
@@ -223,7 +224,7 @@ aim_memory action=status
 
 要求 Node.js 20+。会话日志体检/修复依赖 Node 的 zstd，需要 Node 22.15+；在 Node 20 上插件其余功能正常，诊断页会明确标记这一项不可用，而不是等用户点下去才报错。
 
-测试共 190 项；Node 20 上 13 项依赖 `node:sqlite` 或 zstd 的用例按运行时能力跳过（177 pass / 13 skip），另有 2 项使用 shell 包装器的引擎用例只在 POSIX 上运行（Windows 上 175 pass / 15 skip）。Node 22 在 Linux / macOS 全过，Windows 上 187 pass / 3 skip。CI 覆盖 Linux / Windows / macOS × Node 20 / 22。“全绿”指没有失败，不等于每个平台都跑满 190 项。
+测试共 191 项；Node 20 上 13 项依赖 `node:sqlite` 或 zstd 的用例按运行时能力跳过（178 pass / 13 skip），另有 2 项使用 shell 包装器的引擎用例只在 POSIX 上运行（Windows 上 176 pass / 15 skip）。Node 22 在 Linux / macOS 全过，Windows 上 188 pass / 3 skip。CI 覆盖 Linux / Windows / macOS × Node 20 / 22。“全绿”指没有失败，不等于每个平台都跑满 191 项。
 
 ```bash
 npm test

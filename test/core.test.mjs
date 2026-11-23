@@ -13,7 +13,7 @@ import { defaultMemoryDirIgnoreStatus, ensureDefaultMemoryDirIgnored, ensureGiti
 import { MemoryScopes, sessionKey } from '../lib/scopes.js';
 import { decodeWorkspaceBucket, dshSessionsDir, encodeWorkspace, resolveWorkspacePath, workspaceIndex } from '../lib/dsh-workspace.js';
 import { userModelsDir } from '../lib/model-paths.js';
-import { summarizeTurnActivity } from '../lib/turn-activity.js';
+import { isDestructiveShellCommand, summarizeTurnActivity } from '../lib/turn-activity.js';
 import { isSessionActive } from '../lib/activity.js';
 import {
   chat, embed, externalConfigFrom, listModels, normalizeExternal, parseEmbeddingResponse, parseRerankResponse,
@@ -688,6 +688,57 @@ test('decision review gates on reversibility, not on reason length', () => {
     () => evaluateDecision({ decision: '数字也不是', risk: 1 }),
     /risk 必须是 low \/ medium \/ high/,
   );
+});
+
+test('shell risk uses command position and ignores arguments', () => {
+  for (const command of [
+    "git log --format='%H' -5",
+    'grep -rn format src/',
+    'grep -rn "rm" .',
+    'grep -rn "Remove-Item" .',
+    'echo rm',
+    'ls -l / git status',
+    'git log --format="%H" --decorate',
+  ]) {
+    assert.equal(isDestructiveShellCommand(command), false, command);
+  }
+  for (const command of [
+    'rm -rf tmp',
+    'git rm old.txt',
+    'git mv old.txt new.txt',
+    'git reset --hard HEAD',
+    'git clean -fd',
+    'find . -name "*.tmp" -delete',
+    'Remove-Item -Recurse tmp',
+    'taskkill /PID 123',
+    'ls -l && rm -rf tmp',
+    "bash -c 'rm -rf tmp'",
+    'echo rm | xargs rm',
+  ]) {
+    assert.equal(isDestructiveShellCommand(command), true, command);
+  }
+
+  const eventFor = (turn, command) => [
+    {
+      type: 'assistant/message',
+      data: {
+        turn,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool-call', id: `c${turn}`, name: 'shell', arguments: JSON.stringify({ command }) }],
+        },
+      },
+    },
+    { type: 'turn/end', data: { turn } },
+  ];
+  const safe = summarizeTurnActivity(eventFor(3, 'grep -rn "rm" .'), 's', 3);
+  assert.equal(safe.risk_level, 'low');
+  assert.match(safe.reason, /low（只读）/);
+  assert.doesNotMatch(safe.reason, /删除/);
+
+  const unsafe = summarizeTurnActivity(eventFor(4, 'git status && rm -rf tmp'), 's', 4);
+  assert.equal(unsafe.risk_level, 'high');
+  assert.match(unsafe.reason, /high（删除、移动或终止类操作）/);
 });
 
 test('turn activity becomes one observed decision with tools, failures and files', () => {

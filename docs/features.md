@@ -183,7 +183,7 @@ verified: false
 - `decision`：第 N 轮、工具调用次数与名称分布、修改了哪些本地文件、失败次数；
 - `reason`：完整工具/文件清单与风险推断说明；
 - `tools` / `files`：结构化的工具计数（含失败数）和读取/修改文件列表；
-- `risk_level`：按工具类型推断（删除/移动/`rm` 等 = high，写文件 = medium，只读 = low）。
+- `risk_level`：按工具类型和 shell 命令位置推断（`rm`、`git rm` / `git mv`、`Remove-Item` 等删除/移动/终止操作 = high，写文件 = medium，只读 = low）。参数里的 `format`、`rm`、`kill` 不会命中；
 
 它是“做了什么”的执行审计，不占用正反合审查，也不会被 `promote` 提炼进知识库；同一轮重复落库会按 `session + turn` 覆盖同一条。`autoDecisionLog: false` 可关闭。
 
