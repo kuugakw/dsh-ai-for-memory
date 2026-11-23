@@ -514,7 +514,7 @@ models/
 - 支持 `ctxSize`、`port`、`binary`、`startupTimeoutMs`、`extraArgs`；
 - `ctxSize` 默认 2048，可在面板调整；过大的 ctx 会白占常驻 KV cache；
 - 自动端口冲突时换端口重试最多 3 次；显式端口不重试；
-- 启动前写 `.engine.lock/<model>.json`，插件重启后自动探测并接管仍活着的引擎；
+- 启动前写 `.engine.lock/<model>.json`，插件重启后自动探测并接管仍活着的引擎；锁文件丢失时扫描本机 `llama-server` 命令行重新接管；停止会确认 PID 退出，未退出先 SIGTERM 再 SIGKILL，只有确认死亡才删锁；
 - 启动失败保留 stderr/stdout 尾部和实际启动命令，面板显示诊断提示。
 
 ### 8.3 自动路由

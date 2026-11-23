@@ -264,6 +264,7 @@ window.__ModuleLoader__.load({
         localModelEngineRunning: '本地引擎运行中',
         localModelAdopted: '已接管（插件重启前启动）',
         localModelStaleEngine: '配置已变更，待重启',
+        localModelEngineUnready: '进程仍在运行，但接管探测失败；请停止后重试',
         localModelUnconfigured: '未配置 API',
         localModelUse: '填入地址',
         localModelStart: '启动引擎并填入',
@@ -816,6 +817,7 @@ window.__ModuleLoader__.load({
         localModelEngineRunning: 'Local engine running',
         localModelAdopted: 'Adopted from before the plugin reload',
         localModelStaleEngine: 'Config changed; restart required',
+        localModelEngineUnready: 'Process is still running but the probe failed; stop it and retry',
         localModelUnconfigured: 'API not configured',
         localModelUse: 'Use this address',
         localModelStart: 'Start engine & use',
@@ -4885,7 +4887,9 @@ window.__ModuleLoader__.load({
                       : (data?.localEngines ?? []).find((engine) => engine.id === model.id)?.adopted
                         ? t.localModelAdopted
                         : t.localModelEngineRunning}：${(data?.localEngines ?? []).find((engine) => engine.id === model.id)?.baseUrl ?? ''}`
-                    : (engineSkipFor(data, model.id)?.reason ?? t.localModelGguf))
+                    : (data?.localEngines ?? []).some((engine) => engine.id === model.id)
+                      ? t.localModelEngineUnready
+                      : (engineSkipFor(data, model.id)?.reason ?? t.localModelGguf))
                   : (model.configured ? t.localModelReady : (model.error || t.localModelUnconfigured))),
               (model.runnable || model.configured)
                 && (['Embedding', 'Rerank'].includes(category.name) || category.name === 'Loose')

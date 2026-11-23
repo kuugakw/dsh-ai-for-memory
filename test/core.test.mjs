@@ -44,7 +44,7 @@ import { applyDisclosure, buildIndex, RRF_K, reciprocalRankFusion, search, snipp
 import { BoundedCache, CATEGORIES, appendJsonLine, dshHome, hourKey, listJsonlFiles, writeJson } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
-import { buildServerArgs, findModelFile, localEngineStatus, missingLocalEngineKinds, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig, autoStartSkips, clearAutoStartSkip, noteAutoStartSkip } from '../lib/local-engine.js';
+import { buildServerArgs, findModelFile, localEngineStatus, missingLocalEngineKinds, parseLlamaServerCommandLine, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig, autoStartSkips, clearAutoStartSkip, noteAutoStartSkip } from '../lib/local-engine.js';
 import { configuredEndpointBase, configuredEndpointIsDedicated, createEndpointGate } from '../lib/engine-gate.js';
 import {
   commitSync, initSync, pullSync, pushSync, readSyncConfig, syncStatus, writeSyncConfig,
@@ -3960,6 +3960,17 @@ test('loose GGUF files are classified by name and can be marked by the user', ()
   }
 });
 
+test('llama-server command lines map back to model paths and ports', () => {
+  const windows = parseLlamaServerCommandLine(String.raw`"C:\tools\llama-server.exe" -m "C:\Users\me\.dsh\ai-for-memory\models\Embedding\fake\fake.gguf" --host 127.0.0.1 --port 61175 --embeddings`);
+  assert.equal(windows?.port, 61175);
+  assert.equal(windows?.modelPath, String.raw`C:\Users\me\.dsh\ai-for-memory\models\Embedding\fake\fake.gguf`);
+  const posix = parseLlamaServerCommandLine("/opt/llama.cpp/llama-server -m '/models/Embedding/a b/a.gguf' --port 62136 --reranking");
+  assert.equal(posix?.port, 62136);
+  assert.equal(posix?.modelPath, '/models/Embedding/a b/a.gguf');
+  assert.equal(parseLlamaServerCommandLine('node fake-server.js -m x --port 1'), null);
+  assert.equal(parseLlamaServerCommandLine('llama-server -m x'), null);
+});
+
 test('a failed llama-server start reports its stderr and exact command', async () => {
   const root = tempRoot();
   try {
@@ -4217,6 +4228,69 @@ test('a live llama-server from the previous plugin process is adopted', async ()
     assert.equal(fs.readdirSync(lockDir).filter((name) => name.endsWith('.json')).length, 0);
   } finally {
     if (child && child.exitCode === null) child.kill();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a live engine whose health probe fails stays visible and stoppable', async () => {
+  const root = tempRoot();
+  let child = null;
+  try {
+    const models = path.join(root, 'models');
+    const modelDir = path.join(models, 'Embedding', 'unhealthy');
+    fs.mkdirSync(modelDir, { recursive: true });
+    const modelPath = path.join(modelDir, 'unhealthy.gguf');
+    fs.writeFileSync(modelPath, '');
+    fs.writeFileSync(path.join(modelDir, 'model.json'), JSON.stringify({ model: 'unhealthy' }));
+
+    // This process is alive but never serves /health, simulating a load that
+    // is slower than the adoption timeout.
+    child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    const port = await freePort();
+    fs.writeFileSync(path.join(models, '.engine.lock'), JSON.stringify({
+      version: 1,
+      engines: [{
+        id: 'Embedding/unhealthy',
+        pid: child.pid,
+        port,
+        model: 'unhealthy',
+        modelPath,
+        baseUrl: `http://127.0.0.1:${port}`,
+        command: 'llama-server',
+        startedAt: new Date().toISOString(),
+      }],
+    }));
+
+    const statuses = await restoreLocalEngines({ modelsRoot: models });
+    const unhealthy = statuses.find((row) => row.id === 'Embedding/unhealthy');
+    assert.ok(unhealthy, 'a live process must stay visible after a failed probe');
+    assert.equal(unhealthy.ready, false);
+    assert.equal(unhealthy.pid, child.pid);
+    assert.match(unhealthy.error, /接管探测失败/);
+    // The journal must survive: deleting it here was the orphan bug.
+    const lockDir = path.join(models, '.engine.lock');
+    assert.equal(fs.statSync(lockDir).isDirectory(), true);
+    assert.equal(fs.readdirSync(lockDir).filter((name) => name.endsWith('.json')).length, 1);
+
+    // Starting again must not spawn a second server beside the survivor.
+    const retried = await startLocalEngine({ modelsRoot: models, modelId: 'Embedding/unhealthy' });
+    assert.equal(retried.ok, false);
+    assert.match(retried.error, /仍在运行|健康检查/);
+
+    // Stopping must kill it and only then remove the journal.
+    const stopped = await stopLocalEngine('Embedding/unhealthy');
+    assert.equal(stopped.ok, true, stopped.error);
+    for (let attempt = 0; attempt < 100 && child.exitCode === null && child.signalCode === null; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.ok(child.exitCode !== null || child.signalCode !== null, 'unhealthy process was not terminated');
+    assert.equal(fs.readdirSync(lockDir).filter((name) => name.endsWith('.json')).length, 0);
+  } finally {
+    if (child && child.exitCode === null) child.kill();
+    await stopAllLocalEngines();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

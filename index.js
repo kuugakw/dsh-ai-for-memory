@@ -4056,7 +4056,7 @@ export function apply(ctx, config) {
   // server on a new port while the survivor keeps its VRAM. Adoption never
   // starts or stops a model; lifecycle is an explicit user action.
   try {
-    void restoreLocalEngines();
+    void restoreLocalEngines({ scanProcesses: true });
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error(`[ai-for-memory] 本地引擎接管失败：${error?.message ?? error}`);
