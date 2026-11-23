@@ -1364,6 +1364,16 @@ test('knowledge normalizes categories, ids and duplicates', () => {
   assert.equal(normalizeCategory('errors_fixes'), 'errors_fixes');
   assert.equal(normalizeCategory('behavior_tristate'), 'project_facts');
   assert.equal(normalizeCategory('unknown-thing', 'workflow_rules'), 'workflow_rules');
+  // Inherited object keys must not leak Object.prototype / Function into the
+  // category field.
+  assert.equal(normalizeCategory('__proto__'), 'project_facts');
+  assert.equal(normalizeCategory('constructor'), 'project_facts');
+  assert.equal(normalizeCategory('unknown-thing', '__proto__'), 'project_facts');
+  assert.equal(normalizeCategory(Object.create(null)), 'project_facts');
+  assert.equal(typeof normalizeCategory('constructor'), 'string');
+  const protoCategory = normalizeKnowledge({ text: '分类不能是对象', category: '__proto__' });
+  assert.equal(typeof protoCategory.category, 'string');
+  assert.equal(protoCategory.category, 'project_facts');
   assert.equal(normalizeSource('web'), 'web');
   assert.equal(normalizeSource('mcp'), 'mcp');
   assert.equal(normalizeSource('gui'), 'unknown');

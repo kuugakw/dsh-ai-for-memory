@@ -4,6 +4,10 @@
 
 ## 未发布
 
+### 安全
+
+- **分类字段不能再变成对象或函数**：`normalizeCategory()` 直接读 `CATEGORY_ALIASES[value]`，而 `__proto__` / `constructor` 会命中原型链，返回 `Object.prototype` 或 `Function`，写入后分类字段就不再是字符串。现在只认 `Object.hasOwn()` 的自有别名，且别名必须是已知分类；`fallback` 也限制在已知分类内，无法字符串化的对象回退到 `project_facts`。回归用例覆盖 `__proto__`、`constructor`、对象 fallback 与 `Object.create(null)`。
+
 ### 知识查询
 
 - **单行大对象在 SQLite 分配前拒绝**：`SQL_MAX_ROW_BYTES` 只能在 `iterate()` 拿到行之后检查，`randomblob(134217728)` 仍会先让 RSS 上涨 128 MB。现在为临时库注册有上限的 `randomblob` / `zeroblob` 实现，超过 2 MiB 在分配前抛错；`printf` / `format` 可通过短格式串放大出任意长度的字符串，在只读 SQL 校验和 authorizer 两层直接拒绝。回归用例用 128 MiB 参数验证错误路径，实测 RSS 只增加约 1 MiB。
