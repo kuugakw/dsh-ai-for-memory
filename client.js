@@ -274,6 +274,7 @@ window.__ModuleLoader__.load({
         localModelStop: '停止引擎',
         localModelStopConfirm: '停止这个本地引擎？正在使用它的请求会失败。',
         localModelStopped: '本地引擎已停止',
+        localModelStaleLockStopped: '锁记录已过期；没有杀死这个 PID，已清理锁记录。',
         localModelStopFailed: '停止本地引擎失败',
         localModelCtx: '上下文 ctx-size',
         localModelCtxHint: 'embedding 输入很短，ctx-size 过大会预分配一份常驻 KV cache；按模型能力调小，保存后重启引擎生效。',
@@ -837,6 +838,7 @@ window.__ModuleLoader__.load({
         localModelStop: 'Stop engine',
         localModelStopConfirm: 'Stop this local engine? In-flight requests using it will fail.',
         localModelStopped: 'Local engine stopped',
+        localModelStaleLockStopped: 'The lock was stale; that PID was left alone and the stale lock was removed.',
         localModelStopFailed: 'Failed to stop local engine',
         localModelCtx: 'Context ctx-size',
         localModelCtxHint: 'Embedding inputs are short; a large ctx-size reserves a permanent KV cache. Lower it to the model’s actual need; restart the engine after saving.',
@@ -2764,8 +2766,11 @@ window.__ModuleLoader__.load({
         if (!model) return;
         setLocalModelBusy(model.id);
         try {
-          await callApi('/local-engine/stop', { method: 'POST', body: { model: model.id } });
-          setNotice({ kind: 'ok', text: t.localModelStopped });
+          const stopPayload = await callApi('/local-engine/stop', { method: 'POST', body: { model: model.id } });
+          setNotice({
+            kind: 'ok',
+            text: stopPayload?.stale ? t.localModelStaleLockStopped : t.localModelStopped,
+          });
           await load('');
         } catch (stopError) {
           setNotice({ kind: 'err', text: `${t.localModelStopFailed}: ${String(stopError?.message ?? stopError)}` });
@@ -2823,8 +2828,11 @@ window.__ModuleLoader__.load({
         setLocalModelBusy(model.id);
         setNotice(null);
         try {
-          await callApi('/local-engine/stop', { method: 'POST', body: { model: model.id } });
-          setNotice({ kind: 'ok', text: t.localModelStopped });
+          const stopPayload = await callApi('/local-engine/stop', { method: 'POST', body: { model: model.id } });
+          setNotice({
+            kind: 'ok',
+            text: stopPayload?.stale ? t.localModelStaleLockStopped : t.localModelStopped,
+          });
           await load('');
         } catch (stopError) {
           setNotice({ kind: 'err', text: `${t.localModelStopFailed}: ${String(stopError?.message ?? stopError)}` });

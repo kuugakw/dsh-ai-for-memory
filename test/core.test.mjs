@@ -108,6 +108,32 @@ function freePort() {
   });
 }
 
+/**
+ * A real `llama-server` is not available in CI. Link/copy the current Node
+ * binary under that name so OS process-table identity checks can see the same
+ * executable name they see in production.
+ */
+function fakeLlamaExecutable(root) {
+  const name = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server';
+  const destination = path.join(root, name);
+  try {
+    fs.linkSync(process.execPath, destination);
+  } catch {
+    fs.copyFileSync(process.execPath, destination);
+    fs.chmodSync(destination, 0o755);
+  }
+  return destination;
+}
+
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function fakeExec(cwd) {
   return { agent: { session: { header: { cwd } } } };
 }
@@ -4300,12 +4326,15 @@ test('a live engine whose health probe fails stays visible and stoppable', async
     fs.writeFileSync(path.join(modelDir, 'model.json'), JSON.stringify({ model: 'unhealthy' }));
 
     // This process is alive but never serves /health, simulating a load that
-    // is slower than the adoption timeout.
-    child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+    // is slower than the adoption timeout. It has the llama-server executable
+    // name so the PID-reuse guard can verify it belongs to this engine.
+    const port = await freePort();
+    const binary = fakeLlamaExecutable(root);
+    child = spawn(binary, ['-e', 'setInterval(() => {}, 1000)', '--', '-m', modelPath, '--port', String(port)], {
       stdio: 'ignore',
       windowsHide: true,
     });
-    const port = await freePort();
+    await new Promise((resolve) => setTimeout(resolve, 100));
     fs.writeFileSync(path.join(models, '.engine.lock'), JSON.stringify({
       version: 1,
       engines: [{
@@ -4346,6 +4375,56 @@ test('a live engine whose health probe fails stays visible and stoppable', async
     assert.equal(fs.readdirSync(lockDir).filter((name) => name.endsWith('.json')).length, 0);
   } finally {
     if (child && child.exitCode === null) child.kill();
+    await stopAllLocalEngines();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a recycled PID is not adopted or killed as an engine', async () => {
+  const root = tempRoot();
+  let victim = null;
+  try {
+    const models = path.join(root, 'models');
+    const modelDir = path.join(models, 'Embedding', 'victim');
+    fs.mkdirSync(modelDir, { recursive: true });
+    const modelPath = path.join(modelDir, 'victim.gguf');
+    fs.writeFileSync(modelPath, '');
+    fs.writeFileSync(path.join(modelDir, 'model.json'), JSON.stringify({ model: 'victim' }));
+
+    // Simulates the lock surviving a DSH crash while the OS reassigns its PID
+    // to an unrelated process.
+    victim = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    const port = await freePort();
+    fs.writeFileSync(path.join(models, '.engine.lock'), JSON.stringify({
+      version: 1,
+      engines: [{
+        id: 'Embedding/victim',
+        pid: victim.pid,
+        port,
+        model: 'victim',
+        modelPath,
+        baseUrl: `http://127.0.0.1:${port}`,
+        command: 'llama-server',
+        startedAt: new Date().toISOString(),
+      }],
+    }));
+
+    const statuses = await restoreLocalEngines({ modelsRoot: models });
+    assert.equal(statuses.some((row) => row.id === 'Embedding/victim'), false);
+    // The stale journal is removed, but the unrelated PID is left alone.
+    assert.equal(fs.readdirSync(path.join(models, '.engine.lock'))
+      .filter((name) => name.endsWith('.json')).length, 0);
+    assert.equal(processAlive(victim.pid), true, 'restore killed a recycled PID');
+
+    const stopped = await stopLocalEngine('Embedding/victim');
+    assert.equal(stopped.ok, true);
+    assert.equal(stopped.stopped, false);
+    assert.equal(processAlive(victim.pid), true, 'stop killed a recycled PID');
+  } finally {
+    if (victim && victim.exitCode === null) victim.kill('SIGKILL');
     await stopAllLocalEngines();
     fs.rmSync(root, { recursive: true, force: true });
   }
