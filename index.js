@@ -1280,7 +1280,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           type: 'string',
           enum: ['session', 'shared'],
           description:
-            '写入范围，默认 session=当前对话独立存储（默认不对外开放，其他对话检索不到；需要时在面板逐个打开）；'
+            '写入范围，默认 session=当前对话独立存储（默认不对外开放，其他对话检索不到；可只对指定对话开放，或对全部对话开放）；'
             + 'shared=所有对话共用的共享层（适合跨对话约定、全局事实）。',
         },
         content: {
@@ -1819,7 +1819,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         + '默认跨对话检索本对话、已打开的其他对话与共享层，结果逐条标注来源对话；'
         + '同一事实在多处各存一份时，合并后会折叠成一条（保留最高分，其他来源写成「另见」），不重复占 top_k。'
         + '默认每条只返回查询附近的摘要和全文长度；需要全文时传 detail=full，不要为了浏览而一次性倾倒整篇知识。'
-        + '未打开的对话不可见（默认新建对话不开放，需在面板逐个打开）。'
+        + '未授权的对话不可见：每个对话默认不开放，可在面板只对指定对话开放（可多选），或对全部对话开放。'
         + '需要历史约定、先前决策、错误修复记录或界面事实时先检索，不要凭空猜测。',
       parameters: {
         query: {
@@ -2096,7 +2096,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         + '若这一轮已经结束、没有下一次请求，则在轮末保留最近几轮后清出其余内容。'
         + '每 N 轮的自动整理仍按相似度选择，手动工具始终可用。'
         + '存档默认按对话隔离（每个对话只列出自己的），restore 默认可以跨对话找到别的对话保存过的上下文，'
-        + '但只有已打开的对话可见（新建对话默认不开放）。',
+        + '但只有对本对话授权的对话可见：对方要么对全部对话开放，要么把本对话列进了它的开放名单（新建对话默认不开放）。',
       parameters: {
         action: {
           type: 'string',
@@ -2497,7 +2497,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         + 'compact=对结构有效但物理体积异常膨胀的日志重排 zstd 帧（事件一个不改）；'
         + 'doctor=跨三个存储体检（日志 / workspace.json 索引 / 投影缓存）：序号断层、缺日志、投影比日志新、'
         + '回合没写成收尾，apply=true 时截断断档（需 repairLogs=true）、把过期投影改名归档、'
-        + '并给缺日志的会话写占位日志或清掉索引条目（ghosts=placeholder/prune/keep）；'
+        + '并给缺日志的会话写占位日志或清掉索引条目（ghosts=auto/placeholder/prune/keep）；'
         + '默认只预演，apply=true 才写回。修完要重新打开该对话才会重新加载。'
         + '会话日志修复依赖 Node 22.15+ 的 zstd；Node 20 上其余功能正常，诊断页会显示不可用及校验器回退原因。'
         + '不要修复当前正在进行的对话。',
