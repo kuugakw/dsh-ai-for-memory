@@ -207,7 +207,7 @@ aim_memory action=status
 - 总览补齐六层卡片，并显示 tokenMeter 的**实时上下文占用**（阈值单独保留）；
 - **MCP 出口**：本机 MCP 客户端可列出记忆根并调用现有 `aim_*` 工具；
 - 上下文占用达到阈值时的**全量硬重置**与任务续接；
-- 本地 **llama.cpp 推理引擎**：自动发现 GGUF、由用户在面板显式启动/停止 `llama-server`，支持 BGE-M3 与 BGE Reranker v2 m3；启动失败时面板显示 stderr 尾部、实际命令和针对性修复提示；启动前会把 PID/端口写入用户模型目录的 `.engine.lock/<模型>.json`（一个模型一个文件，并发启动不会覆盖彼此的锁记录），插件重启后自动探测并接管还活着的引擎，不再重复拉起第二份；锁文件丢失时扫描本机 `llama-server` 命令行重新接管；停止会确认 PID 退出，探测失败也不会再删锁留下孤儿进程；**插件关闭/重载不会停掉模型**，只有 DSH 正常退出时才停；模型存在但没开启时，打开面板会弹一次提醒；
+- 本地 **llama.cpp 推理引擎**：自动发现 GGUF、由用户在面板显式启动/停止 `llama-server`，支持 BGE-M3 与 BGE Reranker v2 m3；启动失败时面板显示 stderr 尾部、实际命令和针对性修复提示；启动前会把 PID/端口写入用户模型目录的 `.engine.lock/<模型>.json`（一个模型一个文件，并发启动不会覆盖彼此的锁记录），插件重启后自动探测并接管还活着的引擎，不再重复拉起第二份；面板「llama.cpp → 高级设置（model.json）」可直接改类型、权重路径、ctx-size、端口、pooling、超时、binary 和 `extraArgs`，不用手写配置文件；锁文件丢失时扫描本机 `llama-server` 命令行重新接管；停止会确认 PID 退出，探测失败也不会再删锁留下孤儿进程；**插件关闭/重载不会停掉模型**，只有 DSH 正常退出时才停；模型存在但没开启时，打开面板会弹一次提醒；
 - 设置保存后**自动重载并刷新**，不需要手动重载；
 - 工作区分桶在 Windows / POSIX 上的跨平台解码修复；
 - 外部模型地址默认留空、探活超时 5 秒，未配置时不再连接本地 8080；
@@ -223,7 +223,7 @@ aim_memory action=status
 
 要求 Node.js 20+。会话日志体检/修复依赖 Node 的 zstd，需要 Node 22.15+；在 Node 20 上插件其余功能正常，诊断页会明确标记这一项不可用，而不是等用户点下去才报错。
 
-测试共 189 项；Node 20 上 13 项依赖 `node:sqlite` 或 zstd 的用例按运行时能力跳过（176 pass / 13 skip），另有 2 项使用 shell 包装器的引擎用例只在 POSIX 上运行（Windows 上 174 pass / 15 skip）。Node 22 在 Linux / macOS 全过，Windows 上 186 pass / 3 skip。CI 覆盖 Linux / Windows / macOS × Node 20 / 22。“全绿”指没有失败，不等于每个平台都跑满 189 项。
+测试共 190 项；Node 20 上 13 项依赖 `node:sqlite` 或 zstd 的用例按运行时能力跳过（177 pass / 13 skip），另有 2 项使用 shell 包装器的引擎用例只在 POSIX 上运行（Windows 上 175 pass / 15 skip）。Node 22 在 Linux / macOS 全过，Windows 上 187 pass / 3 skip。CI 覆盖 Linux / Windows / macOS × Node 20 / 22。“全绿”指没有失败，不等于每个平台都跑满 190 项。
 
 ```bash
 npm test

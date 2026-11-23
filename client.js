@@ -291,7 +291,15 @@ window.__ModuleLoader__.load({
         llamaRerankColumn: 'Rerank 模型',
         llamaNoModels: '没有识别出这一类模型。',
         llamaTuneTitle: 'llama.cpp 调参',
-        llamaTuneHint: '这些参数写入模型的 model.json 或根目录 .model-meta.json；保存后点击启动，正在运行的实例不会热改。',
+        llamaAdvancedTitle: '高级设置（model.json）',
+        llamaAdvancedHint: '这些参数写入模型的 model.json 或根目录 .model-meta.json；保存后点击启动，正在运行的实例不会热改。',
+        llamaKind: '模型类型',
+        llamaKindAuto: '自动（按目录或文件名）',
+        llamaModelPath: '权重文件（相对模型目录，留空自动）',
+        llamaModelPathHint: '相对路径按模型文件夹解析；留空时自动找文件夹里的 .gguf。Loose 模型的权重文件固定为根目录下的 GGUF。',
+        llamaConfigFile: '配置文件',
+        llamaConfigFileLoose: '根目录 .model-meta.json',
+        llamaRestartHint: '保存后需停止并重新启动引擎才生效。',
         llamaSelectModel: '选择模型',
         llamaModel: '模型',
         llamaCtx: 'ctx-size',
@@ -451,6 +459,8 @@ window.__ModuleLoader__.load({
         maxClearChars: '清理最多字符',
         autoKnowledge: '自动整理时提炼知识',
         autoKnowledgeLimit: '每次自动提炼上限',
+        autoDecisionLog: '记录每轮自动活动',
+        autoDecisionLogHint: '关闭后不再为每轮工具调用写「常规」决策记录；aim_decide 的风险审查记录不受影响。只影响之后的新记录。',
         retentionTitle: '保留与磁盘',
         stagingRetentionDays: '过程记录保留天数（只删已归档）',
         contextRetentionDays: '上下文存档保留天数（0=永不删）',
@@ -844,7 +854,15 @@ window.__ModuleLoader__.load({
         llamaRerankColumn: 'Rerank models',
         llamaNoModels: 'No model of this type detected.',
         llamaTuneTitle: 'llama.cpp tuning',
-        llamaTuneHint: 'These values are written to the model.json or the root .model-meta.json; save then start. A running instance is not hot-reloaded.',
+        llamaAdvancedTitle: 'Advanced settings (model.json)',
+        llamaAdvancedHint: 'These values are written to the model.json or the root .model-meta.json; save then start. A running instance is not hot-reloaded.',
+        llamaKind: 'Model type',
+        llamaKindAuto: 'Auto (folder or filename)',
+        llamaModelPath: 'Weight file (relative to model folder; empty = auto)',
+        llamaModelPathHint: 'Relative paths resolve inside the model folder; empty finds the .gguf automatically. A Loose model always uses its root GGUF file.',
+        llamaConfigFile: 'Config file',
+        llamaConfigFileLoose: 'root .model-meta.json',
+        llamaRestartHint: 'Stop and start the engine after saving.',
         llamaSelectModel: 'Select model',
         llamaModel: 'Model',
         llamaCtx: 'ctx-size',
@@ -1004,6 +1022,8 @@ window.__ModuleLoader__.load({
         maxClearChars: 'Max chars to clear',
         autoKnowledge: 'Distill knowledge during auto tidy',
         autoKnowledgeLimit: 'Auto-distill items per run',
+        autoDecisionLog: 'Record routine turn activity',
+        autoDecisionLogHint: 'When off, routine tool activity is no longer written as observed decision records; aim_decide risk reviews are unaffected. Only new records are affected.',
         retentionTitle: 'Retention & disk',
         stagingRetentionDays: 'Process log retention days (archived only)',
         contextRetentionDays: 'Context archive retention days (0 = never)',
@@ -1764,6 +1784,7 @@ window.__ModuleLoader__.load({
       const [formMaxClearChars, setFormMaxClearChars] = React.useState(120000);
       const [formAutoKnowledge, setFormAutoKnowledge] = React.useState(true);
       const [formAutoKnowledgeLimit, setFormAutoKnowledgeLimit] = React.useState(10);
+      const [formAutoDecisionLog, setFormAutoDecisionLog] = React.useState(true);
       const [formStagingRetention, setFormStagingRetention] = React.useState(30);
       const [formContextRetention, setFormContextRetention] = React.useState(0);
       const [formDecisionRetention, setFormDecisionRetention] = React.useState(0);
@@ -1813,6 +1834,8 @@ window.__ModuleLoader__.load({
       const [llamaModelId, setLlamaModelId] = React.useState('');
       const lastLlamaConfigKey = React.useRef('');
       const [llamaCtx, setLlamaCtx] = React.useState(2048);
+      const [llamaKind, setLlamaKind] = React.useState('');
+      const [llamaModelPath, setLlamaModelPath] = React.useState('');
       const [llamaPort, setLlamaPort] = React.useState(0);
       const [llamaPooling, setLlamaPooling] = React.useState('');
       const [llamaTimeout, setLlamaTimeout] = React.useState(120000);
@@ -1926,6 +1949,7 @@ window.__ModuleLoader__.load({
           if (Number.isInteger(payload.maxClearChars)) setFormMaxClearChars(payload.maxClearChars);
           if (typeof payload.autoKnowledge === 'boolean') setFormAutoKnowledge(payload.autoKnowledge);
           if (Number.isInteger(payload.autoKnowledgeLimit)) setFormAutoKnowledgeLimit(payload.autoKnowledgeLimit);
+          if (typeof payload.autoDecisionLog === 'boolean') setFormAutoDecisionLog(payload.autoDecisionLog);
           if (Number.isInteger(payload.stagingRetentionDays)) setFormStagingRetention(payload.stagingRetentionDays);
           if (Number.isInteger(payload.contextRetentionDays)) setFormContextRetention(payload.contextRetentionDays);
           if (Number.isInteger(payload.decisionRetentionDays)) setFormDecisionRetention(payload.decisionRetentionDays);
@@ -1990,8 +2014,11 @@ window.__ModuleLoader__.load({
       const localModelRows = (data?.localModels?.categories ?? [])
         .flatMap((category) => (category.models ?? []).map((model) => ({ ...model, category: category.name })));
       const llamaModelKind = (model) => String(model?.kind ?? '').toLowerCase();
-      const llamaModels = localModelRows.filter((model) => model.runnable
-        && ['embedding', 'rerank'].includes(llamaModelKind(model)));
+      const llamaModels = localModelRows.filter((model) => {
+        if (model.engine !== '' && model.engine !== 'llama.cpp') return false;
+        if (['Embedding', 'Rerank'].includes(model.category)) return String(model.modelPath ?? '') !== '';
+        return model.category === 'Loose' && String(model.modelPath ?? '').toLowerCase().endsWith('.gguf');
+      });
       const llamaSelected = llamaModels.find((model) => model.id === llamaModelId) ?? null;
       React.useEffect(() => {
         if (llamaModelId === '' && llamaModels.length > 0) setLlamaModelId(llamaModels[0].id);
@@ -2001,6 +2028,8 @@ window.__ModuleLoader__.load({
       // /state reload, discarding edits that had not been saved yet.
       const llamaConfigKey = llamaSelected ? [
         llamaSelected.id,
+        llamaSelected.kind ?? '',
+        llamaSelected.configuredModelPath ?? '',
         llamaSelected.ctxSize,
         llamaSelected.port,
         llamaSelected.pooling ?? '',
@@ -2015,6 +2044,10 @@ window.__ModuleLoader__.load({
         }
         if (lastLlamaConfigKey.current === llamaConfigKey) return;
         lastLlamaConfigKey.current = llamaConfigKey;
+        setLlamaKind(llamaSelected.kind
+          ? `${String(llamaSelected.kind)[0].toUpperCase()}${String(llamaSelected.kind).slice(1).toLowerCase()}`
+          : '');
+        setLlamaModelPath(llamaSelected.configuredModelPath ?? '');
         setLlamaCtx(llamaSelected.ctxSize > 0 ? llamaSelected.ctxSize : 2048);
         setLlamaPort(llamaSelected.port > 0 ? llamaSelected.port : 0);
         setLlamaPooling(llamaSelected.pooling ?? '');
@@ -2198,6 +2231,7 @@ window.__ModuleLoader__.load({
           maxClearChars: Number(formMaxClearChars) || 120000,
           autoKnowledge: formAutoKnowledge,
           autoKnowledgeLimit: Number(formAutoKnowledgeLimit) || 10,
+          autoDecisionLog: formAutoDecisionLog,
           stagingRetentionDays: Number(formStagingRetention) || 0,
           contextRetentionDays: Number(formContextRetention) || 0,
           decisionRetentionDays: Number(formDecisionRetention) || 0,
@@ -2252,6 +2286,7 @@ window.__ModuleLoader__.load({
           && payload.maxClearChars === body.maxClearChars
           && payload.autoKnowledge === body.autoKnowledge
           && payload.autoKnowledgeLimit === body.autoKnowledgeLimit
+          && payload.autoDecisionLog === body.autoDecisionLog
           && payload.stagingRetentionDays === body.stagingRetentionDays
           && payload.contextRetentionDays === body.contextRetentionDays
           && payload.decisionRetentionDays === body.decisionRetentionDays
@@ -2676,6 +2711,8 @@ window.__ModuleLoader__.load({
             method: 'POST',
             body: {
               model: llamaSelected.id,
+              kind: llamaKind,
+              modelPath: llamaModelPath.trim(),
               ctxSize: Number(llamaCtx),
               port: Number(llamaPort),
               pooling: llamaPooling,
@@ -5269,7 +5306,7 @@ window.__ModuleLoader__.load({
         isSettings && settingsSection === 'llama'
           ? h('section', { style: styles.card },
             h('h3', { style: styles.cardTitle }, t.llamaTuneTitle),
-            h('p', { style: styles.hint }, t.llamaTuneHint),
+            h('p', { style: styles.hint }, t.llamaAdvancedHint),
             h('div', { style: { margin: '2px 0 10px' } },
               h('div', { style: { ...styles.label, marginBottom: '4px' } }, t.engineLifecycle),
               h('div', { style: { display: 'flex', gap: '16px', flexWrap: 'wrap' } },
@@ -5301,9 +5338,34 @@ window.__ModuleLoader__.load({
               },
               llamaModels.length === 0 ? h('option', { value: '' }, t.llamaNoModels) : null,
               llamaModels.map((model) => h('option', { key: model.id, value: model.id },
-                `${model.label}（${model.kind}）`)))),
+                `${model.label}（${model.kind || t.localModelKindUnknown}）`)))),
             llamaSelected
-              ? h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: '8px', marginTop: '8px' } },
+              ? h('div', {
+                style: {
+                  marginTop: '12px', paddingTop: '12px',
+                  borderTop: '1px solid rgba(128,128,128,0.25)',
+                },
+              },
+              h('h4', { style: styles.cardTitle }, t.llamaAdvancedTitle),
+              h('p', { style: { ...styles.hint, margin: '0 0 8px' } },
+                `${t.llamaConfigFile}：${llamaSelected.category === 'Loose'
+                  ? t.llamaConfigFileLoose
+                  : (llamaSelected.manifest || '—')}`),
+              h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: '8px' } },
+                h('label', { style: styles.label }, t.llamaKind,
+                  h('select', {
+                    style: styles.input, value: llamaKind,
+                    onChange: (event) => setLlamaKind(event.target.value),
+                  },
+                  h('option', { value: '' }, t.llamaKindAuto),
+                  ['Embedding', 'Rerank'].map((value) => h('option', { key: value, value }, value)))),
+                h('label', { style: styles.label }, t.llamaModelPath,
+                  h('input', {
+                    style: styles.input, value: llamaModelPath,
+                    placeholder: llamaSelected.modelPath || '',
+                    disabled: llamaSelected.category === 'Loose',
+                    onChange: (event) => setLlamaModelPath(event.target.value),
+                  })),
                 h('label', { style: styles.label }, t.llamaCtx,
                   h('input', {
                     style: styles.input, type: 'number', min: 256, max: 131072, step: 256,
@@ -5336,7 +5398,9 @@ window.__ModuleLoader__.load({
                   h('textarea', {
                     style: { ...styles.input, minHeight: '62px', resize: 'vertical', fontFamily: 'ui-monospace, Consolas, monospace' },
                     value: llamaExtra, onChange: (event) => setLlamaExtra(event.target.value),
-                  })))
+                  }))),
+              h('p', { style: { ...styles.hint, margin: '6px 0 0' } }, t.llamaModelPathHint),
+              h('p', { style: { ...styles.hint, margin: '2px 0 0' } }, t.llamaRestartHint))
               : null,
             h('div', { style: { display: 'flex', gap: '7px', flexWrap: 'wrap', marginTop: '9px', alignItems: 'center' } },
               h('button', {
@@ -5421,6 +5485,21 @@ window.__ModuleLoader__.load({
               style: { ...styles.switchOption, ...(!formAutoKnowledge ? styles.switchOptionOn : {}) },
               onClick: () => setFormAutoKnowledge(false),
             }, t.switchOff)),
+          h('div', { style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.autoDecisionLog),
+            h('button', {
+              type: 'button', role: 'switch', 'aria-checked': formAutoDecisionLog,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(formAutoDecisionLog ? styles.switchOptionOn : {}) },
+              onClick: () => setFormAutoDecisionLog(true),
+            }, t.switchOn),
+            h('button', {
+              type: 'button', role: 'switch', 'aria-checked': !formAutoDecisionLog,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(!formAutoDecisionLog ? styles.switchOptionOn : {}) },
+              onClick: () => setFormAutoDecisionLog(false),
+            }, t.switchOff)),
+          h('p', { style: { ...styles.hint, marginTop: '-4px' } }, t.autoDecisionLogHint),
           h('div', { style: styles.modeRow },
             h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t.requestAnchor),
             h('button', {

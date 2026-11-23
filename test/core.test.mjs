@@ -2912,6 +2912,8 @@ test('config validator accepts defaults and rejects wrong types', () => {
   assert.equal(validator({}).maxClearChars, 120000);
   assert.equal(validator({}).autoKnowledge, true);
   assert.equal(validator({}).autoKnowledgeLimit, 10);
+  assert.equal(validator({}).autoDecisionLog, true);
+  assert.equal(validator({ autoDecisionLog: false }).autoDecisionLog, false);
   assert.equal(validator({}).stagingRetentionDays, 30);
   assert.equal(validator({}).contextRetentionDays, 0);
   assert.equal(validator({}).decisionRetentionDays, 0);
@@ -3912,6 +3914,60 @@ test('local engine resolves GGUF files and builds llama.cpp arguments', () => {
     const routingCategory = catalog.categories.find((category) => category.name === 'Routing');
     assert.equal(routingCategory.models[0].runnable, false);
     assert.match(routingCategory.models[0].error, /预留/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('model config can change modelPath, kind and clear back to auto', () => {
+  const root = tempRoot();
+  try {
+    const models = path.join(root, 'models');
+    const modelDir = path.join(models, 'Embedding', 'fake');
+    fs.mkdirSync(modelDir, { recursive: true });
+    fs.writeFileSync(path.join(modelDir, 'fake.gguf'), '');
+    fs.writeFileSync(path.join(modelDir, 'other.gguf'), '');
+    const manifest = path.join(modelDir, 'model.json');
+    fs.writeFileSync(manifest, JSON.stringify({ model: 'fake', ctxSize: 2048 }));
+
+    const changed = updateModelConfig({
+      modelsRoot: models,
+      modelId: 'Embedding/fake',
+      kind: 'Rerank',
+      modelPath: 'other.gguf',
+    });
+    assert.equal(changed.ok, true, changed.error);
+    assert.equal(changed.kind, 'Rerank');
+    assert.equal(changed.modelPath, 'other.gguf');
+    const saved = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+    assert.equal(saved.kind, 'Rerank');
+    assert.equal(saved.modelPath, 'other.gguf');
+    const resolved = resolveModel({ modelsRoot: models, modelId: 'Embedding/fake' });
+    assert.equal(resolved.ok, true);
+    assert.equal(resolved.model.kind, 'rerank');
+    assert.equal(resolved.model.modelPath, path.join(modelDir, 'other.gguf'));
+
+    // Empty kind means "use the folder/name inference again"; empty modelPath
+    // means "find the weight file automatically".
+    const cleared = updateModelConfig({
+      modelsRoot: models,
+      modelId: 'Embedding/fake',
+      kind: '',
+      modelPath: '',
+    });
+    assert.equal(cleared.ok, true, cleared.error);
+    assert.equal(cleared.kind, 'embedding');
+    const clearedSaved = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+    assert.equal(clearedSaved.kind, undefined);
+    assert.equal(clearedSaved.modelPath, undefined);
+
+    const missing = updateModelConfig({
+      modelsRoot: models,
+      modelId: 'Embedding/fake',
+      modelPath: 'does-not-exist.gguf',
+    });
+    assert.equal(missing.ok, false);
+    assert.match(missing.error, /不存在/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

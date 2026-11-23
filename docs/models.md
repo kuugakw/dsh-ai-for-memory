@@ -72,7 +72,7 @@ Rerank 示例：
 - `Embedding` 和 `Rerank` 是插件当前使用的两类；
 - `engine` 目前支持 `llama.cpp`；有 `.gguf` 时默认即为它；
 - `binary` 可指定 `llama-server`，省略时用 `DSH_LLAMA_SERVER` / `LLAMA_SERVER` 环境变量，再退回 PATH；
-- `modelPath` 相对于模型文件夹；省略时自动找文件夹里的 `.gguf`；
+- `modelPath` 相对于模型文件夹；省略时自动找文件夹里的 `.gguf`；面板「llama.cpp → 高级设置」可直接改，不用手写 `model.json`；
 - `pooling` 用于 Embedding，BGE-M3 建议 `cls`；`ctxSize` 默认 2048（可调，面板每个本地模型旁有 `ctx-size` 输入框；embedding 实际输入很短，过大的 ctx 会白占常驻 KV cache）；`port` 省略时自动选空闲端口；端口被抢占（`EADDRINUSE`）时自动换端口重试最多 3 次，显式 `port` 不重试；
 - 面板里点「启动引擎并填入」会启动 `llama-server`，再填入地址和模型名，仍需点「保存设置」；
 - 生命周期默认是「常闭」：启动/停止都是显式操作，插件加载时只接管已经在跑的 `llama-server`，不会自动启动；**插件关闭再打开（调试）或保存设置后的重载不会停掉它们**，只有 DSH 正常退出（关闭窗口 / 退出应用）时，插件才在进程退出前停掉自己启动或接管的引擎。DSH 被强制结束（任务管理器、崩溃）时子进程可能残留，下次启动会先读锁接管；锁文件也丢了时会扫描本机 `llama-server` 命令行，把模型路径在当前模型目录下的进程重新接管，而不是再起第二份；
