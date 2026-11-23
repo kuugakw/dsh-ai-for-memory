@@ -1374,6 +1374,32 @@ test('knowledge normalizes categories, ids and duplicates', () => {
   const protoCategory = normalizeKnowledge({ text: '分类不能是对象', category: '__proto__' });
   assert.equal(typeof protoCategory.category, 'string');
   assert.equal(protoCategory.category, 'project_facts');
+
+  // Tags: a comma-separated string is accepted, while object/non-string items
+  // must be dropped rather than stringified into "[object Object]".
+  assert.deepEqual(
+    normalizeKnowledge({ text: '标签可以是一条逗号分隔的字符串', tags: 'alpha, beta，gamma' }).tags,
+    ['alpha', 'beta', 'gamma'],
+  );
+  assert.deepEqual(
+    normalizeKnowledge({ text: '标签数组里的脏项要丢掉', tags: [' clean ', { bad: true }, 42, 'clean', ''] }).tags,
+    ['clean'],
+  );
+  assert.deepEqual(normalizeKnowledge({ text: '标签不能是对象', tags: { bad: true } }).tags, []);
+  // Confidence accepts numbers and numeric strings; "high" is invalid input,
+  // not a silent 0.8.
+  assert.equal(normalizeKnowledge({ text: '数字字符串置信度', confidence: '0.7' }).confidence, 0.7);
+  assert.equal(normalizeKnowledge({ text: '缺省置信度', confidence: undefined }).confidence, 0.8);
+  assert.equal(normalizeKnowledge({ text: '置信度上限', confidence: 2 }).confidence, 1);
+  assert.throws(
+    () => normalizeKnowledge({ text: '非法置信度', confidence: 'high' }),
+    /confidence 必须是 0~1 的数字/,
+  );
+  assert.throws(
+    () => normalizeKnowledge({ text: '非法置信度对象', confidence: {} }),
+    /confidence 必须是 0~1 的数字/,
+  );
+
   assert.equal(normalizeSource('web'), 'web');
   assert.equal(normalizeSource('mcp'), 'mcp');
   assert.equal(normalizeSource('gui'), 'unknown');

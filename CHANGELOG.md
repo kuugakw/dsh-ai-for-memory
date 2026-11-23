@@ -4,6 +4,10 @@
 
 ## 未发布
 
+### 知识库
+
+- **`tags` / `confidence` 输入清洗**：`tags` 现在接受字符串数组或逗号分隔字符串，非字符串数组项直接丢弃，不会再被 `String()` 成 `"[object Object]"`；`confidence` 接受数字或数字字符串，`"high"` 等无法解析的值直接报错，不再静默回落 0.8。回归用例覆盖逗号字符串、脏数组项、对象 tags、数字字符串和非法 confidence。
+
 ### 安全
 
 - **分类字段不能再变成对象或函数**：`normalizeCategory()` 直接读 `CATEGORY_ALIASES[value]`，而 `__proto__` / `constructor` 会命中原型链，返回 `Object.prototype` 或 `Function`，写入后分类字段就不再是字符串。现在只认 `Object.hasOwn()` 的自有别名，且别名必须是已知分类；`fallback` 也限制在已知分类内，无法字符串化的对象回退到 `project_facts`。回归用例覆盖 `__proto__`、`constructor`、对象 fallback 与 `Object.create(null)`。
