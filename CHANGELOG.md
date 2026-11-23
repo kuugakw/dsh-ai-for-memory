@@ -6,7 +6,7 @@
 
 ### 本地引擎
 
-- **只认自己 profile 的锁和进程**：`discoverLiveEngines()` 之前只要可执行文件名以 `llama-server` 开头、权重在当前 models 根目录下就认领，两个 DSH profile 共用 models 目录或用户手起过 `llama-server` 时，都会把别人的进程写进本实例的内存 map 和锁，之后停止/清理就可能 SIGKILL 它。现在锁记录带当前 DSH profile 的 `owner`，owner 不匹配的锁不探测、不改写、不删除；锁文件丢失时也只扫描 `ppid === process.pid` 的直接子进程。跨 DSH 重启且锁丢失的孤儿进程不再自动认领，宁可留给人处理，也不把未知进程变成可停止实例。回归用例覆盖其他 profile 的锁、无 owner 的旧锁，以及当前/非当前父进程判定。
+- **只认自己 profile 的锁和进程**：`discoverLiveEngines()` 之前只要可执行文件名以 `llama-server` 开头、权重在当前 models 根目录下就认领，两个 DSH profile 共用 models 目录或用户手起过 `llama-server` 时，都会把别人的进程写进本实例的内存 map 和锁，之后停止/清理就可能 SIGKILL 它。现在锁记录带当前 DSH profile 的 `owner`，owner 不匹配的锁不探测、不改写、不删除；锁文件丢失时也只扫描 `ppid === process.pid` 的直接子进程。`stopAllLocalEngines()` 也只会停当前进程自己 spawn、仍有 child handle 的实例，接管来的 survivor 不参与 dispose。跨 DSH 重启且锁丢失的孤儿进程不再自动认领，宁可留给人处理，也不把未知进程变成可停止实例。回归用例覆盖其他 profile 的锁、无 owner 的旧锁，以及当前/非当前父进程判定。
 - **PID 不再当作进程身份**：锁里只有 PID 时，系统回收 PID 后可能把旧记录指向无关进程；接管探测失败路径和停止路径现在都会先核对命令行里的可执行文件、`-m` 模型路径和 `--port`，核对不上就只清理过期锁，不发信号。健康检查通过的引擎仍可停，自定义 binary 不依赖进程名。`process.once('exit')` 也只杀当前进程自己 spawn 的 child，不再对 map 里的裸 PID 发 SIGKILL。回归用例用 `sleep`/Node 进程模拟 PID 回收，确认 restore 与 stop 都不会杀掉它。
 
 ### 自动活动记录

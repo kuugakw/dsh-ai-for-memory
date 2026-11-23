@@ -4334,6 +4334,12 @@ test('a live llama-server from the previous plugin process is adopted', async ()
     assert.ok(readoptedRow);
     assert.equal(readoptedRow.stale, true);
 
+    // Plugin dispose must not kill an adopted survivor; only an explicit stop
+    // (or a child this process spawned) may signal it.
+    assert.equal(await stopAllLocalEngines(), 0);
+    assert.equal(child.exitCode, null);
+    assert.equal(child.signalCode, null);
+
     // Stopping an adopted engine must terminate the surviving process too.
     const stopped = await stopLocalEngine('Embedding/fake');
     assert.equal(stopped.ok, true, stopped.error);
