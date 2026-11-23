@@ -2666,7 +2666,7 @@ test('cross-conversation search folds the same fact into one hit', async () => {
 
 test('config validator bounds auto settings', () => {
   const defaults = normalizeConfig({});
-  assert.equal(defaults.autoEnabled, false);
+  assert.equal(defaults.autoEnabled, true);
   assert.equal(defaults.autoEveryRounds, 5);
   assert.equal(defaults.contextUsagePercent, 70);
   assert.equal(defaults.maxContextChars, 30000);

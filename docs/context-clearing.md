@@ -143,7 +143,7 @@ DSH 的一次任务不是「一问一答」，而是「一条用户请求 + 很�
 
 | 配置 | 默认 | 当前 profile | 作用与调参建议 |
 |---|---|---|---|
-| `autoEnabled` | `false` | `true` | 总开关；关掉后手动清理和保留策略仍工作 |
+| `autoEnabled` | `true` | `true` | 总开关；关掉后手动清理和保留策略仍工作 |
 | `autoEveryRounds` | `5` | `2` | 每几轮整理一次；越小越省窗口，存档越频繁 |
 | `contextUsagePercent` | `70` | `45` | 占用达到多少时触发；越低越激进，45% 是「任务进行中也不超过一半」的保守值 |
 | `topicalClear` | `true` | `true` | `true` 按相似度选轮次；`false` 走「全量快照 + DSH 原生压缩」 |

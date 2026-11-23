@@ -8,7 +8,7 @@
 
 ### 自动整理
 
-`autoEnabled` 默认**关闭**。打开后，每个 `turn/end` 检查轮次，每次模型请求前检查一次上下文占用：
+`autoEnabled` 默认**开启**（需要时在面板切「手动」，或配置 `autoEnabled: false`）。开启时，每个 `turn/end` 检查轮次，每次模型请求前检查一次上下文占用：
 
 - 每 `autoEveryRounds` 轮（默认 5）触发；或
 - 上下文占用达到 `contextUsagePercent`（默认 70%）触发。

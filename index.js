@@ -85,7 +85,13 @@ export const inject = ['tools'];
 const DEFAULTS = Object.freeze({
   directoryName: '.ai-for-memory',
   root: '',
-  autoEnabled: false,
+  // Context organization is on by default. A long task that never trims its
+  // window eventually passes the model's context limit: the provider rejects
+  // every request and the conversation looks broken, while its early turns were
+  // never archived. Every automatic clear archives first and can be restored, so
+  // the safe default is "keep the window usable" rather than "grow until it
+  // fails"; `autoEnabled: false` turns the whole thing back off.
+  autoEnabled: true,
   autoEveryRounds: 5,
   // Automatic exact snapshots: every N completed turns a recent context window
   // is written to snapshots/. They are cheap, restore any state, and are pruned

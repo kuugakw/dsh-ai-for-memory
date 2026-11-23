@@ -4,6 +4,10 @@
 
 ## 未发布
 
+### 默认配置
+
+- **`autoEnabled` 默认改为 `true`**：上下文自动整理默认开启（每 `autoEveryRounds` 轮或占用到 `contextUsagePercent` 时触发）。长任务不会因为窗口一路涨到发不出请求而「看起来坏掉」；自动清理一律先存档，`aim_context restore` 可调回，不想要时在面板切回「手动」或配置 `autoEnabled: false`。`docs/configuration.md`、`docs/context.md`、`docs/context-clearing.md`、`docs/features.md` 与 README 的默认值同步更新。
+
 ### 会话存储
 
 - **新增 `aim_repair action=doctor`**：把会话日志、`storages/workspace.json` 索引和 `session_projcache` 投影缓存放在一起体检，识别四类失配——序号断层（`seq` 不连续）、回合未收尾、索引里有但磁盘上没有日志、投影比日志新；并比较插件记忆存档里的最新轮次，报告「日志比存档少 N 轮」。默认只预演；`apply=true` 时可截断断档日志（需 `repairLogs=true`）、把过期投影改名归档。缺日志的会话按 `ghosts=auto`（默认）处理：插件记忆里有存档的保留并写占位日志（打开是空对话），没有存档的从索引移除（先备份 `workspace.json`）。

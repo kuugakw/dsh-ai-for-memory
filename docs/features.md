@@ -686,7 +686,7 @@ http://127.0.0.1:<DSH 端口>/ai-for-memory/mcp
 | `knowledgeBackend` | `json` | `json` 或 `sqlite` |
 | `defaultPublic` | `false` | 新对话是否默认对其他对话开放 |
 | `reviewHighRiskOnly` | `true` | 只审查 high，medium 直接放行；false 才审查 medium |
-| `autoEnabled` | `false` | 自动整理总开关 |
+| `autoEnabled` | `true` | 自动整理总开关 |
 | `autoEveryRounds` | 5 | 每几轮自动整理 |
 | `engineLifecycle` | `manual` | 本地引擎运行方式：常闭 / 常开 / 每轮开关（空闲约 2 分钟后释放） |
 | `contextUsagePercent` | 70 | 占用达到多少百分比触发全量重置 |

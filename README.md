@@ -39,7 +39,7 @@ AI for Memory 把这些信息分开保存、按需取回：
 - **知识库**：一条一句、带分类和出处，可以检索、提炼、导出；
 - **可选增强**：SQL 查询、RAG 语义检索、外部 Embedding / Rerank 服务，以及从 `models/` 启动本地 [llama.cpp](https://github.com/ggml-org/llama.cpp) 引擎（BGE-M3 / BGE Reranker v2 m3，不下载权重）。
 
-默认是**轻量模式**：本地规则 + 本地检索，不联网、不需要 API Key。RAG、SQL 持久镜像和外部模型默认关闭；自动快照默认开启，自动整理默认关闭。
+默认是**轻量模式**：本地规则 + 本地检索，不联网、不需要 API Key。RAG、SQL 持久镜像和外部模型默认关闭；自动快照和自动整理默认开启——自动整理每 5 轮或占用达到 70% 时触发，清出前一律先存档，`aim_context restore` 可随时调回，不想要就在面板切「手动」。
 
 ---
 
