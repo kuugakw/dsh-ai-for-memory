@@ -6,7 +6,7 @@
 
 ### 会话存储
 
-- **新增 `aim_repair action=doctor`**：把会话日志、`storages/workspace.json` 索引和 `session_projcache` 投影缓存放在一起体检，识别四类失配——序号断层（`seq` 不连续）、回合未收尾、索引里有但磁盘上没有日志、投影比日志新。默认只预演；`apply=true` 时可截断断档日志（需 `repairLogs=true`）、把过期投影改名归档、给缺日志的会话写占位日志（`ghosts=placeholder`，打开是空对话）或清掉索引条目（`ghosts=prune`，先备份 `workspace.json`）。
+- **新增 `aim_repair action=doctor`**：把会话日志、`storages/workspace.json` 索引和 `session_projcache` 投影缓存放在一起体检，识别四类失配——序号断层（`seq` 不连续）、回合未收尾、索引里有但磁盘上没有日志、投影比日志新；并比较插件记忆存档里的最新轮次，报告「日志比存档少 N 轮」。默认只预演；`apply=true` 时可截断断档日志（需 `repairLogs=true`）、把过期投影改名归档。缺日志的会话按 `ghosts=auto`（默认）处理：插件记忆里有存档的保留并写占位日志（打开是空对话），没有存档的从索引移除（先备份 `workspace.json`）。
 - **测试入口改为 `node --test test/`**，新增 `test/session-doctor.test.mjs`（6 项）：断档截断、占位日志可被校验器接受、索引清理与备份、过期投影归档、预演不写盘、占位日志识别两种 id 写法。
 
 ## 0.5.2（2026-11-23）

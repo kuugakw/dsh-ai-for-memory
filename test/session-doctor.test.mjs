@@ -224,3 +224,68 @@ test('session doctor: placeholder artifact is a valid empty session for any id s
     }
   }
 });
+
+/** Register one memory root holding a scope for `sessionId` reaching `lastTurn`. */
+function writeMemoryScope(home, sessionId, lastTurn) {
+  const root = path.join(home, 'memory');
+  const scope = path.join(root, 'sessions', 's_test');
+  fs.mkdirSync(path.join(scope, 'snapshots'), { recursive: true });
+  fs.writeFileSync(path.join(scope, 'session.json'), `${JSON.stringify({
+    format: 1, session_id: sessionId, key: 's_test', workspace: WORKSPACE,
+  }, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(path.join(scope, 'snapshots', `auto-snapshot-t${lastTurn}_20260101_000000.json`), '{}\n');
+  const registry = path.join(home, 'ai-for-memory', 'roots.json');
+  fs.mkdirSync(path.dirname(registry), { recursive: true });
+  fs.writeFileSync(registry, `${JSON.stringify({
+    version: 1, roots: [{ root, workspace: WORKSPACE, label: '工作区' }],
+  }, null, 2)}\n`, 'utf8');
+  return scope;
+}
+
+test('session doctor: auto keeps archived conversations and prunes the rest', async () => {
+  const home = tempHome();
+  try {
+    writeIndex(home, ['session-kept', 'session-forgotten']);
+    writeMemoryScope(home, 'session-kept', 42);
+
+    const report = await doctorSessions({ env: { DSH_HOME: home }, apply: true });
+    assert.equal(report.ghosts, 'auto');
+    assert.equal(report.counts.missing, 2);
+    assert.equal(report.counts.withMemory, 1);
+    assert.equal(report.plan.keep, 1);
+    assert.equal(report.plan.prune, 1);
+
+    assert.equal(fs.existsSync(path.join(home, 'sessions', BUCKET, 'session-kept', DOCTOR_LOG_NAME)), true);
+    assert.equal(fs.existsSync(path.join(home, 'sessions', BUCKET, 'session-forgotten')), false);
+    const index = readWorkspaceIndex(path.join(home, 'storages', 'workspace.json'));
+    assert.deepEqual(index.doc.tables.workspaces['ws-1'].sessionIds, ['session-kept']);
+    const kinds = report.actions.map((action) => action.kind);
+    assert.deepEqual(kinds, ['placeholder', 'prune']);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('session doctor: a log shorter than its memory store is reported', async () => {
+  const home = tempHome();
+  try {
+    const id = 'session-short';
+    const log = blankLog(id);
+    log.events.push(
+      { type: 'turn/start', seq: 3, time: 1700000000000, data: { turn: 1 } },
+      { type: 'turn/end', seq: 4, time: 1700000000000, data: { turn: 1, reason: { kind: 'completed' } } },
+    );
+    writeLog(home, id, log);
+    writeMemoryScope(home, id, 5);
+
+    const report = await doctorSessions({ env: { DSH_HOME: home } });
+    assert.equal(report.rows[0].state, 'ok');
+    assert.equal(report.rows[0].logLastTurn, 1);
+    assert.equal(report.rows[0].coverageGap, 4);
+    assert.match(report.rows[0].detail, /日志只到第 1 轮，插件存档到第 5 轮（日志少 4 轮）/);
+    assert.equal(report.plan.coverage, 1);
+    assert.match(formatDoctorReport(report), /aim_context restore/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});

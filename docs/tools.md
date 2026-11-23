@@ -181,13 +181,15 @@ DSH 把一个对话摊在三处，任何一处落后都会表现成「对话打�
 - `missing`：索引里有、磁盘上没有日志；
 - `unreadable`：解压或解析失败。
 
+对「日志还在」的会话，`doctor` 还会比一次**覆盖度**：从插件记忆存档的文件名里取最新轮次（`auto-snapshot-t<轮>`、`decision_auto_t<轮>`），日志比存档少时直接写明「日志只到第 N 轮，插件存档到第 M 轮」。这类缺口只能用 `aim_context restore` 把存档调回，日志本身补不回来。
+
 默认只预演，参数含义：
 
 | 参数 | 取值 | 含义 |
 |---|---|---|
 | `apply` | `true` | 真正写盘 |
 | `repairLogs` | `true` | 截断 `gap` 日志到断点，与 `repair` 共用同一条「先备份、写后复验、冲突即放弃」的路径；默认只报告，避免碰到另一个标签页正在写的会话 |
-| `ghosts` | `placeholder`（默认）/ `prune` / `keep` | 缺日志时：写一份占位日志（打开是空对话，正文已丢失）/ 从 `workspace.json` 移除条目（先备份 `workspace.json.bak-<时间戳>`）/ 只报告 |
+| `ghosts` | `auto`（默认）/ `placeholder` / `prune` / `keep` | 缺日志时：`auto` 以插件记忆存档为准——有存档就保留并写占位日志，没有就移除条目；`placeholder` 全部保留（占位日志打开是空对话）；`prune` 全部移除（先备份 `workspace.json.bak-<时间戳>`）；`keep` 只报告 |
 | `cache` | `clear`（默认）/ `keep` | 把比日志新的投影缓存改名成 `.bak-<时间戳>`，让 DSH 重新生成；`keep` 只报告 |
 
 `doctor` 不删除任何会话日志，也不覆盖已存在的日志：占位日志只写在没有日志的会话目录里。

@@ -2491,9 +2491,9 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         },
         ghosts: {
           type: 'string',
-          enum: ['placeholder', 'prune', 'keep'],
-          description: 'doctor 用：缺日志的会话怎么办——placeholder=写占位日志让对话能打开（空对话，默认）、'
-            + 'prune=从 workspace.json 移除这些条目、keep=只报告。',
+          enum: ['auto', 'placeholder', 'prune', 'keep'],
+          description: 'doctor 用：缺日志的会话怎么办——auto=以插件记忆存档为准（有存档就保留并写占位日志，'
+            + '没有就移除条目，默认）、placeholder=全部保留、prune=全部移除、keep=只报告。',
         },
         cache: {
           type: 'string',
@@ -2515,7 +2515,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         if (action === 'doctor') {
           const report = await doctorSessions({
             apply: args?.apply === true,
-            ghosts: typeof args?.ghosts === 'string' ? args.ghosts : 'placeholder',
+            ghosts: typeof args?.ghosts === 'string' ? args.ghosts : 'auto',
             cache: typeof args?.cache === 'string' ? args.cache : 'clear',
             repairLogs: args?.repairLogs === true,
           });
