@@ -436,6 +436,10 @@ window.__ModuleLoader__.load({
         conversationClosed: '不开放',
         conversationOpenHintOn: '其他对话可以通过 aim_search（默认跨对话）和面板「全部对话」读到它。',
         conversationOpenHintOff: '只有本对话能读自己的记忆；其他对话的检索、恢复和合并视图都会跳过它。',
+        conversationViewers: '仅对这些对话开放（可多选）',
+        conversationViewersHint: '只对勾选的对话开放：它们能通过 aim_search（跨对话）和 aim_context restore 读到本对话的存档，其余对话看不见。',
+        conversationViewersAll: '已对全部对话开放；取消勾选「开放」后，才能只挑选允许读取本对话的几个对话。',
+        conversationViewersEmpty: '还没有其他对话可选。',
         conversationFolder: '记忆文件夹',
         saveConversation: '保存对话设置',
         conversationSaved: '对话设置已保存',
@@ -1000,6 +1004,10 @@ window.__ModuleLoader__.load({
         conversationClosed: 'Closed',
         conversationOpenHintOn: 'Other conversations can read it through aim_search (cross-conversation by default) and the "All conversations" view.',
         conversationOpenHintOff: 'Only this conversation can read its memory; other conversations skip it in search, restore and merged views.',
+        conversationViewers: 'Open only to these conversations (multi-select)',
+        conversationViewersHint: 'Only the checked conversations may read this one through aim_search (cross-conversation) and aim_context restore; everyone else is skipped.',
+        conversationViewersAll: 'Open to every conversation. Switch to "Closed" to pick the few conversations allowed to read it.',
+        conversationViewersEmpty: 'No other conversation to choose yet.',
         conversationFolder: 'Memory folder',
         saveConversation: 'Save conversation',
         conversationSaved: 'Conversation settings saved',
@@ -1849,6 +1857,9 @@ window.__ModuleLoader__.load({
       const [formContextExternal, setFormContextExternal] = React.useState(false);
       const [formName, setFormName] = React.useState('');
       const [formPublic, setFormPublic] = React.useState(true);
+  // Session ids this conversation is open to when it is not public. Kept next to
+  // the open/closed switch because both are saved by the same card.
+  const [formViewers, setFormViewers] = React.useState([]);
       const [saving, setSaving] = React.useState(false);
       const [sessionSaving, setSessionSaving] = React.useState(false);
       const [verifyingId, setVerifyingId] = React.useState('');
@@ -1976,6 +1987,7 @@ window.__ModuleLoader__.load({
           const selected = payload?.selectedSession ?? null;
           setFormName(selected?.label ?? '');
           setFormPublic(selected?.public === true);
+          setFormViewers(Array.isArray(selected?.viewers) ? [...selected.viewers] : []);
           applyScope({
             kind: typeof payload.scope === 'string' ? payload.scope : kind,
             key: payload?.selectedSession?.key ?? (kind === 'session' ? (active?.key ?? null) : null),
@@ -2571,6 +2583,7 @@ window.__ModuleLoader__.load({
               session: selectedSession.key,
               label: formName.trim(),
               public: formPublic,
+              viewers: formPublic ? [] : formViewers,
             },
           });
           setNotice({ kind: 'ok', text: t.conversationSaved });
@@ -4789,6 +4802,39 @@ window.__ModuleLoader__.load({
                     onClick: () => setFormPublic(false),
                   }, t.conversationClosed)))),
             h('p', { style: styles.hint }, formPublic ? t.conversationOpenHintOn : t.conversationOpenHintOff),
+            formPublic
+              ? h('p', { style: styles.hint }, t.conversationViewersAll)
+              : h('div', { style: styles.label },
+                t.conversationViewers,
+                h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+                  conversationRows.filter((row) => row.key !== selectedSession.key).length === 0
+                    ? h('span', { style: styles.hint }, t.conversationViewersEmpty)
+                    : conversationRows
+                      .filter((row) => row.key !== selectedSession.key)
+                      .map((row) => {
+                        // Grants are stored as Session ids; rows persisted before
+                        // this feature may only carry a key, so accept both on read.
+                        const id = row.sessionId || row.key;
+                        const checked = formViewers.includes(id) || formViewers.includes(row.key);
+                        return h('label', {
+                          key: row.key,
+                          style: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' },
+                        }, h('input', {
+                          type: 'checkbox',
+                          checked,
+                          onChange: () => setFormViewers((current) => {
+                            const next = new Set(current);
+                            if (next.has(id) || next.has(row.key)) {
+                              next.delete(id);
+                              next.delete(row.key);
+                            } else {
+                              next.add(id);
+                            }
+                            return [...next];
+                          }),
+                        }), h('span', null, conversationName(row)));
+                      })),
+                h('p', { style: styles.hint }, t.conversationViewersHint)),
             h('div', { style: styles.meta },
               h('span', { style: styles.mono }, `${t.conversationFolder}: sessions/${selectedSession.key}`),
               selectedSession.sessionId

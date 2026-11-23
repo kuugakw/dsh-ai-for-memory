@@ -4,6 +4,12 @@
 
 ## 未发布
 
+### 对话访问控制
+
+- **新增「只对指定对话开放」**：每个对话除了「不开放 / 对全部对话开放」，现在还可以勾选若干个对话，只对它们开放（`viewers` 里存 Session id，可多选，最多 50 个）。面板的「当前对话」卡片在关闭状态下显示可勾选的对话列表；`session.json` 里 `public: true` 优先于 `viewers`，关闭（不开放）会清空 `viewers`，避免留下旧授权。
+- **可见性规则统一到一处**：`aim_search`（跨对话检索）、`aim_context` 的 list/restore、`aim_memory` 的 sessions 统计、面板的合并视图与状态接口，全部改为「本对话 / public / 被点名的 viewers」三选一，未授权的对话不出现、也不泄露名字和规模。
+- 新增 `test/conversation-access.test.mjs`（4 项）：allowlist 规范化（去重、去空、去自己、trim）、可见性判定、跨对话检索范围、统计口径。
+
 ### 默认配置
 
 - **`autoEnabled` 默认改为 `true`**：上下文自动整理默认开启（每 `autoEveryRounds` 轮或占用到 `contextUsagePercent` 时触发）。长任务不会因为窗口一路涨到发不出请求而「看起来坏掉」；自动清理一律先存档，`aim_context restore` 可调回，不想要时在面板切回「手动」或配置 `autoEnabled: false`。`docs/configuration.md`、`docs/context.md`、`docs/context-clearing.md`、`docs/features.md` 与 README 的默认值同步更新。

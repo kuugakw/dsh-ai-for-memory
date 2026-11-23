@@ -479,6 +479,33 @@ export function conversationLabel(row, ownKey = '') {
 }
 
 /**
+ * Whether one conversation may read another one's memory.
+ *
+ * Three grants, widest last:
+ *
+ * - a conversation always reads itself;
+ * - `public: true` opens it to every conversation (the original behaviour);
+ * - `viewers: [session-id …]` opens it to a named list only, which is what
+ *   "A 只对 B 开放" means: B may search and restore A's archives, C may not.
+ *
+ * The reader is matched by Session id and by conversation key, so a grant keeps
+ * working whether it was stored from the panel (id) or from an older row (key).
+ *
+ * @param {{key?: string, sessionId?: string, public?: boolean, viewers?: string[]}} row
+ * @param {string|null} readerKey - conversation key of the caller
+ * @param {string} readerSessionId - Session id of the caller
+ */
+export function scopeVisibleTo(row, readerKey, readerSessionId) {
+  if (row === null || typeof row !== 'object') return false;
+  if (readerKey !== null && row.key === readerKey) return true;
+  if (row.public === true) return true;
+  const viewers = Array.isArray(row.viewers) ? row.viewers : [];
+  if (viewers.length === 0) return false;
+  if (readerKey !== null && viewers.includes(readerKey)) return true;
+  return readerSessionId !== '' && viewers.includes(readerSessionId);
+}
+
+/**
  * Every readable source for one call, in read order.
  *
  * `session` = only the calling conversation (falls back to shared when the call
@@ -507,11 +534,11 @@ export function memorySources(context, scope = 'session') {
   const sources = own ? [own] : [];
   for (const row of scopes.listSessions()) {
     if (ownKey !== null && row.key === ownKey) continue;
-    // A conversation that is not open is invisible to every other conversation:
-    // no cross-conversation search, no restored contexts, no merged panel view.
-    // Only explicitly-opened conversations are visible across scopes; a missing
-    // `public` field is private, not open.
-    if (row.public !== true) continue;
+    // A conversation that is not open to this caller is invisible: no
+    // cross-conversation search, no restored contexts, no merged panel view.
+    // `public` opens it to everyone; `viewers` opens it to a named list only; a
+    // missing field is private, not open.
+    if (!scopeVisibleTo(row, ownKey, sessionId)) continue;
     sources.push({
       store: scopes.sessionStore(row.key),
       scope: 'session',
@@ -526,22 +553,22 @@ export function memorySources(context, scope = 'session') {
 }
 
 /**
- * Conversations the caller may read: its own plus every open one.
+ * Conversations the caller may read: its own plus every one it was granted.
  *
- * Used by the status/sessions summaries so a closed conversation never leaks
- * its name or size to another conversation.
+ * Used by the status/sessions summaries so a conversation the caller was not
+ * granted never leaks its name or size.
  */
 export function readableConversations(context) {
   const { scopes, sessionId } = context;
   const ownKey = sessionId === '' ? null : sessionKey(sessionId);
-  return scopes.listSessions().filter((row) => row.key === ownKey || row.public === true);
+  return scopes.listSessions().filter((row) => scopeVisibleTo(row, ownKey, sessionId));
 }
 
 /** Count of conversations hidden from this caller by their access setting. */
 export function closedConversationCount(context) {
   const { scopes, sessionId } = context;
   const ownKey = sessionId === '' ? null : sessionKey(sessionId);
-  return scopes.listSessions().filter((row) => row.key !== ownKey && row.public !== true).length;
+  return scopes.listSessions().filter((row) => !scopeVisibleTo(row, ownKey, sessionId)).length;
 }
 
 /** The one store a write targets. */
@@ -2281,7 +2308,10 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             const counts = row.counts;
             lines.push(`- ${conversationLabel(row, source.scope === 'session' ? source.key : '')}｜${row.key}`
               + `｜过程记录 ${counts.staging}，归档 ${counts.archive}，快照 ${counts.snapshots}，知识库 ${counts.knowledge}，决策 ${counts.decisions}，上下文 ${counts.contexts}`
-              + `｜最近 ${row.updatedAt || '未知'}${row.public !== true ? '｜未对外开放' : ''}`);
+              + `｜最近 ${row.updatedAt || '未知'}`
+              + (row.public === true
+                ? '｜对全部对话开放'
+                : (row.viewers?.length > 0 ? `｜对 ${row.viewers.length} 个对话开放` : '｜未对外开放')));
           }
           const shared = context.scopes.sharedCounts();
           lines.push(`共享层：过程记录 ${shared.staging}，归档 ${shared.archive}，知识库 ${shared.knowledge}，上下文 ${shared.contexts}`);
