@@ -31,15 +31,18 @@ Release 标题**只写版本号**（如 `0.1.1`），不写「第 N 个正式版
 
 1. 跑完测试；
 2. 按重大/功能/修复位更新 `package.json` 和 README 徽章；
-3. 提交发布改动；
-4. 创建对应的 Git tag 和 GitHub Release；
-5. 推送提交与 tag。
+3. 提交发布改动，打 `v*` tag；
+4. 推送提交与 tag：CI 跑测试、发布到 npm（带 provenance），并在成功后自动创建 GitHub Release；不需要手工建 Release，也不需要 PAT。
 
 ### npm 发布
 
 npm 上的包名是 `dsh-ai-for-memory`；`package.json` 已移除 `private`，并限制 `files` 只打包入口、lib、文档、locale、示例模型 README 和许可证，`models/.engine.lock` 不会被发布。
 
 首版 `0.5.1` 已手动发布。包现已配置 GitHub Actions Trusted Publisher：仓库 `kuugakw/dsh-ai-for-memory`，workflow 文件名 `publish.yml`，允许 `npm publish`。后续发布只需要推送 `v*` tag，`.github/workflows/publish.yml` 会跑测试并通过 OIDC 发布，自动生成 npm provenance；需要 npm CLI 11.5.1+、Node 22.14+、公开仓库和匹配的 `repository`。workflow 需要 `id-token: write`，不需要 `NODE_AUTH_TOKEN`。
+
+同一个 workflow 在 `npm publish` 成功后用 `GITHUB_TOKEN`（`contents: write`）自动创建 GitHub Release，标题与 tag 一致、正文由 GitHub 生成；Release 创建在发布之后，发布失败不会留下指向空版本的 Release。
+
+`0.0.0-stage` 是首次发布流程留下的占位版本，已用 `npm deprecate` 标记废弃（该操作需要 npm 账号的一次性验证码，CI 的 OIDC 令牌不能代替）。
 
 本地手工发布仍可用 `npm publish --dry-run` 检查包内容，再 `npm publish`；本地发布必须满足 npm 的 2FA 要求，且不会生成 CI provenance。
 
@@ -50,7 +53,7 @@ npm 上的包名是 `dsh-ai-for-memory`；`package.json` 已移除 `private`，�
 ```bash
 npm test
 # 等价于
-node --test test/core.test.mjs
+node --test test/core.test.mjs test/session-doctor.test.mjs test/conversation-access.test.mjs
 ```
 
 当前测试覆盖六层读写、对话隔离、上下文清理/恢复、知识冲突、模型自述确认、事故记录、SQL 路由、RAG 构建、导出、面板数据组装，以及本地引擎的 GGUF 发现和 llama.cpp 启动参数等。
