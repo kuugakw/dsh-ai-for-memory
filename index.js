@@ -75,6 +75,7 @@ import {
   resolveSessionLogTarget,
   scanSessionLogs,
 } from './lib/session-repair.js';
+import { doctorSessions, formatDoctorReport } from './lib/session-doctor.js';
 
 export const name = 'dsh-ai-for-memory';
 
@@ -2458,6 +2459,9 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         + 'repair=修复一份日志：先备份原文件，再优先把旧版插件写入的游离 developer 便条改写成等价的 user 便条'
         + '（保留全部历史），否则截断到第一处损坏之前并用 DSH 自带的合成收尾事件补全回合；'
         + 'compact=对结构有效但物理体积异常膨胀的日志重排 zstd 帧（事件一个不改）；'
+        + 'doctor=跨三个存储体检（日志 / workspace.json 索引 / 投影缓存）：序号断层、缺日志、投影比日志新、'
+        + '回合没写成收尾，apply=true 时截断断档（需 repairLogs=true）、把过期投影改名归档、'
+        + '并给缺日志的会话写占位日志或清掉索引条目（ghosts=placeholder/prune/keep）；'
         + '默认只预演，apply=true 才写回。修完要重新打开该对话才会重新加载。'
         + '会话日志修复依赖 Node 22.15+ 的 zstd；Node 20 上其余功能正常，诊断页会显示不可用及校验器回退原因。'
         + '不要修复当前正在进行的对话。',
@@ -2465,8 +2469,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         action: {
           type: 'string',
           required: true,
-          enum: ['scan', 'repair', 'compact'],
-          description: 'scan=体检会话日志（deep=true 时解压校验）；repair=修复一份（session 必填）；compact=只重排帧缩小物理体积。',
+          enum: ['scan', 'repair', 'compact', 'doctor'],
+          description: 'scan=体检会话日志（deep=true 时解压校验）；repair=修复一份（session 必填）；compact=只重排帧缩小物理体积；doctor=跨日志/索引/投影体检并可修复（apply=true）。',
         },
         session: {
           type: 'string',
@@ -2483,7 +2487,22 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         },
         apply: {
           type: 'boolean',
-          description: 'repair/compact 用：true 才真正写回；默认 false 只返回预演结果。',
+          description: 'repair/compact/doctor 用：true 才真正写回；默认 false 只返回预演结果。',
+        },
+        ghosts: {
+          type: 'string',
+          enum: ['placeholder', 'prune', 'keep'],
+          description: 'doctor 用：缺日志的会话怎么办——placeholder=写占位日志让对话能打开（空对话，默认）、'
+            + 'prune=从 workspace.json 移除这些条目、keep=只报告。',
+        },
+        cache: {
+          type: 'string',
+          enum: ['clear', 'keep'],
+          description: 'doctor 用：clear=把比日志新的投影缓存改名归档（默认）、keep=只报告。',
+        },
+        repairLogs: {
+          type: 'boolean',
+          description: 'doctor 用：true 才截断序号断层的日志；默认只报告，避免碰到另一个标签页正在写的会话。',
         },
       },
       async execute(args, exec) {
@@ -2492,6 +2511,15 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         if (action === 'scan') {
           const scan = await scanSessionLogs(sessionsDir, { deep: args?.deep === true });
           return formatScanReport(scan, { limit: 40 });
+        }
+        if (action === 'doctor') {
+          const report = await doctorSessions({
+            apply: args?.apply === true,
+            ghosts: typeof args?.ghosts === 'string' ? args.ghosts : 'placeholder',
+            cache: typeof args?.cache === 'string' ? args.cache : 'clear',
+            repairLogs: args?.repairLogs === true,
+          });
+          return formatDoctorReport(report);
         }
         if (action !== 'repair' && action !== 'compact') throw new Error(`未知 action：${String(action)}`);
         const target = resolveSessionLogTarget(sessionsDir, args?.session);

@@ -159,8 +159,38 @@ DSH 把每个对话写成 `~/.dsh/sessions/<工作区分桶>/<会话>/session.v<
 | `scan` | 可选 `deep` | 列出所有会话日志：物理/逻辑大小、事件数、结构状态、异常膨胀标记。`deep=true` 会解压并逐个事件校验（大日志较慢） |
 | `repair` | `session` 必填；可选 `strategy`、`apply` | 修复一份日志。默认只预演；`apply=true` 才写回 |
 | `compact` | `session` 必填；可选 `apply` | 对结构有效的日志重排 zstd 帧（DSH 每次追加一批就写一个帧，长对话会积累上万个碎帧）；事件一个不改，只缩小物理体积 |
+| `doctor` | 可选 `apply`、`ghosts`、`cache`、`repairLogs` | 跨「日志 / `workspace.json` 索引 / 投影缓存」三处体检并修复：序号断层、缺日志、投影比日志新、回合没写成收尾 |
 
 `session` 接受 `session-<uuid>`、裸 uuid、唯一前缀，或 `.zstd` 的绝对路径。
+
+#### `doctor`：三处存储对不上时先体检
+
+DSH 把一个对话摊在三处，任何一处落后都会表现成「对话打不开 / 显示空白 / 侧栏有但点开报缺少日志」：
+
+| 位置 | 作用 | 失配时的界面表现 |
+|---|---|---|
+| `sessions/<分桶>/<会话>/session.v<N>.jsonl.zstd` | 正文（唯一真源） | — |
+| `storages/workspace.json` | 侧栏列出的会话索引 | 列出但打不开（缺日志） |
+| `storages/session_projcache/sessions/<会话>.json` | 投影缓存 | 侧栏/统计里的轮次、token 与日志对不上 |
+
+`doctor` 取三处的并集，给每个会话一个状态：
+
+- `ok`：序号连续，且回合已收尾（本来就是空对话也算 ok）；
+- `gap`：`seq` 不连续。典型成因是「把旧日志复制回来」时，仍在运行的 DSH 宿主用内存里的编号（例如 77248）接在恢复的前缀（53239）后面，于是整份日志被读取器拒绝；
+- `open`：日志停在回合中间（写入被打断）；
+- `missing`：索引里有、磁盘上没有日志；
+- `unreadable`：解压或解析失败。
+
+默认只预演，参数含义：
+
+| 参数 | 取值 | 含义 |
+|---|---|---|
+| `apply` | `true` | 真正写盘 |
+| `repairLogs` | `true` | 截断 `gap` 日志到断点，与 `repair` 共用同一条「先备份、写后复验、冲突即放弃」的路径；默认只报告，避免碰到另一个标签页正在写的会话 |
+| `ghosts` | `placeholder`（默认）/ `prune` / `keep` | 缺日志时：写一份占位日志（打开是空对话，正文已丢失）/ 从 `workspace.json` 移除条目（先备份 `workspace.json.bak-<时间戳>`）/ 只报告 |
+| `cache` | `clear`（默认）/ `keep` | 把比日志新的投影缓存改名成 `.bak-<时间戳>`，让 DSH 重新生成；`keep` 只报告 |
+
+`doctor` 不删除任何会话日志，也不覆盖已存在的日志：占位日志只写在没有日志的会话目录里。
 
 修复策略：
 
