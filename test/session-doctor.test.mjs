@@ -4,13 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { encodeZstdLog, readSessionLog, validateSessionEvents } from '../lib/session-repair.js';
+import { encodeZstdLog, readSessionLog, validateSessionEvents, zstdAvailable } from '../lib/session-repair.js';
 import {
   DOCTOR_LOG_NAME, doctorSessions, formatDoctorReport, placeholderArtifact, readProjection, readWorkspaceIndex,
 } from '../lib/session-doctor.js';
 
 const BUCKET = '--D-ai-~5DE5~4F5C~533A--';
 const WORKSPACE = 'D:\\ai\\工作区';
+// Writing a session artifact needs zstd (Node 22.15+); the CI matrix also runs Node 20.
+const skipZstd = zstdAvailable() ? false : 'requires Node 22.15+ (zstd)';
 
 function tempHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'aim-doctor-'));
@@ -91,7 +93,7 @@ function writeProjection(home, id, seq) {
   return file;
 }
 
-test('session doctor: reports a seq gap and truncates it only when asked', async () => {
+test('session doctor: reports a seq gap and truncates it only when asked', { skip: skipZstd }, async () => {
   const home = tempHome();
   try {
     const id = 'session-gap';
@@ -120,7 +122,7 @@ test('session doctor: reports a seq gap and truncates it only when asked', async
   }
 });
 
-test('session doctor: a missing log gets a placeholder so the conversation opens', async () => {
+test('session doctor: a missing log gets a placeholder so the conversation opens', { skip: skipZstd }, async () => {
   const home = tempHome();
   try {
     const id = 'session-ghost';
@@ -147,7 +149,7 @@ test('session doctor: a missing log gets a placeholder so the conversation opens
   }
 });
 
-test('session doctor: prune removes the dangling index entry and keeps a backup', async () => {
+test('session doctor: prune removes the dangling index entry and keeps a backup', { skip: skipZstd }, async () => {
   const home = tempHome();
   try {
     const file = writeIndex(home, ['session-ghost', 'session-alive']);
@@ -171,7 +173,7 @@ test('session doctor: prune removes the dangling index entry and keeps a backup'
   }
 });
 
-test('session doctor: a projection ahead of its log is moved aside', async () => {
+test('session doctor: a projection ahead of its log is moved aside', { skip: skipZstd }, async () => {
   const home = tempHome();
   try {
     const id = 'session-ahead';
@@ -193,7 +195,7 @@ test('session doctor: a projection ahead of its log is moved aside', async () =>
   }
 });
 
-test('session doctor: a dry run writes nothing at all', async () => {
+test('session doctor: a dry run writes nothing at all', { skip: skipZstd }, async () => {
   const home = tempHome();
   try {
     writeIndex(home, ['session-ghost']);
@@ -210,7 +212,7 @@ test('session doctor: a dry run writes nothing at all', async () => {
   }
 });
 
-test('session doctor: placeholder artifact is a valid empty session for any id shape', async () => {
+test('session doctor: placeholder artifact is a valid empty session for any id shape', { skip: skipZstd }, async () => {
   for (const id of ['0f0e0d0c-0000-4000-8000-000000000000', 'session-0f0e0d0c-0000-4000-8000-000000000000']) {
     const dir = tempHome();
     try {
@@ -242,7 +244,7 @@ function writeMemoryScope(home, sessionId, lastTurn) {
   return scope;
 }
 
-test('session doctor: auto keeps archived conversations and prunes the rest', async () => {
+test('session doctor: auto keeps archived conversations and prunes the rest', { skip: skipZstd }, async () => {
   const home = tempHome();
   try {
     writeIndex(home, ['session-kept', 'session-forgotten']);
@@ -266,7 +268,7 @@ test('session doctor: auto keeps archived conversations and prunes the rest', as
   }
 });
 
-test('session doctor: a log shorter than its memory store is reported', async () => {
+test('session doctor: a log shorter than its memory store is reported', { skip: skipZstd }, async () => {
   const home = tempHome();
   try {
     const id = 'session-short';
