@@ -2,7 +2,14 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
-## 未发布
+## 0.5.3（2026-11-23）
+
+### 发布与包元数据
+
+- **npm 只从 0.5.1 起发**：0.5.0 及更早版本只在 GitHub Releases，README 顶部已写明这一点；npm 上不补发历史版本。
+- **包内补上 `test/`**：`files` 增加 `test`。此前 `scripts.test` 指向 `test/core.test.mjs`，但 `test/` 不在包里，`npm i` 之后跑 `npm test` 直接 ENOENT；现在装上就能真正运行测试。
+- **README 链接修正**：「Version」徽章原来指向相对路径 `package.json`，npm 页面不提供该文件预览，点击必然 404；改为指向 GitHub Releases，徽章版本号与发布同步。
+- **`0.0.0-stage` 标记废弃**：首次发布流程留下的占位版本已 `npm deprecate`，不会再被误装。
 
 ### 对话访问控制
 
