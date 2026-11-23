@@ -44,7 +44,7 @@ import { applyDisclosure, buildIndex, RRF_K, reciprocalRankFusion, search, snipp
 import { BoundedCache, CATEGORIES, appendJsonLine, dshHome, hourKey, listJsonlFiles, writeJson } from '../lib/util.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
-import { buildServerArgs, findModelFile, localEngineStatus, missingLocalEngineKinds, parseLlamaServerCommandLine, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig, autoStartSkips, clearAutoStartSkip, noteAutoStartSkip } from '../lib/local-engine.js';
+import { ENGINE_OWNER, isCurrentDshChild, buildServerArgs, findModelFile, localEngineStatus, missingLocalEngineKinds, parseLlamaServerCommandLine, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig, autoStartSkips, clearAutoStartSkip, noteAutoStartSkip } from '../lib/local-engine.js';
 import { configuredEndpointBase, configuredEndpointIsDedicated, createEndpointGate } from '../lib/engine-gate.js';
 import {
   commitSync, initSync, pullSync, pushSync, readSyncConfig, syncStatus, writeSyncConfig,
@@ -4292,6 +4292,7 @@ test('a live llama-server from the previous plugin process is adopted', async ()
       version: 1,
       engines: [{
         id: 'Embedding/fake',
+        owner: ENGINE_OWNER,
         pid: child.pid,
         port,
         model: 'fake',
@@ -4348,6 +4349,47 @@ test('a live llama-server from the previous plugin process is adopted', async ()
   }
 });
 
+test('engine ownership is scoped to this DSH profile, not a shared models root', async () => {
+  assert.equal(isCurrentDshChild({ ppid: process.pid }), true);
+  assert.equal(isCurrentDshChild({ ppid: process.pid + 1 }), false);
+  assert.equal(isCurrentDshChild({}), false);
+
+  const root = tempRoot();
+  try {
+    const models = path.join(root, 'models');
+    const modelDir = path.join(models, 'Embedding', 'shared');
+    fs.mkdirSync(modelDir, { recursive: true });
+    const modelPath = path.join(modelDir, 'shared.gguf');
+    fs.writeFileSync(modelPath, '');
+    fs.writeFileSync(path.join(modelDir, 'model.json'), JSON.stringify({ model: 'shared' }));
+    const lockFile = path.join(models, '.engine.lock');
+    const row = {
+      id: 'Embedding/shared',
+      pid: process.pid,
+      port: await freePort(),
+      model: 'shared',
+      modelPath,
+      baseUrl: 'http://127.0.0.1:1',
+      command: 'llama-server',
+      startedAt: new Date().toISOString(),
+    };
+    // Another profile's row: do not adopt it and do not delete its journal.
+    fs.writeFileSync(lockFile, JSON.stringify({
+      version: 1,
+      engines: [{ ...row, owner: 'another-profile' }],
+    }));
+    assert.deepEqual(await restoreLocalEngines({ modelsRoot: models }), []);
+    assert.equal(fs.existsSync(lockFile), true);
+
+    // A legacy row has no owner; with no matching child, leave it alone too.
+    fs.writeFileSync(lockFile, JSON.stringify({ version: 1, engines: [row] }));
+    assert.deepEqual(await restoreLocalEngines({ modelsRoot: models }), []);
+    assert.equal(fs.existsSync(lockFile), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a recycled PID is not adopted or killed as an engine', async () => {
   const root = tempRoot();
   let victim = null;
@@ -4370,6 +4412,7 @@ test('a recycled PID is not adopted or killed as an engine', async () => {
       version: 1,
       engines: [{
         id: 'Embedding/victim',
+        owner: ENGINE_OWNER,
         pid: victim.pid,
         port,
         model: 'victim',
