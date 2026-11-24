@@ -32,14 +32,20 @@ jobs:
 
       - name: Wait until npm serves this version
         run: |
+          set -euo pipefail
           version=$(node -p "require('./package.json').version")
-          for _ in $(seq 1 30); do
-            if npm view "dsh-ai-for-memory@$version" version >/dev/null 2>&1; then
+          # The registry CDN can lag several minutes behind a successful publish.
+          # Query the version endpoint directly (no npm cache) and allow 10 min.
+          url="https://registry.npmjs.org/dsh-ai-for-memory/$version"
+          for _ in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)
+            if [ "$code" = "200" ]; then
+              echo "npm serves $version"
               exit 0
             fi
             sleep 10
           done
-          echo "npm never served dsh-ai-for-memory@$version" >&2
+          echo "npm never served dsh-ai-for-memory@$version (last HTTP $code)" >&2
           exit 1
 
       - name: Build index
