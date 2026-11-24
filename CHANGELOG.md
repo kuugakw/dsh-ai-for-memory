@@ -2,12 +2,21 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
-## 未发布
+## 0.5.4（2026-11-24）
+
+### npm 检索
+
+- **关键词补齐 `ai-memory`、`agent-memory`、`llm-memory`、`mcp-server`**：npm 搜索按包名 + keywords 匹配，此前只有 `context`、`compaction`、`repair` 这类功能词，搜 “memory”、“mcp”、“agent memory” 基本命中不到；现在与 `dsh`、`dsh-plugin`、`memory` 一起覆盖常见搜法，`npm search memory` / `mcp` 能搜到。
 
 ### 发布渠道
 
 - **新增官方插件索引**：`market/index.json` + `market/icons/`，托管在 GitHub Pages（`https://kuugakw.github.io/dsh-ai-for-memory/index.json`），由 tag 触发的 `market` workflow 自动重建；DSH 里在「插件 → 实验性插件 → Custom plugin indexes → 发现 → 添加索引源」填入即可浏览和一键安装 0.5.1 及之后的版本。
 - **README 写明发布范围**：0.5.0 及更早只在 GitHub Releases；npm 是早期渠道（从 0.5.1 起）；插件索引从当前版本起收录，之后版本继续更新。
+
+### 修复
+
+- **`aim_context restore` 注入的消息补上 `role` 和 `id`**：`agent.inject()` 接收的是完整 `UserMessage`，DSH 会把它原样追加进对话历史。此前只传了 `content` + `source`，缺 `role` 的消息落进 transcript 之后，下一次模型请求会被服务端以 ``messages[N]: missing field `role` `` 拒绝（HTTP 422），而且这条坏消息会留在历史里，那个对话之后每次发消息都会失败。现在恢复内容按同样的通知载体注入：`role: 'user'`、稳定 `id`、`source.form = 'notice'`，与清理提示一致；`test/core.test.mjs` 增加 `role`/`id`/`form` 断言防止回退。`docs/context.md`、`docs/tools.md` 写明恢复消息的载体形式。
+- **`aim_repair` 能发现并修复「消息缺身份」**：DSH 打开会话时要求每条消息带 `id`（`user/message` 还要 `role`、`source.kind`、`content`），缺了会整份拒绝并报 `lacks an identified message`。插件此前只跑格式校验（`restoreReleasedV4Artifact`）和本地生命周期回放，两者都看不见这个字段，于是这种日志被扫描报成「正常」、对话却打不开。现在 `scan deep` 额外逐条校验消息身份；`repair` 新增 `strategy=identity`（`auto` 里最先尝试，`salvage`/`truncate` 仍作退路），只补 `id`/`role`，事件、序号与正文一律不动；写回复验也包含这条检查。`doctor` 同步新增 `invalid` 状态（序号连续、回合已收尾，但有消息缺身份），`apply=true` + `repairLogs=true` 时直接补，预演会写明要补几份。新增用例 `test/core.test.mjs`「a message without an id is repaired in place」与 `test/session-doctor.test.mjs`「a message without an id is reported and repaired in place」，`docs/tools.md`、`docs/features.md` 同步说明。
 
 ## 0.5.3（2026-11-23）
 

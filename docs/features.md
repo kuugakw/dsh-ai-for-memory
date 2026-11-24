@@ -4,7 +4,7 @@
 >
 > 它不替代主 [README](../README.md)，也不替代安装、工具参数、面板操作、本地模型等专门文档。需要精确操作时，请以对应文档和面板为准。
 >
-> 对应版本：**0.5.3**。
+> 对应版本：**0.5.4**。
 
 ---
 
@@ -232,8 +232,11 @@ DSH 把每个对话写成 `session.v4.jsonl.zstd`。其中一条事件结构不�
 
 修复策略：
 
+- **identity**（`auto` 里最先尝试）：只给缺身份的消息补 `id`/`role`，事件、序号与正文一律不动；
 - **salvage**：把旧版插件写入的游离 `developer/message` 改写成等价的 `user/message` notice；
 - **truncate**：截断到第一处结构违规之前，并补写 DSH 自己的收尾事件。
+
+深度体检除了格式校验，还会按 DSH reader 的规则逐条检查消息身份（`id`、`role`、`source.kind`、`content`）：格式校验器接受没有 `id` 的消息，只看它会把这种日志报成「正常」，而对话打开时会被拒（`lacks an identified message`）。
 
 安全措施：
 

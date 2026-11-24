@@ -1,13 +1,13 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.5.3-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.5.3-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
+[![Status](https://img.shields.io/badge/status-stable%200.5.4-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.5.4-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.5.3 是功能与维护更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版新增：会话存储体检 `aim_repair action=doctor`、对话可「只对指定对话开放」、上下文自动整理默认开启；并修正 npm 包内测试与 README 链接。
+> **0.5.4 是检索与元数据更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版补齐 npm 关键词（`ai-memory`、`agent-memory`、`llm-memory`、`mcp-server`），让包能在 `npm search memory` / `mcp` 里被搜到；功能与 0.5.3 相同。
 >
-> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.3）。插件索引这类新渠道从当前版本（0.5.3）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
+> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.4）。插件索引这类新渠道从当前版本（0.5.4）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
 >
 > 升级前请备份记忆目录。
 
@@ -119,7 +119,7 @@ verified: false
 ## 快速开始
 
 ```bash
-dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.3
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.4
 ```
 
 也可以在 DSH **设置 → 插件 → 添加插件** 中填 `dsh-ai-for-memory`。本地开发用目录安装：
@@ -202,10 +202,11 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 ## 更新内容
 
-当前版本 **0.5.3**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.5.4**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
+- **0.5.4**：npm 关键词补上 `ai-memory`、`agent-memory`、`llm-memory`、`mcp-server`（配合已有的 `dsh`、`dsh-plugin`、`memory`），提升在 `npm search memory` / `mcp` 里的命中率；功能与 0.5.3 相同；
 - **0.5.3**：新增 `aim_repair action=doctor`（会话日志 / 索引 / 投影缓存三处体检）、对话级「只对指定对话开放」名单、上下文自动整理默认开启；npm 包补上 `test/`（`npm test` 不再 ENOENT）、README 徽章改指 Releases（npm 页面没有 `package.json`，相对链接必然 404）、`0.0.0-stage` 占位版本标记废弃；
 
 - **0.5.2 发布更新**：安装文档改为 npm / `dsh plugin` 优先；新增 tag 触发的 GitHub Actions 发布工作流、npm OIDC provenance、`dsh.compatibility` 和 `engines.dsh`，并补齐 `context`、`compaction`、`repair` 关键词；

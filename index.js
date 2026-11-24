@@ -2220,9 +2220,22 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             Number.isInteger(config.restoreMaxChars) ? config.restoreMaxChars : 12000,
             Number.isInteger(config.maxContextChars) ? config.maxContextChars : 30000,
           );
+          // `agent.inject()` takes a complete UserMessage, not just the body:
+          // DSH appends the payload to the transcript verbatim. A payload
+          // without `role` therefore reaches the provider as `{"content": …}`
+          // and the whole next request fails with
+          // "messages[N]: missing field `role`". The restore note is a notice
+          // carrier like the clear note: `source.kind = ai-for-memory` keeps it
+          // distinguishable from real user input.
           await exec.agent.inject({
+            id: randomUUID(),
+            role: 'user',
             content: [{ type: 'text', text: formatRestoreContext(found.record, { maxChars: restoreBudget }) }],
-            source: { kind: 'ai-for-memory' },
+            source: {
+              kind: 'ai-for-memory',
+              form: 'notice',
+              summary: clip(`恢复上下文：${found.record.context_id}`, 120),
+            },
           });
           return `已恢复上下文 ${found.record.context_id}（${found.source.label}，第 ${found.record.turn_from}-${found.record.turn_to} 轮），`
             + `按 ${restoreBudget} 字符预算注入，将在下一步生效。`;
@@ -2491,13 +2504,15 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         'DSH 会话日志体检与修复。DSH 把每个对话写成 session.v<N>.jsonl.zstd（多段 zstd 帧），'
         + '其中一条事件结构不合规就会让整个对话打不开（stored log is corrupt / SessionFormatError），'
         + '而 DSH 自身没有删除或修复接口。'
-        + 'scan=列出 <DSH_HOME>/sessions 下的会话日志，默认只读文件头；deep=true 才异步解压并逐事件校验；'
-        + 'repair=修复一份日志：先备份原文件，再优先把旧版插件写入的游离 developer 便条改写成等价的 user 便条'
-        + '（保留全部历史），否则截断到第一处损坏之前并用 DSH 自带的合成收尾事件补全回合；'
+        + 'scan=列出 <DSH_HOME>/sessions 下的会话日志，默认只读文件头；deep=true 才异步解压并逐事件校验'
+        + '（含消息身份：id/role/source/content，缺了 DSH 会以 lacks an identified message 拒绝整份日志）；'
+        + 'repair=修复一份日志：先备份原文件，再依次尝试给缺身份的消息补 id/role（identity）、'
+        + '把旧版插件写入的游离 developer 便条改写成等价的 user 便条（salvage，保留全部历史）、'
+        + '最后截断到第一处损坏之前并用 DSH 自带的合成收尾事件补全回合（truncate）；'
         + 'compact=对结构有效但物理体积异常膨胀的日志重排 zstd 帧（事件一个不改）；'
-        + 'doctor=跨三个存储体检（日志 / workspace.json 索引 / 投影缓存）：序号断层、缺日志、投影比日志新、'
-        + '回合没写成收尾，apply=true 时截断断档（需 repairLogs=true）、把过期投影改名归档、'
-        + '并给缺日志的会话写占位日志或清掉索引条目（ghosts=auto/placeholder/prune/keep）；'
+        + 'doctor=跨三个存储体检（日志 / workspace.json 索引 / 投影缓存）：序号断层、消息缺身份（id/role/source）、'
+        + '缺日志、投影比日志新、回合没写成收尾，apply=true 时截断断档、补齐消息身份（两者需 repairLogs=true）、'
+        + '把过期投影改名归档、并给缺日志的会话写占位日志或清掉索引条目（ghosts=auto/placeholder/prune/keep）；'
         + '默认只预演，apply=true 才写回。修完要重新打开该对话才会重新加载。'
         + '会话日志修复依赖 Node 22.15+ 的 zstd；Node 20 上其余功能正常，诊断页会显示不可用及校验器回退原因。'
         + '不要修复当前正在进行的对话。',
@@ -2514,12 +2529,12 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         },
         deep: {
           type: 'boolean',
-          description: 'scan 用：true 时解压并校验事件结构（能发现 developer/message 错位这类损坏，但大日志较慢）。',
+          description: 'scan 用：true 时解压并校验事件结构（能发现 developer/message 错位、消息缺 id 这类损坏，但大日志较慢）。',
         },
         strategy: {
           type: 'string',
-          enum: ['auto', 'salvage', 'truncate'],
-          description: 'repair 用：auto=先改写便条、失败再截断（默认）；salvage=只改写；truncate=直接截断。',
+          enum: ['auto', 'identity', 'salvage', 'truncate'],
+          description: 'repair 用：auto=先补消息身份、再改写便条、最后截断（默认）；identity=只补 id/role；salvage=只改写旧便条；truncate=直接截断。',
         },
         apply: {
           type: 'boolean',
@@ -2538,7 +2553,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         },
         repairLogs: {
           type: 'boolean',
-          description: 'doctor 用：true 才截断序号断层的日志；默认只报告，避免碰到另一个标签页正在写的会话。',
+          description: 'doctor 用：true 才截断序号断层的日志、给缺身份的消息补 id/role；默认只报告，避免碰到另一个标签页正在写的会话。',
         },
       },
       async execute(args, exec) {

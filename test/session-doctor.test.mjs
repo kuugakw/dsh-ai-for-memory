@@ -122,6 +122,50 @@ test('session doctor: reports a seq gap and truncates it only when asked', { ski
   }
 });
 
+test('session doctor: a message without an id is reported and repaired in place', { skip: skipZstd }, async () => {
+  const home = tempHome();
+  try {
+    const id = 'session-no-id';
+    // Sequence is intact and the turn is closed; the only defect is the message
+    // identity, which the seq check cannot see and the format validator accepts.
+    const log = blankLog(id);
+    log.events.push(
+      { type: 'turn/start', seq: 3, time: 1700000000000, data: { turn: 1 } },
+      { type: 'step/start', seq: 4, time: 1700000000000, data: { turn: 1, step: 1 } },
+      {
+        type: 'user/message', seq: 5, time: 1700000000000, surfaceOp: 'append',
+        data: { role: 'user', source: { kind: 'ai-for-memory' }, content: [{ type: 'text', text: '恢复的上下文' }] },
+      },
+      { type: 'step/end', seq: 6, time: 1700000000000, data: { turn: 1, step: 1 } },
+      { type: 'turn/end', seq: 7, time: 1700000000000, data: { turn: 1, reason: { kind: 'completed' } } },
+    );
+    const file = writeLog(home, id, log);
+
+    const before = await doctorSessions({ env: { DSH_HOME: home }, repairLogs: true });
+    assert.equal(before.counts.invalid, 1);
+    assert.equal(before.counts.ok, 0);
+    assert.equal(before.rows[0].state, 'invalid');
+    assert.match(before.rows[0].detail, /缺少消息 id/);
+    assert.match(formatDoctorReport(before), /消息身份缺失 1/);
+    assert.match(formatDoctorReport(before), /预演/);
+
+    const report = await doctorSessions({ env: { DSH_HOME: home }, repairLogs: true, apply: true });
+    assert.equal(report.actions[0].kind, 'identity');
+    assert.match(report.actions[0].detail, /补齐 1 条消息的身份/);
+
+    const after = await doctorSessions({ env: { DSH_HOME: home }, repairLogs: true });
+    assert.equal(after.counts.invalid, 0);
+    assert.equal(after.counts.ok, 1);
+    const repaired = await readSessionLog(file);
+    assert.equal(repaired.events.length, log.events.length);
+    assert.equal(typeof repaired.events[5].data.id, 'string');
+    assert.ok(repaired.events[5].data.id.length > 0);
+    assert.deepEqual(repaired.events[5].data.content, log.events[5].data.content);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('session doctor: a missing log gets a placeholder so the conversation opens', { skip: skipZstd }, async () => {
   const home = tempHome();
   try {

@@ -87,6 +87,7 @@ JSON 导出保留 `provenance`、`verified`、`changes`、`confidence`、`eviden
 - 旧轮次按话题相似度选择，低相似度才清出；
 - 清理前先完整存档，`restore` 可以调回；
 - 恢复不会整份塞回去，按 `restoreMaxChars` 从尾部取最近的轮次/事件段；
+- 恢复内容作为一条带通知标记的 `user/message` 注入（`role: 'user'`、`source.kind = ai-for-memory`、`source.form = notice`），下一步生效，不是新的用户请求；
 - `clear` 登记后在下一次模型请求前执行，不会等到轮末；
 - 当轮正在进行时，本轮的上下文不会被清掉。
 
@@ -158,8 +159,8 @@ DSH 把每个对话写成 `~/.dsh/sessions/<工作区分桶>/<会话>/session.v<
 
 | action | 主要参数 | 作用 |
 |---|---|---|
-| `scan` | 可选 `deep` | 列出所有会话日志：物理/逻辑大小、事件数、结构状态、异常膨胀标记。`deep=true` 会解压并逐个事件校验（大日志较慢） |
-| `repair` | `session` 必填；可选 `strategy`、`apply` | 修复一份日志。默认只预演；`apply=true` 才写回 |
+| `scan` | 可选 `deep` | 列出所有会话日志：物理/逻辑大小、事件数、结构状态、异常膨胀标记。`deep=true` 会解压并逐个事件校验（含消息身份，大日志较慢） |
+| `repair` | `session` 必填；可选 `strategy`（`auto`/`identity`/`salvage`/`truncate`）、`apply` | 修复一份日志。默认只预演；`apply=true` 才写回 |
 | `compact` | `session` 必填；可选 `apply` | 对结构有效的日志重排 zstd 帧（DSH 每次追加一批就写一个帧，长对话会积累上万个碎帧）；事件一个不改，只缩小物理体积 |
 | `doctor` | 可选 `apply`、`ghosts`、`cache`、`repairLogs` | 跨「日志 / `workspace.json` 索引 / 投影缓存」三处体检并修复：序号断层、缺日志、投影比日志新、回合没写成收尾 |
 
@@ -179,6 +180,7 @@ DSH 把一个对话摊在三处，任何一处落后都会表现成「对话打�
 
 - `ok`：序号连续，且回合已收尾（本来就是空对话也算 ok）；
 - `gap`：`seq` 不连续。典型成因是「把旧日志复制回来」时，仍在运行的 DSH 宿主用内存里的编号（例如 77248）接在恢复的前缀（53239）后面，于是整份日志被读取器拒绝；
+- `invalid`：序号连续、回合也收尾了，但有消息缺身份（`id`/`role`/`source`）。DSH 打开时会报 `lacks an identified message`，而序号检查看不出来；
 - `open`：日志停在回合中间（写入被打断）；
 - `missing`：索引里有、磁盘上没有日志；
 - `unreadable`：解压或解析失败。
@@ -190,7 +192,7 @@ DSH 把一个对话摊在三处，任何一处落后都会表现成「对话打�
 | 参数 | 取值 | 含义 |
 |---|---|---|
 | `apply` | `true` | 真正写盘 |
-| `repairLogs` | `true` | 截断 `gap` 日志到断点，与 `repair` 共用同一条「先备份、写后复验、冲突即放弃」的路径；默认只报告，避免碰到另一个标签页正在写的会话 |
+| `repairLogs` | `true` | 截断 `gap` 日志到断点、给 `invalid` 日志补消息身份，与 `repair` 共用同一条「先备份、写后复验、冲突即放弃」的路径；默认只报告，避免碰到另一个标签页正在写的会话 |
 | `ghosts` | `auto`（默认）/ `placeholder` / `prune` / `keep` | 缺日志时：`auto` 以插件记忆存档为准——有存档就保留并写占位日志，没有就移除条目；`placeholder` 全部保留（占位日志打开是空对话）；`prune` 全部移除（先备份 `workspace.json.bak-<时间戳>`）；`keep` 只报告 |
 | `cache` | `clear`（默认）/ `keep` | 把比日志新的投影缓存改名成 `.bak-<时间戳>`，让 DSH 重新生成；`keep` 只报告 |
 
@@ -198,8 +200,11 @@ DSH 把一个对话摊在三处，任何一处落后都会表现成「对话打�
 
 修复策略：
 
-- `salvage`（自动优先）：把旧版插件写入、却落在 step 之外的 `developer/message` 请求锚点/清理便条改写为等价的 `user/message` 便条，**保留全部历史事件**。当前版本已经改用 `user/message`，所以这些只是历史遗留的载体。
+- `identity`（`auto` 里最先尝试）：只给缺身份的消息补 `id`/`role`，事件、序号和正文一个不改。DSH 打开会话时要求每条消息带 `id`（`user/message` 还要 `role`、`source.kind`、`content`），缺了会整份拒绝并报 `lacks an identified message`；
+- `salvage`：把旧版插件写入、却落在 step 之外的 `developer/message` 请求锚点/清理便条改写为等价的 `user/message` 便条，**保留全部历史事件**。当前版本已经改用 `user/message`，所以这些只是历史遗留的载体；
 - `truncate`（兜底）：截断到第一处结构损坏之前，并用 DSH 自带的合成收尾事件（未完成工具结果、`step/end`、`turn/end`）补全回合；会丢弃损坏点之后的事件，报告里写明丢了多少。
+
+`scan deep=true` 除了格式校验，还会逐条检查消息身份：格式校验器（`restoreReleasedV4Artifact`）和本地生命周期回放都接受缺 `id` 的消息，只看它们会把这种日志报成「正常」，而对话打开时照样被拒——所以这条检查是单独加上去的。
 
 安全约束：
 

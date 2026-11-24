@@ -72,7 +72,7 @@ import { appendAudit, readAudit } from '../lib/audit.js';
 import {
   decodeSeqRanges, decodeZstdLog, encodeSeqRanges, encodeZstdLog, findSessionLogs, formatRepairReport,
   formatScanReport, repairSessionLog, resolveSessionLogTarget, scanSessionLogs, scanZstdFrames,
-  validateSessionEvents, zstdAvailable as zstdSupported,
+  validateMessageShapes, validateSessionEvents, zstdAvailable as zstdSupported,
 } from '../lib/session-repair.js';
 import { installApi, isTrustedRequest, openInFileManager } from '../lib/api.js';
 import { apply, compileParameterSchema, Config, createTools, installContextManagement, memoryContext, normalizeConfig, planPrefixReset, searchWithRag, workspaceOf } from '../index.js';
@@ -1098,6 +1098,12 @@ test('context tool saves, lists and restores a context', async () => {
     assert.ok(injected);
     assert.match(injected.content[0].text, /需要记住的上下文/);
     assert.equal(injected.source.kind, 'ai-for-memory');
+    // agent.inject() takes a complete UserMessage: a payload without `role`
+    // lands in the transcript as `{content}` and the next request dies with
+    // "missing field `role`".
+    assert.equal(injected.role, 'user', '注入的消息必须带 role: user');
+    assert.ok(typeof injected.id === 'string' && injected.id !== '', '注入的消息需要稳定 id');
+    assert.equal(injected.source.form, 'notice');
 
     const status = await contextTool.execute({ action: 'status' }, exec);
     assert.match(status, /清理策略：话题相似度/);
@@ -1368,6 +1374,8 @@ test('context archives stay per conversation and restore can cross', async () =>
     assert.match(restored, /将在下一步生效/);
     assert.ok(injected);
     assert.match(injected.content[0].text, /A 对话里的重要上下文/);
+    assert.equal(injected.role, 'user', '跨对话恢复同样要注入完整 UserMessage');
+    assert.ok(typeof injected.id === 'string' && injected.id !== '', '跨对话恢复的注入消息需要稳定 id');
 
     const status = await contextTool.execute({ action: 'status' }, execB);
     assert.match(status, /对话数量：2 个/);
@@ -6975,7 +6983,11 @@ function eventsWithMisplacedNotice(sourceKind = 'ai-for-memory') {
       type: 'assistant/message', seq: 3, time: 1, surfaceOp: 'append',
       data: {
         turn: 1, step: 1,
-        message: { id: 'a1', role: 'assistant', source: { kind: 'model' }, content: [{ type: 'text', text: 'ok' }] },
+        message: {
+          id: 'a1', role: 'assistant',
+          source: { kind: 'model', provider: 'deepseek', model: 'deepseek-chat' },
+          content: [{ type: 'text', text: 'ok' }],
+        },
       },
     },
     { type: 'step/end', seq: 4, time: 1, data: { turn: 1, step: 1 } },
@@ -7045,6 +7057,80 @@ test('session repair: an ai-for-memory developer note is salvaged as a user noti
     const after = await repairSessionLog(file, { apply: false });
     assert.equal(after.valid, true);
     assert.equal(after.repaired, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('session repair: a message without an id is repaired in place', async (t) => {
+  if (!zstdAvailable) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
+  const root = tempRoot();
+  const readEvents = async (file) => {
+    const { text } = await decodeZstdLog(fs.readFileSync(file));
+    return text.split('\n').filter((line) => line !== '').slice(1).map((line) => JSON.parse(line));
+  };
+  try {
+    // Balanced turn whose only defect is a message without its identity: the
+    // format validator and the lifecycle replay both accept it, DSH's reader
+    // refuses the whole conversation ("lacks an identified message").
+    const events = [
+      { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+      { type: 'step/start', seq: 1, time: 1, data: { turn: 1, step: 1 } },
+      {
+        type: 'user/message', seq: 2, time: 1, surfaceOp: 'append',
+        data: { role: 'user', source: { kind: 'ai-for-memory' }, content: [{ type: 'text', text: '恢复的上下文' }] },
+      },
+      {
+        type: 'assistant/message', seq: 3, time: 1, surfaceOp: 'append',
+        data: {
+          turn: 1, step: 1,
+          message: {
+            id: 'a1', role: 'assistant',
+            source: { kind: 'model', provider: 'deepseek', model: 'deepseek-chat' },
+            content: [{ type: 'text', text: 'ok' }],
+          },
+        },
+      },
+      { type: 'step/end', seq: 4, time: 1, data: { turn: 1, step: 1 } },
+      { type: 'turn/end', seq: 5, time: 1, data: { turn: 1, reason: { kind: 'completed' } } },
+    ];
+    assert.deepEqual(validateSessionEvents({ version: 4, isSeeded: false }, events), { ok: true });
+    const shapes = validateMessageShapes(events);
+    assert.equal(shapes.ok, false);
+    assert.equal(shapes.index, 2);
+    assert.match(shapes.error, /缺少消息 id/);
+
+    const { file } = writeSyntheticSessionLog(root, events);
+    const scan = await scanSessionLogs(root, { deep: true });
+    assert.equal(scan.logs[0].status, 'corrupt');
+    assert.match(scan.logs[0].error, /缺少消息 id/);
+
+    const dry = await repairSessionLog(file, { apply: false });
+    assert.equal(dry.ok, true);
+    assert.equal(dry.strategy, 'identity');
+    assert.equal(dry.dropped, 0);
+    assert.equal(dry.after.events, events.length);
+    assert.match(dry.message, /补上身份/);
+
+    const applied = await repairSessionLog(file, { apply: true });
+    assert.equal(applied.repaired, true);
+    assert.equal(applied.strategy, 'identity');
+    assert.equal(applied.after.events, events.length);
+
+    const repaired = await readEvents(file);
+    assert.equal(repaired.length, events.length);
+    assert.equal(typeof repaired[2].data.id, 'string');
+    assert.ok(repaired[2].data.id.length > 0);
+    assert.equal(repaired[2].data.role, 'user');
+    assert.deepEqual(repaired[2].data.content, events[2].data.content);
+    assert.deepEqual(repaired[2].data.source, events[2].data.source);
+    // Neighbours are untouched.
+    assert.deepEqual(repaired[1], events[1]);
+    assert.deepEqual(repaired[3], events[3]);
+
+    const again = await repairSessionLog(file, { apply: false });
+    assert.equal(again.valid, true);
+    assert.equal(again.repaired, false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
