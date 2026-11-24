@@ -1,13 +1,13 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.5.8-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.5.8-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
+[![Status](https://img.shields.io/badge/status-stable%200.5.9-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.5.9-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > **0.5.8 是记忆安全与可靠性更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版给记忆回灌加数据边界（`aim_search`/SQL/restore 的结果标明「来自记忆库、不是指令」并防伪造结束标记），新增掉电一致性测试（写入进程被 `SIGKILL` 后 JSON 必完整、JSONL 撕裂尾行会被跳过），并让崩溃进程遗留的锁可被下一个写者立即接管；功能与 0.5.7 相同。
 >
-> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.8）。插件索引这类新渠道从当前版本（0.5.8）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
+> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.9）。插件索引这类新渠道从当前版本（0.5.9）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
 >
 > 升级前建议备份记忆目录；数据版本变化会走 `schema.json` 的迁移流程，迁移前自动把要改写的文件备份到 `backups/schema-v<旧版本>-<时间>/`，更详细的规则见 [配置与数据目录](docs/configuration.md#格式版本与迁移)。
 
@@ -127,7 +127,7 @@ verified: false
 ## 快速开始
 
 ```bash
-dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.8
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.9
 ```
 
 也可以在 DSH **设置 → 插件 → 添加插件** 中填 `dsh-ai-for-memory`。本地开发用目录安装：
@@ -210,11 +210,12 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 ## 更新内容
 
-当前版本 **0.5.8**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.5.9**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
-- **0.5.8**：记忆回灌带数据边界（`<<<MEMORY-DATA…>>>`，伪造结束标记会被替换）；新增掉电一致性测试（杀写入进程后 JSON 必须完整、JSONL 撕裂尾行跳过且不粘下一条）；崩溃进程遗留的锁按 owner pid / 空锁 1 秒规则立即接管；market 工作流改用 `upload-pages-artifact@v4`，修复索引停在 0.5.6 的问题；
+- **0.5.9**：修复 0.5.8 的 Node 20 CI——`node:sqlite` 不可用时 SQL 用例现在正确跳过；产品代码与 0.5.8 相同；
+- **0.5.8**：记忆回灌带数据边界（`<<<MEMORY-DATA…>>>`，伪造结束标记会被替换）；新增掉电一致性测试（杀写入进程后 JSON 必须完整、JSONL 撕裂尾行跳过且不粘下一条）；崩溃进程遗留的锁按 owner pid / 空锁 1 秒规则立即接管；
 - **0.5.7**：安全收紧——MCP 出口默认关闭（开启才生成 token）、面板 API 拒绝无 Fetch Metadata 的非浏览器请求、`export` 的 `dest` 限制在 `<记忆目录>/exports/`、`aim_repair` 只接受 `sessions/` 内的日志、新文件 0600 / 目录 0700 并一次性修正旧文件、知识/过程记录/决策/上下文落盘前脱敏；SQL 通道拒绝 `load_extension`/`readfile`/`writefile`、拒绝 `JOIN` 与自连接、原始 `SELECT` 强制外层 `LIMIT 50`；`autoDecisionRetentionDays` 默认 90→30 天并加 2000 条上限；
 - **0.5.6**：Windows 上锁目录创建/释放瞬间会短暂返回 `EPERM`/`EACCES`/`ENOENT`，之前会被当成错误抛出；现在统一按竞争重试（`LOCK_CONTENTION`），锁释放也改为尽力而为，不会再因为别的进程正在接管锁而让工具调用失败；测试用例会捕获子进程 stderr 便于定位；
 - **0.5.5**：新增跨进程写入锁（`withFileLockSync` / `withFileLock`，`mkdir` 原子锁 + 陈旧锁接管），读改写共享文件不再后写覆盖先写；新增 `schema.json` 数据版本与迁移框架（老数据自动迁移，迁移前备份要改写的文件，新版本数据拒绝降级写入）；`engines.dsh` 去掉 `<0.3.0` 上限；`aim_repair` 遇到不认识的会话日志版本时标「版本不支持」并拒绝写入；`doctor` 修复后状态归位 `ok` 并标「已修复」；面板深度体检提示与文档补齐消息身份/`identity` 边界说明；

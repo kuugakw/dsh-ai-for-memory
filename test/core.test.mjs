@@ -8064,7 +8064,11 @@ test('stored artifacts are private and secrets are redacted', () => {
   }
 });
 
-test('SQL route blocks extension loading, joins and unbounded raw selects', () => {
+test('SQL route blocks extension loading, joins and unbounded raw selects', (t) => {
+  if (!sqliteAvailable()) {
+    t.skip('node:sqlite is unavailable on this Node build');
+    return;
+  }
   const root = tempRoot();
   try {
     const store = new MemoryStore(root).init();
