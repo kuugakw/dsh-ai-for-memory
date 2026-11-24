@@ -7855,8 +7855,10 @@ test('file lock serializes read-modify-write across processes', async () => {
     ].join('\n'));
     writeJson(file, { n: 0 });
     const workers = Array.from({ length: 4 }, () => new Promise((resolve, reject) => {
-      const cp = spawn(process.execPath, [child, file], { stdio: 'ignore' });
-      cp.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`worker exited ${code}`))));
+      const cp = spawn(process.execPath, [child, file], { stdio: ['ignore', 'ignore', 'pipe'] });
+      let stderr = '';
+      cp.stderr.on('data', (chunk) => { stderr += chunk; });
+      cp.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`worker exited ${code}: ${stderr}`))));
       cp.on('error', reject);
     }));
     await Promise.all(workers);

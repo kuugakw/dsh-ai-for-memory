@@ -1,13 +1,13 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.5.5-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.5.5-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
+[![Status](https://img.shields.io/badge/status-stable%200.5.6-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.5.6-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.5.5 是稳定性与兼容性更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版补齐跨进程写入锁与数据版本迁移（`schema.json` + 自动备份），放宽 `engines.dsh` 上限，DSH 换会话日志格式时 `aim_repair` 改为「版本不支持」并拒绝写入；功能与 0.5.4 相同。
+> **0.5.6 是稳定性修订版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版修正 Windows 上锁目录刚释放时的瞬时 `EPERM`/`EACCES`：现在按竞争重试而不是让工具调用失败；功能与 0.5.5 相同。
 >
-> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.5）。插件索引这类新渠道从当前版本（0.5.5）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
+> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.6）。插件索引这类新渠道从当前版本（0.5.6）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
 >
 > 升级前建议备份记忆目录；数据版本变化会走 `schema.json` 的迁移流程，迁移前自动把要改写的文件备份到 `backups/schema-v<旧版本>-<时间>/`，更详细的规则见 [配置与数据目录](docs/configuration.md#格式版本与迁移)。
 
@@ -127,7 +127,7 @@ verified: false
 ## 快速开始
 
 ```bash
-dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.5
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.6
 ```
 
 也可以在 DSH **设置 → 插件 → 添加插件** 中填 `dsh-ai-for-memory`。本地开发用目录安装：
@@ -210,10 +210,11 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 ## 更新内容
 
-当前版本 **0.5.5**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.5.6**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
+- **0.5.6**：Windows 上锁目录创建/释放瞬间会短暂返回 `EPERM`/`EACCES`/`ENOENT`，之前会被当成错误抛出；现在统一按竞争重试（`LOCK_CONTENTION`），锁释放也改为尽力而为，不会再因为别的进程正在接管锁而让工具调用失败；测试用例会捕获子进程 stderr 便于定位；
 - **0.5.5**：新增跨进程写入锁（`withFileLockSync` / `withFileLock`，`mkdir` 原子锁 + 陈旧锁接管），读改写共享文件不再后写覆盖先写；新增 `schema.json` 数据版本与迁移框架（老数据自动迁移，迁移前备份要改写的文件，新版本数据拒绝降级写入）；`engines.dsh` 去掉 `<0.3.0` 上限；`aim_repair` 遇到不认识的会话日志版本时标「版本不支持」并拒绝写入；`doctor` 修复后状态归位 `ok` 并标「已修复」；面板深度体检提示与文档补齐消息身份/`identity` 边界说明；
 
 - **0.5.4**：npm 关键词补上 `ai-memory`、`agent-memory`、`llm-memory`、`mcp-server`（配合已有的 `dsh`、`dsh-plugin`、`memory`），提升在 `npm search memory` / `mcp` 里的命中率；功能与 0.5.3 相同；
