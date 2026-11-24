@@ -24,6 +24,10 @@
 | `incident` | `title` 等 | 记录一次事故，归入 `incidents` |
 | `status` | — | 查看各层统计和运行状态 |
 
+`repair` / `compact` 的 `session` 可以给会话 id（`session-<uuid>`、裸 uuid 或唯一前缀），也可以给 **DSH sessions 目录内**日志的绝对路径；目录外路径一律拒绝，符号链接也不允许把它带出 sessions 目录。这样 `aim_repair` 只读它该读的那批文件，不会变成任意 `.zstd` 的读取器。
+
+`export` 的 `dest` 是模型可控参数，因此被限制为**相对 `<记忆目录>/exports/` 的路径**：绝对路径、盘符和 `..` 一律拒绝，写盘前还会校验一次符号链接，导出内容不会落到记忆目录之外（避免被网页注入的模型把知识库原文写到 `~/.bashrc`、项目清单等任意位置）。
+
 写入范围：
 
 - `scope=session`（默认）：写当前对话；

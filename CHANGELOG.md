@@ -2,6 +2,20 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 0.5.7（2026-11-24）
+
+### 安全与信噪比
+
+- **SQL 白名单补上扩展加载函数**：`load_extension`、`readfile`、`writefile`、`fts3_tokenizer`、`fts5_tokenizer`、`edit` 加入禁用函数集合。`node:sqlite` 默认不加载扩展，但白名单不该依赖这个默认值——运行时一旦开放扩展，`SELECT load_extension('/tmp/x')` 就是任意代码执行。
+- **原始 SQL 强制外层 LIMIT、拒绝自连接**：`translateToSql` 的 raw 路径此前原样执行，`SELECT * FROM …` 不带宽限，`SELECT count(*) FROM knowledge_docs a, knowledge_docs b, c, d` 这类聚合会在 SQLite 内部同步物化，一条 SQL 就能卡住 DSH 事件循环。现在原始 SELECT 一律包成 `SELECT * FROM (…) LIMIT 50`，且 `JOIN` / 同一张表出现两次直接拒绝（单表事实查询不需要连接）。
+- **记忆文件默认 0600、目录 0700**：`writeJson` / `appendJsonLine` / `ensureDir` 全部带 mode；旧版本落成 0644 的文件在首次初始化时一次性 `chmod`（标记 `.permissions-0600`），共享主机、多账户或云盘同步时别的账户读不到。
+- **写入时脱敏**：知识库、过程记录、决策、上下文存档在落盘前把常见凭证替换为 `[REDACTED:...]`（`sk-…`、`ghp_…`、`AKIA…`、JWT、`password=…`、URL 里的口令、私钥块等）；上下文存档的 `turns`/`raw_events` 深度替换，restore 时看到的是占位符。脱敏是启发式，文档已注明不能替代「别把密钥粘进对话」。
+- **导出 `dest` 不再接受任意路径**（任意文件写入）：`aim_memory action=export` 的 `dest` 由模型控制，之前直接 `path.resolve(rawDest)` 后 `mkdir -p` + `writeFileSync`，可以写出到记忆目录之外（实测能把知识库原文写到 `/tmp/...`，也能覆盖 `~/.bashrc`、项目 `package.json`，或顺手创建任意目录树）。现在 `dest` 只能是相对 `<记忆目录>/exports/` 的路径：绝对路径、盘符、`..` 全部拒绝，写盘前再做一次 `realpath` 校验，符号链接也不能把它带出 exports/；`sql` 导出的二进制同样受限。
+- **`aim_repair` 不再接受会话目录外的路径**：`session` 传路径时必须是 DSH `sessions/` 目录内的日志，文件名也得是 `session.v<N>.jsonl.zstd`；目录外路径、`..` 和指向外部的符号链接都被拒绝。此前可以拿它读取任意 `.zstd` 并把解析摘要回给模型，结构恰好符合 v4 时还会备份后改写。按会话 id 的修复不受影响。
+- **面板 API 拒绝非浏览器请求**：`isTrustedRequest` 之前对「没有 Origin」的请求直接放行，本机脚本（`curl`、npm postinstall、编辑器插件）因此能直接 `GET` 知识库导出、`POST /api/config` 改外部 Embedding 地址、或往记忆里注入内容。现在面板路由要求浏览器 Fetch Metadata（同源 `Origin` 或 `Sec-Fetch-Site: same-origin`），两者都没有就 403；MCP 路由单独保留 `allowNonBrowser`（它有自己的 Bearer token 和非浏览器客户端）。这属于 CSRF/朴素脚本防护，不是身份认证——同用户进程仍可伪造请求头或直接读盘，真正的边界是系统账户，文档已写明。
+- **MCP 出口默认关闭**：`mcpEnabled` 默认从 `true` 改为 `false`——它是一个独立于浏览器会话的 HTTP 入口，不读文档的用户不该一直保留这个攻击面。开启后才生成 `$DSH_HOME/ai-for-memory/mcp-token`，面板与保存接口的默认值同步改成关闭。
+- **每轮自动活动记录收紧**：`autoDecisionRetentionDays` 默认 90 → 30 天，并新增 `AUTO_DECISION_MAX = 2000` 条硬上限（按 mtime 保留最新）；这类 `decision_auto_*` 记录只走决策层/诊断，不进 `aim_search`——新增回归用例把「不是知识文档、检索不命中、超过上限删最旧」固定下来。
+
 ## 0.5.6（2026-11-24）
 
 ### 修复

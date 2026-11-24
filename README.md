@@ -1,13 +1,13 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.5.6-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.5.6-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
+[![Status](https://img.shields.io/badge/status-stable%200.5.7-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.5.7-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.5.6 是稳定性修订版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版修正 Windows 上锁目录刚释放时的瞬时 `EPERM`/`EACCES`：现在按竞争重试而不是让工具调用失败；功能与 0.5.5 相同。
+> **0.5.7 是安全与权限更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版把入口收紧：MCP 出口默认关闭、面板 API 拒绝非浏览器请求、导出与 `aim_repair` 只能碰允许的目录、记忆文件 0600/目录 0700 且落盘前脱敏；SQL 通道拒绝 `load_extension` 与自连接，原始 SQL 强制外层 LIMIT。功能与 0.5.6 相同。
 >
-> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.6）。插件索引这类新渠道从当前版本（0.5.6）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
+> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.7）。插件索引这类新渠道从当前版本（0.5.7）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
 >
 > 升级前建议备份记忆目录；数据版本变化会走 `schema.json` 的迁移流程，迁移前自动把要改写的文件备份到 `backups/schema-v<旧版本>-<时间>/`，更详细的规则见 [配置与数据目录](docs/configuration.md#格式版本与迁移)。
 
@@ -127,7 +127,7 @@ verified: false
 ## 快速开始
 
 ```bash
-dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.6
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.7
 ```
 
 也可以在 DSH **设置 → 插件 → 添加插件** 中填 `dsh-ai-for-memory`。本地开发用目录安装：
@@ -204,16 +204,17 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 安全边界、API Key 处理、跨对话开放和 DNS rebinding 防护见 [隐私与安全](docs/security.md)。常见问题见 [FAQ](docs/faq.md)。
 
-**MCP 出口默认开启**，只绑定 DSH 的 loopback 监听器；它是独立于浏览器会话的本地 HTTP 入口，因此默认生成 `$DSH_HOME/ai-for-memory/mcp-token`，所有 MCP 请求都必须带 `Authorization: Bearer`。MCP 的 `aim_remember` 固定写共享层并标记 `source: mcp`，仍按模型自述处理。不需要时请在面板关闭 MCP 开关。
+**MCP 出口默认关闭**，需要时在面板「设置 → MCP 出口」打开；开启后才会在 `$DSH_HOME/ai-for-memory/mcp-token` 生成 token，所有 MCP 请求都必须带 `Authorization: Bearer`。它只绑定 DSH 的 loopback 监听器，但仍是一个独立于浏览器会话的本地 HTTP 入口——不用就保持关闭，不要为了省事默认开着。MCP 的 `aim_remember` 固定写共享层并标记 `source: mcp`，仍按模型自述处理。
 
 ---
 
 ## 更新内容
 
-当前版本 **0.5.6**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.5.7**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
+- **0.5.7**：安全收紧——MCP 出口默认关闭（开启才生成 token）、面板 API 拒绝无 Fetch Metadata 的非浏览器请求、`export` 的 `dest` 限制在 `<记忆目录>/exports/`、`aim_repair` 只接受 `sessions/` 内的日志、新文件 0600 / 目录 0700 并一次性修正旧文件、知识/过程记录/决策/上下文落盘前脱敏；SQL 通道拒绝 `load_extension`/`readfile`/`writefile`、拒绝 `JOIN` 与自连接、原始 `SELECT` 强制外层 `LIMIT 50`；`autoDecisionRetentionDays` 默认 90→30 天并加 2000 条上限；
 - **0.5.6**：Windows 上锁目录创建/释放瞬间会短暂返回 `EPERM`/`EACCES`/`ENOENT`，之前会被当成错误抛出；现在统一按竞争重试（`LOCK_CONTENTION`），锁释放也改为尽力而为，不会再因为别的进程正在接管锁而让工具调用失败；测试用例会捕获子进程 stderr 便于定位；
 - **0.5.5**：新增跨进程写入锁（`withFileLockSync` / `withFileLock`，`mkdir` 原子锁 + 陈旧锁接管），读改写共享文件不再后写覆盖先写；新增 `schema.json` 数据版本与迁移框架（老数据自动迁移，迁移前备份要改写的文件，新版本数据拒绝降级写入）；`engines.dsh` 去掉 `<0.3.0` 上限；`aim_repair` 遇到不认识的会话日志版本时标「版本不支持」并拒绝写入；`doctor` 修复后状态归位 `ok` 并标「已修复」；面板深度体检提示与文档补齐消息身份/`identity` 边界说明；
 

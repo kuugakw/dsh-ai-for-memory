@@ -85,10 +85,10 @@
 | `stagingRetentionDays` | 30 | 旧过程记录保留天数；只删已归档文件 |
 | `contextRetentionDays` | 0 | 上下文存档保留天数；0=不自动删 |
 | `requestAnchor` | `true` | 检查点到达且本步没有新用户请求时，加一条“上一轮请求参考”；有新请求则不注入 |
-| `mcpEnabled` | `true` | 是否启用 `/ai-for-memory/mcp` MCP 出口（仍受回环 Host 校验） |
-| `mcpToken` | 空 | 可选的 MCP Bearer 令牌；空=只靠回环地址保护，面板不回显明文 |
+| `mcpEnabled` | `false` | 是否启用 `/ai-for-memory/mcp` MCP 出口（默认关闭；开启后才生成 `mcp-token`，且仍受回环 Host 校验） |
+| `mcpToken` | 空 | 可选的 MCP Bearer 令牌；空=用开启时自动生成的 token 文件，面板不回显明文 |
 | `decisionRetentionDays` | 0 | 决策记录保留天数；0=不自动删 |
-| `autoDecisionRetentionDays` | 90 | 每轮自动活动记录（`decision_auto_*`）保留天数；只删这类记录，0=不自动删；`aim_decide` 审查记录不受它影响 |
+| `autoDecisionRetentionDays` | 30 | 每轮自动活动记录（`decision_auto_*`）保留天数；只删这类记录，0=只看数量上限；`aim_decide` 审查记录不受它影响 |
 | `autoDecisionLog` | `true` | 每轮把工具调用和本地文件改动自动记入决策层（outcome=observed，不进知识库） |
 | `ragMount` | false | 是否把 RAG 索引挂到检索 |
 | `externalBaseUrl` | 空 | 外部模型主地址；空=未配置，不发起探活或请求。示例见面板 placeholder |

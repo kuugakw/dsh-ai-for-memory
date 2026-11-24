@@ -4,7 +4,7 @@
 >
 > 它不替代主 [README](../README.md)，也不替代安装、工具参数、面板操作、本地模型等专门文档。需要精确操作时，请以对应文档和面板为准。
 >
-> 对应版本：**0.5.6**。
+> 对应版本：**0.5.7**。
 
 ---
 
@@ -340,7 +340,7 @@ form = notice
 - `stagingRetentionDays`：删除已归档的旧过程记录文件；
 - `contextRetentionDays`：上下文存档保留天数，0=不自动删除；
 - `decisionRetentionDays`：决策记录保留天数；
-- `autoDecisionRetentionDays`：只删除 `decision_auto_*` 每轮自动活动记录（默认 90 天），审查记录不受影响；
+- `autoDecisionRetentionDays`：只删除 `decision_auto_*` 每轮自动活动记录（默认 30 天，另保留最多 2000 条），审查记录不受影响；这类记录不进入检索结果；
 - 保留清理每天检查一次，即使自动整理关闭也会执行。
 
 ---

@@ -2971,7 +2971,8 @@ test('context pressure triggers only when measured usage reaches the threshold',
 test('config validator accepts defaults and rejects wrong types', () => {
   const validator = normalizeConfig;
   assert.equal(validator({}).directoryName, '.ai-for-memory');
-  assert.equal(validator({}).mcpEnabled, true);
+  // MCP egress adds an HTTP surface; it must stay off until asked for.
+  assert.equal(validator({}).mcpEnabled, false);
   assert.equal(validator({}).maxContextChars, 30000);
   assert.equal(validator({}).defaultTopK, 5);
   assert.equal(validator({}).reviewHighRiskOnly, true);
@@ -2987,7 +2988,7 @@ test('config validator accepts defaults and rejects wrong types', () => {
   assert.equal(validator({}).stagingRetentionDays, 30);
   assert.equal(validator({}).contextRetentionDays, 0);
   assert.equal(validator({}).decisionRetentionDays, 0);
-  assert.equal(validator({}).autoDecisionRetentionDays, 90);
+  assert.equal(validator({}).autoDecisionRetentionDays, 30);
   assert.equal(normalizeConfig({ autoDecisionRetentionDays: 0 }).autoDecisionRetentionDays, 0);
   assert.equal(validator({}).requestAnchor, true);
   assert.equal(validator({ mcpEnabled: false }).mcpEnabled, false);
@@ -4651,7 +4652,7 @@ test('record download cannot escape the knowledge directory', async () => {
     const request = {
       method: 'GET',
       url: `/ai-for-memory/api/record/download?${query.toString()}`,
-      headers: { host: '127.0.0.1:59164' },
+      headers: { host: '127.0.0.1:59164', 'sec-fetch-site': 'same-origin' },
       socket: { remoteAddress: '127.0.0.1', localPort: 59164 },
     };
     await handler(request, response);
@@ -4750,7 +4751,7 @@ test('panel external probe sends the per-kind API keys', async () => {
     const request = {
       method: 'GET',
       url: '/ai-for-memory/api/external?deep=1',
-      headers: { host: '127.0.0.1:59164' },
+      headers: { host: '127.0.0.1:59164', 'sec-fetch-site': 'same-origin' },
       socket: { remoteAddress: '127.0.0.1', localPort: 59164 },
     };
     await handler(request, response);
@@ -5249,15 +5250,14 @@ test('knowledge export round-trips provenance, verification and changes', () => 
   }
 });
 
-test('knowledge export writes to another directory and renders Markdown', () => {
+test('knowledge export writes under exports/ and renders Markdown', () => {
   const root = tempRoot();
   const store = new MemoryStore(root).init();
   store.remember({ doc_id: 'k_a', text: '归档分类要稳定', category: 'project_facts', source: 'user' });
-  const dest = path.join(root, 'offline-disk');
-  const written = writeKnowledgeExport(store, { dest, format: 'json' });
+  const written = writeKnowledgeExport(store, { dest: 'offline-disk', format: 'json' });
   assert.equal(written.ok, true);
   assert.equal(written.docs, 1);
-  assert.equal(path.dirname(written.path), dest);
+  assert.equal(path.dirname(written.path), path.join(root, 'exports', 'offline-disk'));
   assert.equal(fs.existsSync(written.path), true);
   const parsed = JSON.parse(fs.readFileSync(written.path, 'utf8'));
   assert.equal(parsed.docs[0].doc_id, 'k_a');
@@ -5272,7 +5272,7 @@ test('knowledge export writes to another directory and renders Markdown', () => 
   assert.match(md.content, /确认状态 已确认｜provenance authored/);
   assert.equal(normalizeExportFormat('markdown'), 'markdown');
 
-  const badFormat = writeKnowledgeExport(store, { dest, format: 'pdf' });
+  const badFormat = writeKnowledgeExport(store, { dest: 'offline-disk', format: 'pdf' });
   assert.equal(badFormat.ok, false);
   assert.match(badFormat.error, /json|markdown/);
 });
@@ -5295,13 +5295,13 @@ test('knowledge, SQL and RAG exports can be selected in any combination', async 
   assert.equal(missingRag.ok, false);
   assert.match(missingRag.error, /RAG/);
 
-  const dest = path.join(root, 'multi-export');
+  const dest = 'multi-export';
   const written = writeExportArtifacts(store, { types: ['knowledge', 'sql'], dest, format: 'json' });
   assert.equal(written.ok, true);
   assert.equal(written.files.length, 2);
   assert.ok(written.bytes > 0);
   const sqlFile = written.files.find((row) => row.type === 'sql').path;
-  assert.equal(path.dirname(sqlFile), dest);
+  assert.equal(path.dirname(sqlFile), path.join(root, 'exports', dest));
   assert.ok(sqlFile.endsWith('.sqlite'));
   const knowledgeFile = written.files.find((row) => row.type === 'knowledge').path;
   assert.equal(JSON.parse(fs.readFileSync(knowledgeFile, 'utf8')).docs[0].doc_id, 'k_a');
@@ -6914,10 +6914,11 @@ test('panel API rejects DNS-rebinding hosts and cross-site origins', () => {
     headers,
   });
 
-  // Same loopback origin in its usual spellings.
-  assert.equal(isTrustedRequest(request({ host: '127.0.0.1:56296' })), true);
-  assert.equal(isTrustedRequest(request({ host: 'localhost:56296' })), true);
-  assert.equal(isTrustedRequest(request({ host: '[::1]:56296' })), true);
+  // Same loopback origin in its usual spellings. A browser fetch also carries
+  // `Sec-Fetch-Site`, which is what the panel routes now require.
+  assert.equal(isTrustedRequest(request({ host: '127.0.0.1:56296', 'sec-fetch-site': 'same-origin' })), true);
+  assert.equal(isTrustedRequest(request({ host: 'localhost:56296', 'sec-fetch-site': 'same-origin' })), true);
+  assert.equal(isTrustedRequest(request({ host: '[::1]:56296', 'sec-fetch-site': 'same-origin' })), true);
   assert.equal(isTrustedRequest(request({
     host: '127.0.0.1:56296', origin: 'http://127.0.0.1:56296',
   })), true);
@@ -6936,6 +6937,12 @@ test('panel API rejects DNS-rebinding hosts and cross-site origins', () => {
   assert.equal(isTrustedRequest(request({
     host: '127.0.0.1:56296', 'sec-fetch-site': 'cross-site',
   })), false);
+  // A local script (curl, an npm postinstall hook, a VS Code extension) sends
+  // neither Origin nor Fetch Metadata: the panel API must not treat it as a
+  // browser session.
+  assert.equal(isTrustedRequest(request({ host: '127.0.0.1:56296' })), false);
+  // The MCP route keeps its bearer token and accepts non-browser clients.
+  assert.equal(isTrustedRequest(request({ host: '127.0.0.1:56296' }), { allowNonBrowser: true }), true);
   assert.equal(isTrustedRequest(request({ host: '127.0.0.1:9999' })), false);
   assert.equal(isTrustedRequest({
     socket: { remoteAddress: '10.0.0.5', localPort: 56296 },
@@ -7328,6 +7335,21 @@ test('session repair: find/resolve a synthetic artifact by id, prefix and path',
     assert.equal(resolveSessionLogTarget(root, 'synthetic').file, file);
     assert.equal(resolveSessionLogTarget(root, file).file, file);
     assert.throws(() => resolveSessionLogTarget(root, 'missing'), /没有找到会话/);
+
+    // A path argument is model-controlled: anything outside the sessions
+    // directory must be refused, or aim_repair becomes an arbitrary reader.
+    const outside = path.join(path.dirname(root), 'OUTSIDE.zstd');
+    fs.writeFileSync(outside, 'not a session log');
+    try {
+      assert.throws(() => resolveSessionLogTarget(root, outside), /只能修复 DSH 会话目录/);
+      assert.throws(
+        () => resolveSessionLogTarget(root, path.join(root, '..', path.basename(outside))),
+        /只能修复 DSH 会话目录/,
+      );
+      assert.throws(() => resolveSessionLogTarget(root, root), /只能修复 DSH 会话目录/);
+    } finally {
+      fs.rmSync(outside, { force: true });
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -7944,6 +7966,117 @@ test('store migration runs ordered steps, backs up touched files and bumps the v
     assert.equal(readJson(path.join(root, 'schema.json')).schema_version, 2);
 
     assert.throws(() => planMigrations(1, 3, [{ from: 2, to: 3 }]), /迁移链在 v1 处断裂/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('auto turn decisions stay out of retrieval and are capped', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    store.init();
+    fs.mkdirSync(store.decisionDir, { recursive: true });
+    const now = Date.now();
+    for (let index = 0; index < 3; index += 1) {
+      const file = path.join(store.decisionDir, `decision_auto_t${index + 1}_x${index}.json`);
+      fs.writeFileSync(file, JSON.stringify({
+        decision_id: `decision_auto_t${index + 1}_x${index}`,
+        decision: 'edited src/app.js',
+        outcome: 'observed',
+        created_at: new Date(now - (10 - index) * 60000).toISOString(),
+      }));
+      const stamp = new Date(now - (10 - index) * 60000);
+      fs.utimesSync(file, stamp, stamp);
+    }
+    // Instrumentation is not a knowledge document: neither the corpus nor a
+    // search may surface per-turn "I touched a file" rows.
+    assert.equal(store.documents().length, 0);
+    assert.equal(store.search('edited src/app.js').length, 0);
+
+    // The hard cap keeps the newest instrumentation, even with retention off.
+    store.pruneAutoDecisions(0, 2);
+    const left = fs.readdirSync(store.decisionDir).filter((name) => name.startsWith('decision_auto_')).sort();
+    assert.deepEqual(left, ['decision_auto_t2_x1.json', 'decision_auto_t3_x2.json']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('export refuses destinations outside the memory root', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    store.init();
+    const outside = path.join(path.dirname(root), 'OUTSIDE-TARGET.md');
+    const blocked = writeExportArtifacts(store, { dest: outside, types: ['knowledge'] });
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.error, /exports/);
+    assert.equal(fs.existsSync(outside), false, '绝对路径不能写出任何文件');
+
+    const escape = writeExportArtifacts(store, { dest: '../escape.md', types: ['knowledge'] });
+    assert.equal(escape.ok, false);
+    assert.equal(fs.existsSync(path.join(root, '..', 'escape.md')), false);
+
+    const inner = writeExportArtifacts(store, { dest: 'nested/kb.md', types: ['knowledge'] });
+    assert.equal(inner.ok, true);
+    const target = inner.files[0].path;
+    assert.ok(target.startsWith(path.join(root, 'exports')), '导出只能落在 exports/ 内');
+    assert.equal(fs.existsSync(target), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('stored artifacts are private and secrets are redacted', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root).init();
+    const secret = 'sk-abcdefghijklmnopqrstuvwxyz123456';
+    store.remember({ text: `调用密钥 ${secret} 连接`, category: 'project_facts', source: 'user' });
+    const docs = store.documents();
+    assert.equal(docs.length, 1);
+    assert.equal(docs[0].text.includes(secret), false);
+    assert.match(docs[0].text, /\[REDACTED:api-key\]/);
+
+    store.stage({ content: 'password=hunter2hunter2 写进过程记录' });
+    const staged = JSON.stringify(store.stagingRecords());
+    assert.equal(staged.includes('hunter2hunter2'), false);
+    assert.match(staged, /\[REDACTED\]/);
+
+    store.saveContext({ label: 'x', turns: [{ text: 'token=abc1234567890' }], text: 'ok', turnFrom: 1, turnTo: 1 });
+    const context = store.listContexts()[0];
+    const raw = fs.readFileSync(path.join(store.contextDir, `${context.context_id}.json`), 'utf8');
+    assert.equal(raw.includes('abc1234567890'), false);
+
+    if (process.platform !== 'win32') {
+      const file = path.join(store.knowledgeDir, 'mode-check.json');
+      writeJson(file, { ok: true });
+      assert.equal(fs.statSync(file).mode & 0o077, 0, '新文件必须是 0600');
+      assert.equal(fs.statSync(store.knowledgeDir).mode & 0o077, 0, '目录必须是 0700');
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('SQL route blocks extension loading, joins and unbounded raw selects', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root).init();
+    store.remember({ text: '归档分类要稳定', category: 'project_facts', source: 'user' });
+
+    assert.equal(isSafeSelect("SELECT load_extension('/tmp/x')"), false);
+    assert.equal(isSafeSelect("SELECT readfile('/etc/passwd')"), false);
+    assert.equal(translateToSql("SELECT load_extension('/tmp/x')"), null);
+    assert.equal(isSafeSelect('SELECT count(*) FROM knowledge_docs a, knowledge_docs b'), false);
+    assert.equal(isSafeSelect('SELECT * FROM knowledge_docs a JOIN knowledge_docs b'), false);
+
+    const plan = translateToSql('SELECT * FROM knowledge_docs');
+    assert.match(plan.sql, /LIMIT 50/, 'raw SQL 必须被外层 LIMIT 包住');
+    const result = runSqlQuery(store, 'SELECT * FROM knowledge_docs');
+    assert.equal(result.ok, true);
+    assert.ok(result.rows.length <= 50);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

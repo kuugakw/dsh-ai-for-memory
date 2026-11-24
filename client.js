@@ -1805,7 +1805,7 @@ window.__ModuleLoader__.load({
       const [formRagMount, setFormRagMount] = React.useState(false);
       // MCP egress for other local tools. The token is write-only: state only
       // reports whether one is stored, never the value.
-      const [formMcpEnabled, setFormMcpEnabled] = React.useState(true);
+      const [formMcpEnabled, setFormMcpEnabled] = React.useState(false);
       const [formMcpToken, setFormMcpToken] = React.useState('');
       const [mcpHasToken, setMcpHasToken] = React.useState(false);
       const [mcpTokenFile, setMcpTokenFile] = React.useState('');

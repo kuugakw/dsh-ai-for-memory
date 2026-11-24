@@ -182,19 +182,19 @@ const DEFAULTS = Object.freeze({
   contextRetentionDays: 0,
   decisionRetentionDays: 0,
   // Routine turn activity (`decision_auto_*`) is instrumentation, not an audit
-  // conclusion: keep three months by default so the decision scan stays bounded.
+  // conclusion: keep a month by default so the decision scan stays bounded.
   // Reviewed aim_decide records are covered only by decisionRetentionDays.
-  autoDecisionRetentionDays: 90,
+  autoDecisionRetentionDays: 30,
   // When a harness checkpoint (time/schema/reload notice) arrives without a
   // new user request in this same step, append a short anchor so the model does
   // not answer an older topic. A real incoming request always wins. Off only
   // for token-strict setups.
   requestAnchor: true,
-  // MCP egress over the DSH Web server's loopback listener. It exposes a small
-  // read/write memory surface to other MCP clients. Authentication is optional
-  // and OFF by default: acceptable only because DSH binds 127.0.0.1. Set a token
-  // before exposing the listener through any local reverse proxy.
-  mcpEnabled: true,
+  // MCP egress over the DSH Web server's loopback listener. Off by default:
+  // it adds a second, token-authenticated HTTP surface to the profile, and a
+  // user who never reads the docs should not keep that surface open. Turning
+  // it on in the panel generates `$DSH_HOME/ai-for-memory/mcp-token`.
+  mcpEnabled: false,
   mcpToken: '',
 });
 
@@ -1334,8 +1334,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         dest: {
           type: 'string',
           description:
-            'export 用：导出目标，可以是另一块盘上的目录（每个类型一个文件）或完整文件路径；'
-            + '省略时写到记忆目录的 exports/ 下。',
+            'export 用：导出子目录或文件名，必须是相对 <记忆目录>/exports/ 的相对路径'
+            + '（不接受绝对路径、盘符或 ..；写出前会再校验一次符号链接）；省略时直接写到 exports/ 下。',
         },
         types: {
           type: 'array',
@@ -2525,7 +2525,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         },
         session: {
           type: 'string',
-          description: 'repair/compact 用：会话 id（session-<uuid>、裸 uuid 或唯一前缀）或 .zstd 日志的绝对路径。',
+          description: 'repair/compact 用：会话 id（session-<uuid>、裸 uuid 或唯一前缀），或 DSH sessions 目录内日志的绝对路径；目录外的路径会被拒绝。',
         },
         deep: {
           type: 'boolean',
@@ -4149,7 +4149,11 @@ export function apply(ctx, config) {
     editor = undefined;
   }
   try {
-    const mcpAccess = ensureMcpToken(registryDir, resolved.mcpToken);
+    // Only mint the token file when the egress surface is actually enabled:
+    // a disabled MCP must not leave a credential on disk.
+    const mcpAccess = resolved.mcpEnabled === true
+      ? ensureMcpToken(registryDir, resolved.mcpToken)
+      : { token: '', file: '' };
     installApi(ctx, {
       config: resolved,
       entry: ctx?.fiber?.entry,
