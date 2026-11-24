@@ -7,6 +7,7 @@ import http from 'node:http';
 import net from 'node:net';
 import zlib from 'node:zlib';
 import { execFileSync, spawn } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { MemoryStore } from '../lib/store.js';
 import { defaultMemoryDirIgnoreStatus, ensureDefaultMemoryDirIgnored, ensureGitignoreEntry } from '../lib/gitignore.js';
@@ -41,7 +42,8 @@ import {
   categoryOf, formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
 } from '../lib/knowledge-query.js';
 import { applyDisclosure, buildIndex, RRF_K, reciprocalRankFusion, search, snippetOf, tokenize } from '../lib/retrieval.js';
-import { BoundedCache, CATEGORIES, appendJsonLine, dshHome, hourKey, listJsonlFiles, writeJson } from '../lib/util.js';
+import { BoundedCache, CATEGORIES, SCHEMA_VERSION, appendJsonLine, dshHome, hourKey, listJsonlFiles, readJson, withFileLockSync, writeJson } from '../lib/util.js';
+import { migrateStore, planMigrations } from '../lib/migrate.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
 import { ENGINE_OWNER, isCurrentDshChild, buildServerArgs, findModelFile, localEngineStatus, missingLocalEngineKinds, modelIdFromPath, parseLlamaServerCommandLine, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig, autoStartSkips, clearAutoStartSkip, noteAutoStartSkip } from '../lib/local-engine.js';
@@ -7136,6 +7138,89 @@ test('session repair: a message without an id is repaired in place', async (t) =
   }
 });
 
+test('session repair: identity stops at a message it cannot make valid', async (t) => {
+  if (!zstdAvailable) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
+  const root = tempRoot();
+  try {
+    // `id` is missing and so is `source`: identity may only invent id/role, so
+    // there is no safe plan. It must report that instead of fabricating a
+    // source or falling back to truncation on its own.
+    const events = [
+      { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+      { type: 'step/start', seq: 1, time: 1, data: { turn: 1, step: 1 } },
+      {
+        type: 'user/message', seq: 2, time: 1, surfaceOp: 'append',
+        data: { role: 'user', content: [{ type: 'text', text: '没有来源的便条' }] },
+      },
+      { type: 'step/end', seq: 3, time: 1, data: { turn: 1, step: 1 } },
+      { type: 'turn/end', seq: 4, time: 1, data: { turn: 1, reason: { kind: 'completed' } } },
+    ];
+    const shapes = validateMessageShapes(events);
+    assert.equal(shapes.ok, false);
+    assert.match(shapes.error, /缺少消息 id/);
+
+    const { file } = writeSyntheticSessionLog(root, events);
+    const before = fs.readFileSync(file);
+    // `auto` may fall back to truncation (documented), but it must never
+    // fabricate a source, and a dry run must not write anything.
+    const dry = await repairSessionLog(file, { apply: false });
+    if (dry.ok) {
+      assert.equal(dry.strategy, 'truncate', 'identity 不能凭空造 source，auto 只能退回截断');
+      assert.ok(dry.dropped > 0);
+    } else {
+      assert.match(dry.error, /没有找到能通过校验的修复方案/);
+    }
+    const identityOnly = await repairSessionLog(file, { strategy: 'identity', apply: false });
+    assert.equal(identityOnly.ok, false);
+    assert.match(identityOnly.error, /没有找到能通过校验的修复方案/);
+    // Nothing was written: content, seq and the missing source stay untouched.
+    assert.deepEqual(fs.readFileSync(file), before);
+    const scanned = await scanSessionLogs(root, { deep: true });
+    assert.equal(scanned.logs[0].status, 'corrupt');
+    assert.match(scanned.logs[0].error, /缺少消息 id/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('session repair: refuses a log format version it does not know', async (t) => {
+  if (!zstdAvailable) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
+  const root = tempRoot();
+  try {
+    // A future DSH artifact: same file shape, version 5. The tool must report
+    // it and leave it byte-for-byte alone instead of applying v4 rules.
+    const sessionDir = path.join(root, '--C-work--', 'session-v5');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const header = {
+      type: 'session', version: 5, id: 'session-v5', createdAt: 1795173530790,
+      cwd: 'C:\\work', isSeeded: false, delegationDepth: 0,
+    };
+    const events = [
+      { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 1, time: 1, data: { turn: 1, reason: { kind: 'completed' } } },
+    ];
+    const file = path.join(sessionDir, 'session.v5.jsonl.zstd');
+    fs.writeFileSync(file, encodeZstdLog([
+      `${JSON.stringify(header)}\n`,
+      events.map((event) => `${JSON.stringify(event)}\n`).join(''),
+    ]));
+    const before = fs.readFileSync(file);
+
+    const scan = await scanSessionLogs(root, { deep: true });
+    assert.equal(scan.logs[0].version, 5);
+    assert.equal(scan.logs[0].status, 'unsupported');
+    assert.match(scan.logs[0].error, /v5/);
+
+    const report = await repairSessionLog(file, { apply: true });
+    assert.equal(report.ok, false);
+    assert.match(report.error, /格式已变为 v5/);
+    assert.match(report.error, /未写入任何文件/);
+    assert.deepEqual(fs.readFileSync(file), before, '不认识的格式一个字节都不改');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('session repair: an unrecognized orphan event is truncated and closed', async (t) => {
   if (!zstdAvailable) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
   const root = tempRoot();
@@ -7745,6 +7830,118 @@ test('a long running turn is cleared mid-task and continues from a resume brief'
     const before = nodes.length;
     await preStep({ agent: { session }, step: 9, turn: 1, messages: [], signal }, () => {});
     assert.equal(nodes.length, before);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+test('file lock serializes read-modify-write across processes', async () => {
+  const root = tempRoot();
+  try {
+    const file = path.join(root, 'counter.json');
+    const utilUrl = pathToFileURL(path.join(REPO_ROOT, 'lib', 'util.js')).href;
+    const child = path.join(root, 'worker.mjs');
+    fs.writeFileSync(child, [
+      "import { withFileLockSync, readJson, writeJson } from " + JSON.stringify(utilUrl) + ';',
+      "const file = process.argv[2];",
+      'for (let i = 0; i < 25; i += 1) {',
+      '  withFileLockSync(file, () => {',
+      '    const n = (readJson(file)?.n ?? 0) + 1;',
+      '    writeJson(file, { n }, { durable: false });',
+      '  });',
+      '}',
+    ].join('\n'));
+    writeJson(file, { n: 0 });
+    const workers = Array.from({ length: 4 }, () => new Promise((resolve, reject) => {
+      const cp = spawn(process.execPath, [child, file], { stdio: 'ignore' });
+      cp.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`worker exited ${code}`))));
+      cp.on('error', reject);
+    }));
+    await Promise.all(workers);
+    assert.equal(readJson(file)?.n, 100, '4 个进程各加 25 次，一次更新都不能丢');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('file lock steals a stale lock and times out on a live one', () => {
+  const root = tempRoot();
+  try {
+    const file = path.join(root, 'state.json');
+    writeJson(file, { ok: true });
+    const lockDir = `${file}.lock`;
+    fs.mkdirSync(lockDir);
+    fs.writeFileSync(path.join(lockDir, 'owner.json'), '{"pid":1}');
+    const old = new Date(Date.now() - 60000);
+    fs.utimesSync(lockDir, old, old);
+    assert.equal(withFileLockSync(file, () => 'ran', { staleMs: 1000 }), 'ran');
+    assert.equal(fs.existsSync(lockDir), false, '抢到锁后要释放');
+
+    fs.mkdirSync(lockDir);
+    try {
+      assert.throws(
+        () => withFileLockSync(file, () => 'never', { timeoutMs: 100, staleMs: 60000 }),
+        /等待文件锁超时/,
+      );
+    } finally {
+      fs.rmSync(lockDir, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('store records a schema version and refuses a newer one', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    store.init();
+    const schemaFile = path.join(root, 'schema.json');
+    assert.equal(fs.existsSync(schemaFile), true, '首次使用要落下 schema.json');
+    assert.equal(readJson(schemaFile).schema_version, SCHEMA_VERSION);
+    store.init();
+    assert.equal(readJson(schemaFile).schema_version, SCHEMA_VERSION, '重复 init 不改版本');
+
+    writeJson(schemaFile, { schema_version: 99, updated_at: '2099-01-01T00:00:00.000Z' });
+    assert.throws(() => new MemoryStore(root).init(), /更新版本的插件/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('store migration runs ordered steps, backs up touched files and bumps the version', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    store.init();
+    const usage = store.knowledgeUsageFile;
+    fs.mkdirSync(path.dirname(usage), { recursive: true });
+    writeJson(usage, { version: 1, updated_at: '2020-01-01T00:00:00.000Z', docs: { keep: { at: '2020-01-01', count: 1 } } });
+    writeJson(path.join(root, 'schema.json'), { schema_version: 1, updated_at: '2020-01-01T00:00:00.000Z' });
+
+    const steps = [{
+      from: 1,
+      to: 2,
+      description: 'rename a hypothetical field',
+      files: (s) => [s.knowledgeUsageFile],
+      run: (s) => {
+        const data = readJson(s.knowledgeUsageFile);
+        writeJson(s.knowledgeUsageFile, { ...data, layout: 'v2' });
+      },
+    }];
+    const result = migrateStore(store, { to: 2, steps });
+    assert.equal(result.migrated, true);
+    assert.equal(result.from, 1);
+    assert.equal(result.to, 2);
+    const backup = path.join(result.backupDir, path.relative(root, usage));
+    assert.equal(fs.existsSync(backup), true, '迁移前要备份被改写的文件');
+    assert.equal(readJson(backup).layout, undefined, '备份是迁移前的旧内容');
+    assert.equal(readJson(usage).layout, 'v2');
+    assert.equal(readJson(path.join(root, 'schema.json')).schema_version, 2);
+
+    assert.throws(() => planMigrations(1, 3, [{ from: 2, to: 3 }]), /迁移链在 v1 处断裂/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

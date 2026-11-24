@@ -112,6 +112,12 @@ test('session doctor: reports a seq gap and truncates it only when asked', { ski
 
     const report = await doctorSessions({ env: { DSH_HOME: home }, repairLogs: true, apply: true });
     assert.equal(report.actions[0].kind, 'truncate');
+    // The apply report describes the state after the run: the row is no longer
+    // a pending defect, so it must not keep showing up as "gap".
+    assert.equal(report.rows[0].state, 'ok');
+    assert.equal(report.rows[0].repaired, true);
+    assert.match(report.rows[0].detail, /已修复：截断到断点/);
+    assert.match(formatDoctorReport(report), /已修复/);
     const after = await doctorSessions({ env: { DSH_HOME: home }, repairLogs: true });
     assert.equal(after.counts.gap, 0);
     const repaired = await readSessionLog(file);
@@ -152,6 +158,11 @@ test('session doctor: a message without an id is reported and repaired in place'
     const report = await doctorSessions({ env: { DSH_HOME: home }, repairLogs: true, apply: true });
     assert.equal(report.actions[0].kind, 'identity');
     assert.match(report.actions[0].detail, /补齐 1 条消息的身份/);
+    assert.equal(report.rows[0].state, 'ok');
+    assert.equal(report.rows[0].repaired, true);
+    assert.match(report.rows[0].detail, /已修复：为 1 条消息补上身份/);
+    assert.match(formatDoctorReport(report), /已修复/);
+    assert.equal(report.counts.invalid, 0);
 
     const after = await doctorSessions({ env: { DSH_HOME: home }, repairLogs: true });
     assert.equal(after.counts.invalid, 0);
@@ -161,6 +172,35 @@ test('session doctor: a message without an id is reported and repaired in place'
     assert.equal(typeof repaired.events[5].data.id, 'string');
     assert.ok(repaired.events[5].data.id.length > 0);
     assert.deepEqual(repaired.events[5].data.content, log.events[5].data.content);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('session doctor: reports a log format version it does not know', { skip: skipZstd }, async () => {
+  const home = tempHome();
+  try {
+    const id = 'session-v5';
+    const log = blankLog(id);
+    log.header.version = 5;
+    const file = path.join(home, 'sessions', BUCKET, id, 'session.v5.jsonl.zstd');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, encodeZstdLog([
+      `${JSON.stringify(log.header)}\n`,
+      log.events.map((event) => `${JSON.stringify(event)}\n`).join(''),
+    ]));
+    const before = fs.readFileSync(file);
+
+    const report = await doctorSessions({ env: { DSH_HOME: home }, repairLogs: true, apply: true });
+    assert.equal(report.rows[0].state, 'unsupported');
+    assert.equal(report.counts.unsupported, 1);
+    assert.equal(report.actions.length, 0, '不认识的格式不应该被改写');
+    assert.deepEqual(fs.readFileSync(file), before);
+    assert.match(formatDoctorReport(report), /版本不支持 1/);
+    assert.match(formatDoctorReport(report), /升级插件/);
+
+    const dry = await doctorSessions({ env: { DSH_HOME: home }, repairLogs: true });
+    assert.match(formatDoctorReport(dry), /升级插件/);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

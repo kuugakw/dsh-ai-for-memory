@@ -4,7 +4,7 @@
 >
 > 它不替代主 [README](../README.md)，也不替代安装、工具参数、面板操作、本地模型等专门文档。需要精确操作时，请以对应文档和面板为准。
 >
-> 对应版本：**0.5.4**。
+> 对应版本：**0.5.5**。
 
 ---
 
@@ -232,7 +232,7 @@ DSH 把每个对话写成 `session.v4.jsonl.zstd`。其中一条事件结构不�
 
 修复策略：
 
-- **identity**（`auto` 里最先尝试）：只给缺身份的消息补 `id`/`role`，事件、序号与正文一律不动；
+- **identity**（`auto` 里最先尝试）：只给缺身份的消息补 `id`/`role`，事件、序号与正文一律不动；缺 `source`/provider 这类补不了的日志会退回 `salvage`/`truncate`，不会造内容；
 - **salvage**：把旧版插件写入的游离 `developer/message` 改写成等价的 `user/message` notice；
 - **truncate**：截断到第一处结构违规之前，并补写 DSH 自己的收尾事件。
 

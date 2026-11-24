@@ -8,6 +8,7 @@
 
 ```text
 <workspace>/.ai-for-memory/
+├── schema.json     # 数据版本与迁移记录
 ├── staging/        # 过程记录
 ├── archive/        # 分类归档
 ├── snapshots/      # 快照
@@ -31,6 +32,26 @@
 - 相对路径：相对工作区解析。
 
 用过的根目录会登记到 `$DSH_HOME/ai-for-memory/roots.json`，面板的“记忆地址”下拉从这里读取。
+
+### 并发写入
+
+同一份记忆目录可能同时被 DSH 宿主、Web 面板的 API 进程和 MCP 客户端写。原子写（临时文件 + rename）只保证单个文件不会写坏，不保证两次读改写不互相覆盖；所以所有**读改写**的共享文件都加了跨进程锁：
+
+- 锁是数据文件旁的 `<file>.lock/` 目录（`mkdir` 原子创建，目录里的 `owner.json` 记录 pid/主机/时间），进程结束即删；
+- 写者发现锁超过 10 秒没更新，会认定持有者已崩溃并接管（`staleMs`）；等待超过 5 秒仍未拿到锁会抛错，而不是静默写入（`timeoutMs`）；
+- 覆盖范围：知识用量权重 `_usage.json`、待确认/待提炼队列、提炼账本、`roots.json`、`session.json`、以及带 fsync 的 JSONL 追加；`staging` 这类高频日志仍走无锁追加（单行 O_APPEND，读侧容忍半行）。
+- **未加锁的部分**：RAG 索引重建不做整段锁——它要调外部 Embedding 服务，锁可能被持有几分钟；分片和 manifest 都是原子替换，并发重建以最后一次为准。SQLite 镜像由 SQLite 自己加锁。
+
+### 格式版本与迁移
+
+每个记忆根都有一个 `schema.json`（`{"schema_version": 1, "updated_at": "…"}`），记录这份数据是按哪一版布局写的。规则：
+
+- **老数据自动迁移**：插件启动时读 `schema.json`，比当前版本旧就按 `lib/migrate.js` 里的 `MIGRATIONS` 顺序执行迁移；每一步只跑一次，整条链成功后才把版本号写回，链断了（缺某一步）会直接报错而不是跳过。
+- **迁移前自动备份**：每一步声明它要改写的文件，迁移开始前先把这些文件复制到 `backups/schema-v<旧版本>-<时间戳>/`（保留相对路径）。迁移中途失败可以按备份还原，不需要你提前手工备份。
+- **新数据拒绝降级**：`schema.json` 的版本比当前插件新时（例如从 0.6 回到 0.5），初始化直接报「数据由更新版本的插件写入」，宁可打不开也不按旧规则改写。
+- **没有 `schema.json` 的旧目录**：视为当前版本（v1 布局早于这个文件），第一次初始化时补写一份。
+- **加新迁移**：在 `lib/migrate.js` 的 `MIGRATIONS` 里追加 `{ from, to, description, files(store), run(store) }`，把 `SCHEMA_VERSION` 加一，并补一个用 v1 fixture 跑通迁移的测试（参考 `test/core.test.mjs` 的 migration 用例）。
+
 
 ---
 

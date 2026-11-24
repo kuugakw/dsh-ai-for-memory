@@ -157,6 +157,8 @@ JSON 导出保留 `provenance`、`verified`、`changes`、`confidence`、`eviden
 
 DSH 把每个对话写成 `~/.dsh/sessions/<工作区分桶>/<会话>/session.v<N>.jsonl.zstd`（多段 zstd 帧，逐批追加）。只要某一段完整帧里有一条事件违反当前会话格式，DSH 读取时就会整体拒绝，报 `stored session ... is corrupt` / `SessionFormatError`；DSH 自身没有删除或修复接口，于是这个对话再也打不开。
 
+> **格式边界。** 本工具只处理 `v${4}`（当前 DSH 的 `session.v4`）。这套日志是 DSH 私有的、逆向实现的格式，不是公开 API：DSH 一旦改成 `session.v5` 或调整事件结构，`scan` / `doctor` 会把日志标成「版本不支持」，`repair` / `compact` 直接拒绝，**不会用旧规则改写不认识的字节**；等插件跟进新格式后再修。**离开 DSH 没有独立形态**——体检、修复、占位日志都依赖 DSH 的目录与格式，不能单独使用。
+
 | action | 主要参数 | 作用 |
 |---|---|---|
 | `scan` | 可选 `deep` | 列出所有会话日志：物理/逻辑大小、事件数、结构状态、异常膨胀标记。`deep=true` 会解压并逐个事件校验（含消息身份，大日志较慢） |
@@ -196,11 +198,12 @@ DSH 把一个对话摊在三处，任何一处落后都会表现成「对话打�
 | `ghosts` | `auto`（默认）/ `placeholder` / `prune` / `keep` | 缺日志时：`auto` 以插件记忆存档为准——有存档就保留并写占位日志，没有就移除条目；`placeholder` 全部保留（占位日志打开是空对话）；`prune` 全部移除（先备份 `workspace.json.bak-<时间戳>`）；`keep` 只报告 |
 | `cache` | `clear`（默认）/ `keep` | 把比日志新的投影缓存改名成 `.bak-<时间戳>`，让 DSH 重新生成；`keep` 只报告 |
 
-`doctor` 不删除任何会话日志，也不覆盖已存在的日志：占位日志只写在没有日志的会话目录里。
+`doctor` 不删除任何会话日志，也不覆盖已存在的日志：占位日志只写在没有日志的会话目录里。`apply=true` 且修复成功时，本次报告里该行状态归为 `ok` 并带「已修复」标记（`rows[].repaired`），摘要计数按修复后的状态统计；失败的行保留原状态并在「已执行」里写明原因。
 
 修复策略：
 
 - `identity`（`auto` 里最先尝试）：只给缺身份的消息补 `id`/`role`，事件、序号和正文一个不改。DSH 打开会话时要求每条消息带 `id`（`user/message` 还要 `role`、`source.kind`、`content`），缺了会整份拒绝并报 `lacks an identified message`；
+  - 能力边界：它只能补 `id`/`role`。缺 `source.kind`、`assistant/message` 缺 `source.provider`/`source.model`、`tool/result` 缺 `source.callId`（或与 `toolCallId` 不一致）的消息它补不了——`auto` 会继续尝试 `salvage`/`truncate`，显式 `strategy=identity` 则报告「没有找到能通过校验的修复方案」，不会凭空造内容；
 - `salvage`：把旧版插件写入、却落在 step 之外的 `developer/message` 请求锚点/清理便条改写为等价的 `user/message` 便条，**保留全部历史事件**。当前版本已经改用 `user/message`，所以这些只是历史遗留的载体；
 - `truncate`（兜底）：截断到第一处结构损坏之前，并用 DSH 自带的合成收尾事件（未完成工具结果、`step/end`、`turn/end`）补全回合；会丢弃损坏点之后的事件，报告里写明丢了多少。
 

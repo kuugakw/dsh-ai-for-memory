@@ -1,15 +1,15 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.5.4-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.5.4-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
+[![Status](https://img.shields.io/badge/status-stable%200.5.5-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.5.5-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.5.4 是检索与元数据更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版补齐 npm 关键词（`ai-memory`、`agent-memory`、`llm-memory`、`mcp-server`），让包能在 `npm search memory` / `mcp` 里被搜到；功能与 0.5.3 相同。
+> **0.5.5 是稳定性与兼容性更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版补齐跨进程写入锁与数据版本迁移（`schema.json` + 自动备份），放宽 `engines.dsh` 上限，DSH 换会话日志格式时 `aim_repair` 改为「版本不支持」并拒绝写入；功能与 0.5.4 相同。
 >
-> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.4）。插件索引这类新渠道从当前版本（0.5.4）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
+> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.5）。插件索引这类新渠道从当前版本（0.5.5）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
 >
-> 升级前请备份记忆目录。
+> 升级前建议备份记忆目录；数据版本变化会走 `schema.json` 的迁移流程，迁移前自动把要改写的文件备份到 `backups/schema-v<旧版本>-<时间>/`，更详细的规则见 [配置与数据目录](docs/configuration.md#格式版本与迁移)。
 
 **快速入口：** [安装](docs/installation.md) · [功能全览](docs/features.md) · [特点与优点](docs/highlights.md) · [工具参考](docs/tools.md) · [面板](docs/panel.md) · [本地模型/推理引擎](docs/models.md) · [上下文与自动行为](docs/context.md) · [上下文清理机制](docs/context-clearing.md) · [检索与 RAG](docs/search.md) · [知识库](docs/knowledge.md) · [配置](docs/configuration.md) · [隐私](docs/security.md) · [常见问题](docs/faq.md) · [开发](docs/development.md) · [更新记录](CHANGELOG.md)
 
@@ -93,6 +93,14 @@ AI for Memory 把这些信息分开保存、按需取回：
 
 ---
 
+## 依赖与边界
+
+- **需要 DSH 才成立。** 插件是 DSH bundle，六个 `aim_*` 工具、面板和记忆目录都挂在 DSH 的会话/工作区模型上；离开 DSH 没有独立形态，也不提供独立 CLI 或服务。
+- **会话日志体检依赖 DSH 的私有格式。** `aim_repair` 读的是 DSH 的 `session.v4.jsonl.zstd`（zstd 帧 + 它自己的校验器），这套格式是逆向实现的，不是公开 API。DSH 改日志结构时，工具会报「版本不支持」并拒绝写入——不会拿旧规则去改不认识的文件，等插件升级后再修。
+- **`engines.dsh` 不设上限。** 0.2.x 是验证过的版本；更高版本仍可安装（不被版本检查拦住），但日志格式若变化，`aim_repair` 只降级成只读报警，其余记忆功能不依赖这套格式。
+
+---
+
 ## 三个重要原则
 
 ### 1. JSON 是底座
@@ -119,7 +127,7 @@ verified: false
 ## 快速开始
 
 ```bash
-dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.4
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.5
 ```
 
 也可以在 DSH **设置 → 插件 → 添加插件** 中填 `dsh-ai-for-memory`。本地开发用目录安装：
@@ -202,9 +210,11 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 ## 更新内容
 
-当前版本 **0.5.4**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.5.5**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
+
+- **0.5.5**：新增跨进程写入锁（`withFileLockSync` / `withFileLock`，`mkdir` 原子锁 + 陈旧锁接管），读改写共享文件不再后写覆盖先写；新增 `schema.json` 数据版本与迁移框架（老数据自动迁移，迁移前备份要改写的文件，新版本数据拒绝降级写入）；`engines.dsh` 去掉 `<0.3.0` 上限；`aim_repair` 遇到不认识的会话日志版本时标「版本不支持」并拒绝写入；`doctor` 修复后状态归位 `ok` 并标「已修复」；面板深度体检提示与文档补齐消息身份/`identity` 边界说明；
 
 - **0.5.4**：npm 关键词补上 `ai-memory`、`agent-memory`、`llm-memory`、`mcp-server`（配合已有的 `dsh`、`dsh-plugin`、`memory`），提升在 `npm search memory` / `mcp` 里的命中率；功能与 0.5.3 相同；
 - **0.5.3**：新增 `aim_repair action=doctor`（会话日志 / 索引 / 投影缓存三处体检）、对话级「只对指定对话开放」名单、上下文自动整理默认开启；npm 包补上 `test/`（`npm test` 不再 ENOENT）、README 徽章改指 Releases（npm 页面没有 `package.json`，相对链接必然 404）、`0.0.0-stage` 占位版本标记废弃；

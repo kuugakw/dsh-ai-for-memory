@@ -29,7 +29,7 @@ git check-ignore -v .ai-for-memory/
 推荐从 npm 安装：
 
 ```bash
-dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.4
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.5
 ```
 
 `<profile>` 换成你的 DSH profile（例如 `desktop`）。安装后重启 DSH；工具、侧栏入口和面板由 bundle 自动加载。
@@ -59,7 +59,7 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 环境要求：
 
 - **Node.js 20+** 可以运行插件和本地记忆；
-- **DSH 0.2.x**（`>=0.2.0-rc.1 <0.3.0`）；
+- **DSH 0.2.x**（`engines.dsh` 为 `>=0.2.0-rc.1`，不设上限：0.3+ 也能安装，只是没有验证过；会话日志体检只按 v4 格式工作，格式变了会报「版本不支持」而不是改坏文件）；
 - **SQL 查询和 SQLite 镜像**需要运行时有 `node:sqlite`（Node 22.5+ 起内置）；
 - RAG 需要配置外部 Embedding 和 Rerank 服务，不需要 `node:sqlite`。
 
