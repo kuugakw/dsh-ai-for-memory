@@ -1,4 +1,4 @@
-name: market
+﻿name: market
 
 # Publishes the plugin index that DSH's experimental "Custom plugin indexes"
 # feature can be pointed at (index.json + icons/ under market/).
@@ -53,7 +53,7 @@ jobs:
 
       - uses: actions/configure-pages@v5
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: market
 
