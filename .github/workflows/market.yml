@@ -1,4 +1,4 @@
-﻿name: market
+name: market
 
 # Publishes the plugin index that DSH's experimental "Custom plugin indexes"
 # feature can be pointed at (index.json + icons/ under market/).
