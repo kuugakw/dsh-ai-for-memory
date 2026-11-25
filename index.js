@@ -117,6 +117,10 @@ const DEFAULTS = Object.freeze({
   knowledgeBackend: 'json',
   reviewHighRiskOnly: true,
   maxContentChars: 20000,
+  // Redact recognizable credentials (sk-…, ghp_…, password=…) before anything
+  // is written to disk. On by default; turn off only if you deliberately record
+  // a configuration line that looks like a secret.
+  redactSecrets: true,
   maxSnapshotBytes: 262144,
   // New conversations are private by default. Cross-conversation search,
   // restore and the merged view can read full archived conversations, so
@@ -412,6 +416,7 @@ function storeOptions(config) {
     maxContentChars: config.maxContentChars,
     maxSnapshotBytes: config.maxSnapshotBytes,
     defaultTopK: config.defaultTopK,
+    redactSecrets: config.redactSecrets,
     knowledgeBackend: config.knowledgeBackend,
     stagingRetentionDays: config.stagingRetentionDays,
     contextRetentionDays: config.contextRetentionDays,
@@ -1559,10 +1564,11 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           const outside = lookupSources(context)
             .filter((candidate) => candidate.store !== store)
             .reduce((sum, candidate) => sum + candidate.store.listSnapshots().length, 0);
-          return formatSnapshotList(own)
+          const body = formatSnapshotList(own)
             + (outside > 0
               ? `\n其他对话/共享层还有 ${outside} 个快照；restore 默认会跨对话查找。`
               : '');
+          return wrapMemoryData('aim_context/list', body);
         }
 
         if (action === 'remember') {
@@ -2287,9 +2293,10 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
               : '暂无上下文存档。';
           }
           rows.sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)));
-          return [`共 ${rows.length} 个上下文存档${requested === 'all' ? '（所有对话）' : ''}：`, ...rows.map((row) => (
+          const body = [`共 ${rows.length} 个上下文存档${requested === 'all' ? '（所有对话）' : ''}：`, ...rows.map((row) => (
             `- ${row.context_id}｜${row.label}｜${row.origin_label}｜第 ${row.turn_from}-${row.turn_to} 轮｜${row.turn_count} 轮｜${row.chars} 字符｜${row.created_at}`
           ))].join('\n');
+          return wrapMemoryData('aim_context/list', body);
         }
 
         if (action === 'status') {
@@ -2970,8 +2977,14 @@ export function installContextManagement(ctx, config, deps, runtime) {
     const ids = [...engineTurnStarted];
     engineTurnStarted.clear();
     for (const id of ids) {
+      // A new turn may have claimed the engine again while we were awaiting a
+      // previous stop; killing it then would leave that turn without RAG.
+      if (engineTurnStarted.has(id)) continue;
       try {
-        await stopLocalEngine(id);
+        // Idle stop means "release the GPU now": cancel an in-flight load
+        // instead of waiting for the weights and CUDA context to settle, which
+        // is the very thing this stop exists to free.
+        await stopLocalEngine(id, { cancelStart: true });
         // eslint-disable-next-line no-console
         console.log(`[ai-for-memory] 每轮模式空闲，已释放本地引擎 ${id}`);
       } catch (error) {

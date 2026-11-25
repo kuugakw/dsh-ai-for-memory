@@ -65,13 +65,73 @@
       },
       "versions": [
         {
+          "version": "0.5.9",
+          "publishTimestamp": 1795529373,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.0-rc.1"
+          }
+        },
+        {
+          "version": "0.5.8",
+          "publishTimestamp": 1795529039,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.0-rc.1"
+          }
+        },
+        {
+          "version": "0.5.7",
+          "publishTimestamp": 1795525166,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.0-rc.1"
+          }
+        },
+        {
+          "version": "0.5.6",
+          "publishTimestamp": 1795521373,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.0-rc.1"
+          }
+        },
+        {
+          "version": "0.5.5",
+          "publishTimestamp": 1795520989,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.0-rc.1"
+          }
+        },
+        {
+          "version": "0.5.4",
+          "publishTimestamp": 1795518095,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.0-rc.1"
+          }
+        },
+        {
           "version": "0.5.3",
           "publishTimestamp": 1795442498,
           "source": {
             "type": "npm"
           },
           "engines": {
-            "dsh": ">=0.2.0-rc.1 <0.3.0"
+            "dsh": ">=0.2.0-rc.1"
           }
         },
         {
@@ -81,7 +141,7 @@
             "type": "npm"
           },
           "engines": {
-            "dsh": ">=0.2.0-rc.1 <0.3.0"
+            "dsh": ">=0.2.0-rc.1"
           }
         },
         {
@@ -89,6 +149,9 @@
           "publishTimestamp": 1795437188,
           "source": {
             "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.0-rc.1"
           }
         }
       ]

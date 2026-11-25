@@ -38,18 +38,19 @@
 同一份记忆目录可能同时被 DSH 宿主、Web 面板的 API 进程和 MCP 客户端写。原子写（临时文件 + rename）只保证单个文件不会写坏，不保证两次读改写不互相覆盖；所以所有**读改写**的共享文件都加了跨进程锁：
 
 - 锁是数据文件旁的 `<file>.lock/` 目录（`mkdir` 原子创建，目录里的 `owner.json` 记录 pid/主机/时间），进程结束即删；
-- 写者发现锁超过 10 秒没更新，会认定持有者已崩溃并接管（`staleMs`）；如果锁的 owner 记录里是同一台机器上已经不存在的 pid，则立即接管；如果锁目录里根本没有 owner 记录（崩溃发生在「建目录」和「写 owner」之间）且已存在超过 1 秒，也会被接管；等待超过 5 秒仍未拿到锁会抛错，而不是静默写入（`timeoutMs`）；
+- 写者发现锁超过 10 秒没更新，会认定持有者已崩溃并接管（`staleMs`）；如果锁的 owner 记录里是同一台机器上已经不存在的 pid，则立即接管；如果锁目录里根本没有 owner 记录（崩溃发生在「建目录」和「写 owner」之间）且已存在超过 1 秒，也会被接管；等待超过 5 秒仍未拿到锁会抛错，而不是静默写入（`timeoutMs`）；释放前会校验 owner 的 nonce/pid/host，锁被接管后旧持有者不会删掉新锁；
+- **记忆目录不支持跨机器共享**：锁的存活判断依赖同机 pid 和本机时钟，跨机器（NFS/SMB 同时挂载）时活锁只能等 `staleMs` 超时，而调用方通常先超时。需要多机访问时请每台机器各自用自己的记忆目录（或用 Git 同步，但别同时写）；
 - 覆盖范围：知识用量权重 `_usage.json`、待确认/待提炼队列、提炼账本、`roots.json`、`session.json`、以及带 fsync 的 JSONL 追加；`staging` 这类高频日志仍走无锁追加（单行 O_APPEND，读侧容忍半行）。
 - **未加锁的部分**：RAG 索引重建不做整段锁——它要调外部 Embedding 服务，锁可能被持有几分钟；分片和 manifest 都是原子替换，并发重建以最后一次为准。SQLite 镜像由 SQLite 自己加锁。
 
 ### 格式版本与迁移
 
-每个记忆根都有一个 `schema.json`（`{"schema_version": 1, "updated_at": "…"}`），记录这份数据是按哪一版布局写的。规则：
+每个记忆根都有一个 `schema.json`（`{"schema_version": 2, "updated_at": "…"}`），记录这份数据是按哪一版布局写的。规则：
 
-- **老数据自动迁移**：插件启动时读 `schema.json`，比当前版本旧就按 `lib/migrate.js` 里的 `MIGRATIONS` 顺序执行迁移；每一步只跑一次，整条链成功后才把版本号写回，链断了（缺某一步）会直接报错而不是跳过。
+- **老数据自动迁移**：插件启动时读 `schema.json`，比当前版本旧就按 `lib/migrate.js` 里的 `MIGRATIONS` 顺序执行迁移；每一步只跑一次，整条链成功后才把版本号写回，链断了（缺某一步）会直接报错而不是跳过。v1→v2 是「把 0.5.7 之前落盘的旧数据全库脱敏」，逐文件备份、幂等，并遵守 `redactSecrets` 开关。
 - **迁移前自动备份**：每一步声明它要改写的文件，迁移开始前先把这些文件复制到 `backups/schema-v<旧版本>-<时间戳>/`（保留相对路径）。迁移中途失败可以按备份还原，不需要你提前手工备份。
 - **新数据拒绝降级**：`schema.json` 的版本比当前插件新时（例如从 0.6 回到 0.5），初始化直接报「数据由更新版本的插件写入」，宁可打不开也不按旧规则改写。
-- **没有 `schema.json` 的旧目录**：视为当前版本（v1 布局早于这个文件），第一次初始化时补写一份。
+- **没有 `schema.json` 的旧目录**：视为 v1（已知最早布局）并跑完整条迁移链，而不是当成最新版——迁移是幂等的，跳过才可能留下旧布局。
 - **加新迁移**：在 `lib/migrate.js` 的 `MIGRATIONS` 里追加 `{ from, to, description, files(store), run(store) }`，把 `SCHEMA_VERSION` 加一，并补一个用 v1 fixture 跑通迁移的测试（参考 `test/core.test.mjs` 的 migration 用例）。
 
 
@@ -63,6 +64,7 @@
 | `directoryName` | `.ai-for-memory` | 跟随工作区时使用的目录名 |
 | `defaultTopK` | 5 | 默认返回条数 |
 | `knowledgeBackend` | `json` | `json` 或 `sqlite` |
+| `redactSecrets` | `true` | 写入前脱敏（`sk-…`/`ghp_…`/`password=…` 等）；确实要记录配置行时可关 |
 | `defaultPublic` | `false` | 新对话是否默认对其他对话开放 |
 | `reviewHighRiskOnly` | `true` | `true`=只审查 high，medium 直接放行；设为 `false` 才审查 medium |
 | `autoEnabled` | `true` | 自动整理总开关 |

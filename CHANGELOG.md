@@ -2,6 +2,31 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 未发布
+
+### 安全与数据
+
+- **锁释放前校验持有者**：之前 `withFileLockSync` 的 `finally` 无条件 `rmSync` 锁目录。临界区超过 `staleMs` 时锁可能已被别人接管，旧持有者收尾会删掉新持有者的锁，让第三个写者同时进入。现在锁带 nonce/pid/host，释放时只删自己的；新增跨进程回归测试（旧持有者释放后新锁仍在）。
+- **v1→v2 迁移回填脱敏**：0.5.7 只在写入口脱敏，之前落盘的密钥仍明文躺在 `knowledge/`、`contexts/`、`staging/`、`decisions/` 等目录。`SCHEMA_VERSION` 升到 2，v1→v2 用 `redactDeep` 全库改写（逐文件备份、可回滚、幂等）；缺少 `schema.json` 的目录按 v1 处理而不是当成最新版，迁移本身加 `schema.json` 锁。
+- **新增 `redactSecrets` 开关**（默认开）：确实要记录配置行的用户可关掉写时脱敏，迁移也遵守这个开关；脱敏规则去掉前导 `\b`，`DB_PASSWORD=`/`MY_SECRET=` 这类环境变量写法不再漏掉。
+- **面板 API 不再接受 `Sec-Fetch-Site: none`**：本机脚本加一个静态头就能伪造该值，`none` 只防「忘了设头的跨站请求」，而那本来就被 CORS 挡着。安全文档改为如实说明这层不是脚本认证。
+- **本地引擎空闲停止不再等权重加载完**：`stopLocalEngine` 传 `cancelStart: true`，空闲停止立即 SIGTERM 正在加载的进程；循环里重检 `engineTurnStarted`，新回合刚认领的引擎不会被误杀。
+
+### 检索与分发
+
+- **检索候选集改用倒排 postings**：`search()` 不再对全库逐篇跑 BM25、token 碰撞门控和最终打分，只扫与查询共享 token 的文档；`recordKnowledgeUsage` 的 doc_id 集合复用 `documents()` 缓存，不再每次检索重建。
+- **插件索引的 `engines.dsh` 改用当前 manifest**：0.5.1–0.5.3 在 npm 上仍带历史 `<0.3.0` 上限，照抄会让 DSH 0.3 用户通过索引装不上任何版本；`compareVersions` 按 semver 处理预发布（`0.6.0-rc.1 < 0.6.0`）。
+- **端点探测成功长期缓存**：成功结果在进程内不再过期（能力不会自己变），失败仍按 5 秒 TTL 重试；缓存键包含 kind/base/model/key，上限 64 条，配云端时不会每轮重复计费。
+- **`npm run check`**：校验 `market/index.json` 与 `package.json` 的版本和 `engines.dsh` 一致（CI 里的 `lint` 步骤尚未接入——改 workflow 需要 `workflow` 权限的令牌）。
+
+### 会话修复
+
+- **ghosts 移除的条目可合并恢复**：执行 `prune` 前额外写 `workspace.removed-*.json`（按 workspace 记录被移除的 id），报告明确「整体覆盖备份会丢掉 doctor 之后的新条目，要按 id 合并回去」；占位日志文案改为「日志已丢失，内容无法恢复，占位只是让对话能打开」。
+
+### 数据边界
+
+- `aim_context action=list`（快照列表、存档列表）的内容也包进 `<<<MEMORY-DATA…>>>`，不再是裸文本进入模型上下文。
+
 ## 0.5.9（2026-11-24）
 
 ### 修复

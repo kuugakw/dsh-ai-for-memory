@@ -981,6 +981,25 @@ test('turn digest keeps the last completed turns', () => {
   assert.equal(collectTurnDigest([], 2), null);
 });
 
+test('endpoint probe caches a successful capability result', async () => {
+  let calls = 0;
+  const gate = createEndpointGate({
+    timeoutMs: 100,
+    ttlMs: 0,
+    fetchImpl: async (url) => {
+      calls += 1;
+      if (url.endsWith('/props')) return { ok: true, json: async () => ({ has_embeddings: true }) };
+      throw new Error('no inference expected');
+    },
+  });
+  const config = { externalEmbedBaseUrl: 'http://probe:9999' };
+  assert.equal(await gate.configuredEndpointReachable('embedding', config), true);
+  assert.equal(await gate.configuredEndpointReachable('embedding', config), true);
+  // Capability does not appear or disappear, and re-probing a paid endpoint on
+  // every turn is a billing problem: a success outlives the short TTL.
+  assert.equal(calls, 1);
+});
+
 test('auto mode triggers after the configured number of turns', async () => {
   const root = tempRoot();
   const workspace = path.join(root, 'workspace');
@@ -1028,7 +1047,7 @@ test('auto mode triggers after the configured number of turns', async () => {
     const scopes = new MemoryScopes(memoryRoot);
     const conversation = scopes.sessionStoreFor('session-test', {});
     assert.equal(conversation.key, sessionKey('session-test'));
-    assert.equal(scopes.readMeta(conversation.key).schema_version, 1);
+    assert.equal(scopes.readMeta(conversation.key).schema_version, SCHEMA_VERSION);
 
     onSessionEvent(session, { type: 'turn/end', data: { turn: 1 } });
     assert.equal(conversation.store.stagingRecords().length, 0);
@@ -1700,10 +1719,10 @@ test('promote mines the three layers once and deduplicates', () => {
     // Every mined document carries provenance back to its layer item.
     assert.ok(docs.every((doc) => doc.evidence.length >= 1));
     assert.ok(docs.every((doc) => /^(staging|archive|context|decision):/.test(doc.evidence[0].ref)));
-    assert.ok(docs.every((doc) => doc.schema_version === 1));
+    assert.ok(docs.every((doc) => doc.schema_version === SCHEMA_VERSION));
     const ledger = JSON.parse(fs.readFileSync(path.join(root, 'knowledge', '_promoted.json'), 'utf8'));
     assert.equal(ledger.version, 2);
-    assert.equal(ledger.schema_version, 1);
+    assert.equal(ledger.schema_version, SCHEMA_VERSION);
 
     // A second pass is a no-op: the ledger remembers what was mined.
     const second = store.promoteKnowledge();
@@ -1793,7 +1812,7 @@ test('remember merges the same fact and keeps provenance', () => {
     assert.equal(store.documents().length, 1);
     assert.equal(store.documents()[0].text, '另一条完全不同的知识，不能覆盖旧事实');
     assert.equal(collided.changes.at(-1).previous_text, 'DSH 的压缩阈值默认是 0.8');
-    assert.equal(collided.schema_version, 1);
+    assert.equal(collided.schema_version, SCHEMA_VERSION);
 
     // A web fact is classified as external sourcing even without a category.
     const web = store.remember({ text: 'DSH 插件文档在线上可查', source: 'web', url: 'https://example.com/docs' });
@@ -7975,6 +7994,57 @@ test('store migration runs ordered steps, backs up touched files and bumps the v
   }
 });
 
+test('redactSecrets:false keeps a deliberately recorded configuration line', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root, { redactSecrets: false });
+    store.init();
+    store.remember({ text: '测试环境 api_key=test-abc123，上线前换掉', category: 'project_facts', source: 'user' });
+    assert.equal(store.documents()[0].text, '测试环境 api_key=test-abc123，上线前换掉');
+    const scrubbed = new MemoryStore(root);
+    scrubbed.init();
+    scrubbed.remember({ text: 'key=sk-ABCDEFGHIJKLMNOPQRSTUV', category: 'project_facts', source: 'user' });
+    // The default stays on: a pasted key never becomes a permanent fact.
+    const all = scrubbed.documents().map((doc) => doc.text).join('\n');
+    assert.doesNotMatch(all, /sk-ABCDEFGHIJKLMNOPQRSTUV/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('v1 to v2 migration redacts secrets already on disk', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root);
+    store.init();
+    // Simulate a 0.5.6 store: plaintext secret in knowledge and staging.
+    const docFile = path.join(root, 'knowledge', 'doc.json');
+    fs.writeFileSync(docFile, JSON.stringify({
+      doc_id: 'doc', text: 'deploy token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', category: 'project_facts',
+    }));
+    fs.writeFileSync(path.join(root, 'staging', '20260101-00.jsonl'), `${JSON.stringify({
+      id: 's1', content: 'DB_PASSWORD=hunter2', created_at: '2026-01-01T00:00:00.000Z',
+    })}\n`);
+    writeJson(path.join(root, 'schema.json'), { schema_version: 1, updated_at: '2026-01-01T00:00:00.000Z' });
+
+    const migrated = new MemoryStore(root);
+    migrated.init();
+    assert.equal(readJson(path.join(root, 'schema.json')).schema_version, 2);
+    assert.match(fs.readFileSync(docFile, 'utf8'), /\[REDACTED:/);
+    assert.doesNotMatch(fs.readFileSync(docFile, 'utf8'), /ghp_/);
+    assert.match(fs.readFileSync(path.join(root, 'staging', '20260101-00.jsonl'), 'utf8'), /\[REDACTED/);
+    assert.ok(fs.readdirSync(path.join(root, 'backups')).length >= 1, '迁移前要备份');
+    const backups = fs.readdirSync(path.join(root, 'backups'));
+    assert.ok(backups.some((name) => fs.existsSync(path.join(root, 'backups', name, 'knowledge', 'doc.json'))));
+
+    // Idempotent: a second open must not fail or re-redact.
+    migrated.init();
+    assert.equal(readJson(path.join(root, 'schema.json')).schema_version, 2);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('auto turn decisions stay out of retrieval and are capped', () => {
   const root = tempRoot();
   try {
@@ -8114,6 +8184,43 @@ test('file lock takes over a lock whose owner process is gone', () => {
     // A crashed writer's lock must not block the next writer until `staleMs`.
     assert.equal(withFileLockSync(file, () => 'ran', { timeoutMs: 1000, staleMs: 60000 }), 'ran');
     assert.equal(fs.existsSync(lockDir), false, '接管后要释放');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('file lock release does not delete a lock that was stolen from us', async () => {
+  const root = tempRoot();
+  try {
+    const file = path.join(root, 'state.json');
+    const utilUrl = pathToFileURL(path.join(REPO_ROOT, 'lib', 'util.js')).href;
+    const script = path.join(root, 'holder.mjs');
+    const sleep = 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ';
+    fs.writeFileSync(script, [
+      `import { withFileLockSync } from ${JSON.stringify(utilUrl)};`,
+      'const file = process.argv[2];',
+      `const sleepMs = (ms) => ${sleep}ms);`,
+      `withFileLockSync(file, () => { console.log('locked'); sleepMs(400); }, { staleMs: 50, timeoutMs: 5000 });`,
+    ].join('\n'));
+    const child = spawn(process.execPath, [script, file], { stdio: ['ignore', 'pipe', 'pipe'] });
+    await new Promise((resolve, reject) => {
+      child.stdout.once('data', resolve);
+      child.once('error', reject);
+    });
+    const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    // The original holder is inside its critical section. We steal its lock
+    // (staleMs 50) and keep holding while it finishes and runs its release.
+    let ownerWhileHeld = null;
+    withFileLockSync(file, () => {
+      sleepMs(500);
+      const lockDir = `${file}.lock`;
+      if (fs.existsSync(lockDir)) {
+        ownerWhileHeld = JSON.parse(fs.readFileSync(path.join(lockDir, 'owner.json'), 'utf8'));
+      }
+    }, { staleMs: 50, timeoutMs: 5000 });
+    await new Promise((resolve) => { child.once('exit', resolve); });
+    assert.ok(ownerWhileHeld, '旧持有者的释放不能删掉新持有者的锁');
+    assert.equal(ownerWhileHeld.pid, process.pid);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

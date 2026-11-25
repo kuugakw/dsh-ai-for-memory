@@ -46,7 +46,8 @@
   "scripts": {
     "test": "node --test test/core.test.mjs test/session-doctor.test.mjs test/conversation-access.test.mjs",
     "prepublishOnly": "npm test",
-    "market:build": "node scripts/market/build-index.mjs"
+    "market:build": "node scripts/market/build-index.mjs",
+    "check": "node scripts/check-metadata.mjs"
   },
   "publishConfig": {
     "access": "public",

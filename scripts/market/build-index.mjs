@@ -27,11 +27,42 @@ function fetchJson(url) {
   });
 }
 
+function parseVersion(version) {
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(String(version));
+  if (!match) return null;
+  return {
+    nums: [Number(match[1]), Number(match[2]), Number(match[3])],
+    pre: match[4] ? match[4].split('.') : [],
+  };
+}
+
+function compareIdentifiers(a, b) {
+  const an = /^\d+$/.test(a);
+  const bn = /^\d+$/.test(b);
+  if (an && bn) return Number(a) - Number(b);
+  if (an) return -1;
+  if (bn) return 1;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function compareVersions(a, b) {
-  const pa = a.split('.').map(Number);
-  const pb = b.split('.').map(Number);
+  const pa = parseVersion(a);
+  const pb = parseVersion(b);
+  if (!pa || !pb) return 0;
   for (let i = 0; i < 3; i += 1) {
-    if (pa[i] !== pb[i]) return pa[i] - pb[i];
+    if (pa.nums[i] !== pb.nums[i]) return pa.nums[i] - pb.nums[i];
+  }
+  // Semver prerelease: 0.6.0-rc.1 is *older* than 0.6.0, and a longer
+  // prerelease with equal fields is newer (0.6.0-rc.2 > 0.6.0-rc).
+  if (pa.pre.length === 0 && pb.pre.length === 0) return 0;
+  if (pa.pre.length === 0) return 1;
+  if (pb.pre.length === 0) return -1;
+  const length = Math.max(pa.pre.length, pb.pre.length);
+  for (let i = 0; i < length; i += 1) {
+    if (pa.pre[i] === undefined) return -1;
+    if (pb.pre[i] === undefined) return 1;
+    const compared = compareIdentifiers(pa.pre[i], pb.pre[i]);
+    if (compared !== 0) return compared;
   }
   return 0;
 }
@@ -102,13 +133,17 @@ const index = {
         category: 'memory',
         labels: ['context', 'repair', 'panel'],
       },
-      versions: versions.map(([version, meta]) => {
+      versions: versions.map(([version]) => {
         const entry = {
           version,
           publishTimestamp: published(version),
           source: { type: 'npm' },
         };
-        if (meta.engines?.dsh) entry.engines = { dsh: meta.engines.dsh };
+        // The index describes what *this plugin* supports, not what a tarball
+        // declared when it was published. Published 0.5.1–0.5.3 still carry the
+        // historical `<0.3.0` upper bound on npm; copying that would hide every
+        // version from DSH 0.3 users installing through the index.
+        if (manifest.engines?.dsh) entry.engines = { dsh: manifest.engines.dsh };
         return entry;
       }),
     },
