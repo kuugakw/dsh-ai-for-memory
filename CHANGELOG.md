@@ -2,7 +2,7 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
-## 未发布
+## 0.5.10（2026-11-25）
 
 ### 安全与数据
 
@@ -17,7 +17,12 @@
 - **检索候选集改用倒排 postings**：`search()` 不再对全库逐篇跑 BM25、token 碰撞门控和最终打分，只扫与查询共享 token 的文档；`recordKnowledgeUsage` 的 doc_id 集合复用 `documents()` 缓存，不再每次检索重建。
 - **插件索引的 `engines.dsh` 改用当前 manifest**：0.5.1–0.5.3 在 npm 上仍带历史 `<0.3.0` 上限，照抄会让 DSH 0.3 用户通过索引装不上任何版本；`compareVersions` 按 semver 处理预发布（`0.6.0-rc.1 < 0.6.0`）。
 - **端点探测成功长期缓存**：成功结果在进程内不再过期（能力不会自己变），失败仍按 5 秒 TTL 重试；缓存键包含 kind/base/model/key，上限 64 条，配云端时不会每轮重复计费。
-- **`npm run check`**：校验 `market/index.json` 与 `package.json` 的版本和 `engines.dsh` 一致（CI 里的 `lint` 步骤尚未接入——改 workflow 需要 `workflow` 权限的令牌）。
+- **`npm run check`**：校验 `market/index.json` 的 `engines.dsh` 与 `package.json` 一致（不一致直接失败）；索引最新版本暂未追平只告警——发布前本来就会出现这个窗口，线上索引由 `market` 工作流在发布后重建。CI 的 `test` 工作流已接入这一步。
+
+### 发布流程
+
+- `market` 工作流改用 `actions/upload-pages-artifact@v4`：`deploy-pages@v4` 看不到 v3 产出的 `github-pages` 制品，索引曾一度停在 0.5.6；Pages 已切回 GitHub Actions 部署（不再依赖过渡的 `gh-pages` 分支）。
+- 元数据检查接进 `test` 工作流：3 系统 × Node 20/26 每个矩阵都会跑 `npm run check`。
 
 ### 会话修复
 

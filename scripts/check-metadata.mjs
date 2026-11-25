@@ -15,6 +15,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'ut
 const index = JSON.parse(fs.readFileSync(path.join(root, 'market', 'index.json'), 'utf8'));
 const plugin = index.plugins?.[0];
 const problems = [];
+const warnings = [];
 
 if (!plugin) problems.push('market/index.json 没有 plugins[0]');
 for (const entry of plugin?.versions ?? []) {
@@ -23,12 +24,17 @@ for (const entry of plugin?.versions ?? []) {
     problems.push(`${entry.version} 的 engines.dsh=${JSON.stringify(engine)}，应为 ${JSON.stringify(manifest.engines?.dsh)}`);
   }
 }
+// The checked-in index can only list published versions: between bumping
+// package.json and publishing, the newest entry is legitimately older. The
+// market workflow rebuilds the deployed index from npm after publish.
 if (plugin?.versions?.[0]?.version !== manifest.version) {
-  problems.push(`索引最新版本 ${plugin?.versions?.[0]?.version} 与 package.json ${manifest.version} 不一致（发布后忘了重建索引？）`);
+  warnings.push(`索引最新版本 ${plugin?.versions?.[0]?.version} 与 package.json ${manifest.version} 不一致`
+    + '（发布后由 market 工作流重建线上索引；若已发布则说明忘了提交重建结果）');
 }
 
 if (problems.length > 0) {
   console.error(`metadata check failed:\n- ${problems.join('\n- ')}`);
   process.exit(1);
 }
-console.log(`metadata ok: ${plugin.versions.length} 个版本，engines.dsh=${manifest.engines?.dsh}，最新 ${manifest.version}`);
+for (const warning of warnings) console.warn(`warning: ${warning}`);
+console.log(`metadata ok: ${plugin.versions.length} 个版本，engines.dsh=${manifest.engines?.dsh}，索引最新 ${plugin.versions[0]?.version}`);
