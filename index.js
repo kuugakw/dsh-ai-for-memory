@@ -30,7 +30,8 @@ import { installApi } from './lib/api.js';
 import { createEndpointGate, configuredEndpointBase, configuredEndpointIsDedicated } from './lib/engine-gate.js';
 import { listLocalModelsCached } from './lib/model-catalog.js';
 import {
-  clearAutoStartSkip, localEngineStatus, noteAutoStartSkip, restoreLocalEngines, startLocalEngine, stopLocalEngine,
+  clearAutoStartSkip, idleReleaseStillValid, localEngineStatus, noteAutoStartSkip, restoreLocalEngines,
+  startLocalEngine, stopLocalEngine, turnMayClaimEngine,
 } from './lib/local-engine.js';
 import { ensureMcpToken } from './lib/mcp-token.js';
 import { summarizeTurnActivity } from './lib/turn-activity.js';
@@ -2841,6 +2842,16 @@ export function installContextManagement(ctx, config, deps, runtime) {
   // notice is logged once per reason instead of every turn.
   const engineSkipLogged = new Map();
   const engineTurnStarted = new Set();
+  // Engines this plugin started itself (never adopted ones). Only these may be
+  // claimed by a new turn again; an engine the user started by hand must survive
+  // the per-turn idle release.
+  const engineOwned = new Set();
+  // Bumped on every main-session turn start. A release scheduled before the
+  // bump must abort: the turn it worked for is no longer the current one.
+  let turnGeneration = 0;
+  // Set while an idle release is running, so a turn that starts meanwhile waits
+  // for it instead of racing a stopLocalEngine it cannot see.
+  let idleStopInFlight = null;
   // `turn` keeps engines warm across consecutive turns instead of killing a
   // model that may still be reading weights when a short turn ends. The idle
   // window also makes the mode do what it is actually good for: release VRAM
@@ -2855,10 +2866,13 @@ export function installContextManagement(ctx, config, deps, runtime) {
   };
   const scheduleTurnIdleStop = () => {
     clearTurnIdleStop();
+    // Capture the generation the release is for. A turn that starts after this
+    // point bumps it and the release must not stop engines for a dead window.
+    const generation = turnGeneration;
     turnIdleStopTimer = setTimeout(() => {
       turnIdleStopTimer = null;
       if (config.engineLifecycle !== 'turn' || activeTurns.size > 0) return;
-      void stopTurnLocalEngines();
+      void stopTurnLocalEngines(generation);
     }, TURN_IDLE_STOP_MS);
     // A pending idle stop must never keep the plugin process alive.
     turnIdleStopTimer.unref?.();
@@ -2908,12 +2922,30 @@ export function installContextManagement(ctx, config, deps, runtime) {
    */
   const ensureLocalEngines = async (mode) => {
     if (mode !== 'always' && mode !== 'turn') return;
+    // A turn that starts while an idle release is running must wait for the
+    // release to settle: otherwise ensure sees a `ready`/`starting` engine that
+    // the release is about to kill, skips the start, and the turn runs without
+    // embedding/rerank while the release kills the model underneath it.
+    if (mode === 'turn' && idleStopInFlight !== null) {
+      try {
+        await idleStopInFlight;
+      } catch {
+        // The release swallows its own per-engine errors; nothing to redo.
+      }
+    }
     const models = runnableEngineModels();
     if (models.length === 0) return;
     const statuses = new Map(localEngineStatus().map((engine) => [engine.id, engine]));
     for (const { id, kind } of models) {
       const status = statuses.get(id);
       if (status?.ready === true || status?.starting === true) {
+        // Claim the engine before returning: it may already be up from the
+        // previous turn, in which case there is no start promise to add the id.
+        // Only engines this plugin started are claimable, so a hand-started or
+        // adopted process is never killed by the per-turn release.
+        if (mode === 'turn' && turnMayClaimEngine(engineOwned, status)) {
+          engineTurnStarted.add(id);
+        }
         // Already up (or coming up): any old "skipped" note is stale.
         clearAutoStartSkip(id);
         engineSkipLogged.delete(id);
@@ -2951,13 +2983,19 @@ export function installContextManagement(ctx, config, deps, runtime) {
           // cooldown or a scary warning behind: it was never a startup failure.
           engineStartFailures.delete(id);
           engineTurnStarted.delete(id);
+          engineOwned.delete(id);
           return;
         }
         if (result?.ok === true) {
           engineStartFailures.delete(id);
           // An adopted process (left over from before this plugin load) is not
           // owned by this turn; never stop it just because a turn ended.
-          if (result.engine?.adopted === true) engineTurnStarted.delete(id);
+          if (result.engine?.adopted === true) {
+            engineTurnStarted.delete(id);
+            engineOwned.delete(id);
+            return;
+          }
+          engineOwned.add(id);
           return;
         }
         engineStartFailures.set(id, Date.now() + ENGINE_START_COOLDOWN_MS);
@@ -2973,24 +3011,43 @@ export function installContextManagement(ctx, config, deps, runtime) {
     }
   };
 
-  const stopTurnLocalEngines = async () => {
-    const ids = [...engineTurnStarted];
-    engineTurnStarted.clear();
-    for (const id of ids) {
-      // A new turn may have claimed the engine again while we were awaiting a
-      // previous stop; killing it then would leave that turn without RAG.
-      if (engineTurnStarted.has(id)) continue;
-      try {
-        // Idle stop means "release the GPU now": cancel an in-flight load
-        // instead of waiting for the weights and CUDA context to settle, which
-        // is the very thing this stop exists to free.
-        await stopLocalEngine(id, { cancelStart: true });
+  const stopTurnLocalEngines = async (generation) => {
+    const run = (async () => {
+      // Any turn that started after the release was scheduled cancels it: that
+      // turn owns the engines now.
+      if (generation !== turnGeneration) {
         // eslint-disable-next-line no-console
-        console.log(`[ai-for-memory] 每轮模式空闲，已释放本地引擎 ${id}`);
-      } catch (error) {
-        // eslint-disable-next-line no-console
-        console.warn(`[ai-for-memory] 每轮模式停止本地引擎失败：${id}：${error?.message ?? error}`);
+        console.log('[ai-for-memory] 新一轮已开始，取消本地引擎空闲释放');
+        return;
       }
+      const ids = [...engineTurnStarted];
+      engineTurnStarted.clear();
+      for (const id of ids) {
+        // A new turn may have claimed the engine again (or bumped the generation)
+        // while we were awaiting a previous stop; killing it then would leave
+        // that turn without RAG.
+        if (!idleReleaseStillValid({
+          generation, currentGeneration: turnGeneration, claimed: engineTurnStarted, id,
+        })) continue;
+        try {
+          // Idle stop means "release the GPU now": cancel an in-flight load
+          // instead of waiting for the weights and CUDA context to settle, which
+          // is the very thing this stop exists to free.
+          await stopLocalEngine(id, { cancelStart: true });
+          engineOwned.delete(id);
+          // eslint-disable-next-line no-console
+          console.log(`[ai-for-memory] 每轮模式空闲，已释放本地引擎 ${id}`);
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.warn(`[ai-for-memory] 每轮模式停止本地引擎失败：${id}：${error?.message ?? error}`);
+        }
+      }
+    })();
+    idleStopInFlight = run;
+    try {
+      await run;
+    } finally {
+      if (idleStopInFlight === run) idleStopInFlight = null;
     }
   };
 
@@ -3850,6 +3907,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
         // A new turn cancels the idle release; consecutive short turns keep one
         // warm model instead of cold-starting it again after every turn.
         clearTurnIdleStop();
+        turnGeneration += 1;
         void ensureLocalEngines(config.engineLifecycle);
       }
       return;

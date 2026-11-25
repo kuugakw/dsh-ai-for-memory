@@ -46,7 +46,7 @@ import { BoundedCache, CATEGORIES, SCHEMA_VERSION, appendJsonLine, dshHome, hour
 import { migrateStore, planMigrations } from '../lib/migrate.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
-import { ENGINE_OWNER, isCurrentDshChild, buildServerArgs, findModelFile, localEngineStatus, missingLocalEngineKinds, modelIdFromPath, parseLlamaServerCommandLine, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, updateModelConfig, autoStartSkips, clearAutoStartSkip, noteAutoStartSkip } from '../lib/local-engine.js';
+import { ENGINE_OWNER, isCurrentDshChild, buildServerArgs, findModelFile, idleReleaseStillValid, localEngineStatus, missingLocalEngineKinds, modelIdFromPath, parseLlamaServerCommandLine, resolveModel, restoreLocalEngines, startLocalEngine, stopAllLocalEngines, stopLocalEngine, turnMayClaimEngine, updateModelConfig, autoStartSkips, clearAutoStartSkip, noteAutoStartSkip } from '../lib/local-engine.js';
 import { configuredEndpointBase, configuredEndpointIsDedicated, createEndpointGate } from '../lib/engine-gate.js';
 import {
   commitSync, initSync, pullSync, pushSync, readSyncConfig, syncStatus, writeSyncConfig,
@@ -3941,6 +3941,27 @@ test('promote ledger never evicts old refs just to stay under a cap', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('a new turn claims a running engine before the idle release can kill it', () => {
+  const owned = new Set(['Embedding/fake']);
+  // The engine is up from the previous turn: the new turn reuses it, so the
+  // release must see the claim even though no new start promise runs.
+  assert.equal(turnMayClaimEngine(owned, { id: 'Embedding/fake', ready: true }), true);
+  // Still loading: only this plugin starts engines, so it is claimable too.
+  assert.equal(turnMayClaimEngine(owned, { id: 'Embedding/fake', starting: true }), true);
+  // Adopted or hand-started engines are not ours to kill.
+  assert.equal(turnMayClaimEngine(owned, { id: 'Embedding/manual', ready: true }), false);
+  assert.equal(turnMayClaimEngine(owned, null), false);
+
+  const claimed = new Set();
+  const release = { generation: 3, currentGeneration: 3, claimed, id: 'Embedding/fake' };
+  assert.equal(idleReleaseStillValid(release), true);
+  claimed.add('Embedding/fake');
+  assert.equal(idleReleaseStillValid(release), false, 'a claim cancels the stop');
+  claimed.clear();
+  assert.equal(idleReleaseStillValid({ ...release, currentGeneration: 4 }), false,
+    'a newer turn cancels the stop');
 });
 
 test('local engine resolves GGUF files and builds llama.cpp arguments', () => {

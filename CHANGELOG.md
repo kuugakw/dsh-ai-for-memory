@@ -4,6 +4,10 @@
 
 ## 未发布
 
+### 并发与引擎生命周期
+
+- **turn 模式的空闲释放与新 turn 的竞态**：原来只靠 `engineTurnStarted.has(id)` 挡停止，但新 turn 重启一个*已就绪*的引擎时根本不会再走 `engineTurnStarted.add(id)`——`ensureLocalEngines('turn')` 在 `localEngineStatus()` 里看到 `ready`/`starting` 就 `continue` 了，于是释放循环照杀，新 turn 从头到尾没有 embedding/rerank，RAG 静默退回 BM25。现在：`ensureLocalEngines('turn')` 在 `ready`/`starting` 分支显式认领（`turnMayClaimEngine`，只认领本插件启动的引擎，手工启动/收养的不动）；空闲释放带 generation，任何新 turn 都会让旧释放作废（`idleReleaseStillValid`）；新 turn 还会 `await idleStopInFlight`，与正在进行的释放串行化，释放结束后再决定是否重新拉起。新增回归用例覆盖认领与作废的两张真值表。
+
 ### 检索与资源
 
 - **单个超预算的库不再被逐出**：`evictTracked` 原来是 `map.size > 0 && …`，一个库自己超过 64 MB 字节预算就会在插入那一次被立即逐出，于是它每次检索都从零重建整张倒排索引——实测 2000 篇（1180 字符/篇）热检索 656 ms、3000 篇 1060 ms。现在逐出循环要求 `map.size > 1`，最新插入的库始终保留（超预算也不逐），实测 2000 篇热检索降到约 20–30 ms、3000 篇约 31 ms，1000–3000 篇全程 `indexEntries=1`。
