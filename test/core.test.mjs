@@ -8149,6 +8149,13 @@ test('SQL route blocks extension loading, joins and unbounded raw selects', (t) 
     assert.equal(translateToSql("SELECT load_extension('/tmp/x')"), null);
     assert.equal(isSafeSelect('SELECT count(*) FROM knowledge_docs a, knowledge_docs b'), false);
     assert.equal(isSafeSelect('SELECT * FROM knowledge_docs a JOIN knowledge_docs b'), false);
+    // A CTE referenced through a comma join is still a self cross join; the
+    // outer LIMIT 50 cannot stop `count(*)` from materialising N^4 rows.
+    assert.equal(isSafeSelect('WITH x AS (SELECT * FROM knowledge_docs) SELECT count(*) FROM x, x, x, x'), false);
+    assert.equal(isSafeSelect('WITH x AS (SELECT * FROM knowledge_docs) SELECT * FROM x, x'), false);
+    assert.equal(isSafeSelect('WITH x AS (SELECT * FROM knowledge_docs) SELECT * FROM (x, x)'), false);
+    assert.equal(isSafeSelect('WITH x AS (SELECT * FROM knowledge_docs) SELECT count(*) FROM x'), true);
+    assert.equal(translateToSql('WITH x AS (SELECT * FROM knowledge_docs) SELECT count(*) FROM x, x, x, x'), null);
 
     const plan = translateToSql('SELECT * FROM knowledge_docs');
     assert.match(plan.sql, /LIMIT 50/, 'raw SQL 必须被外层 LIMIT 包住');
