@@ -18,6 +18,7 @@
 
 - **边界覆盖 `aim_memory` 回显**：`remember`/`learn`/`incident` 返回里带的知识正文（`clip(doc.text, …)`）现在也包进 `<<<MEMORY-DATA…>>>` 边界，`aim_memory` 不再是把记忆原文直接塞回上下文的缺口。
 - **CTE 逗号自连接封堵**：`WITH x AS (SELECT * FROM knowledge_docs) SELECT count(*) FROM x, x, x, x` 既没有 `JOIN` 关键字、也没有重复的 `knowledge_docs`，旧校验放行后会被包成 `SELECT * FROM (…) LIMIT 50`——但 `count(*)` 仍会物化 N⁴ 行。现在解析每个 FROM 列表并按关系名计数，任何名字在 FROM 位置出现两次就拒绝（包括 `FROM (x, x)` 表组和 `FROM x, (SELECT * FROM x)`）；单次引用、`IN (…)` 列表、`json_extract` 等正常查询不受影响。
+- **带引号的 JSON 键也脱敏**：`{"api_key": "…"}` 之前原样保留——规则要求 key 后直接跟 `=`/`:`，而 JSON 的 key 有闭合引号。现在先匹配引号键（含 `db_password` 这类前缀，值可带引号），再走原有的 `key=value` / `key: value` 规则；`{"api_key_policy": …}` 这类非密钥字段不会被误伤。
 
 ### 测试
 

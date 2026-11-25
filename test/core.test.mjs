@@ -42,7 +42,7 @@ import {
   categoryOf, formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
 } from '../lib/knowledge-query.js';
 import { applyDisclosure, buildIndex, RRF_K, reciprocalRankFusion, search, snippetOf, tokenize, __retrievalCacheStats, __setLibraryCacheBudget } from '../lib/retrieval.js';
-import { BoundedCache, CATEGORIES, SCHEMA_VERSION, appendJsonLine, dshHome, hourKey, listJsonlFiles, listJsonFiles, readJson, readJsonl, withFileLockSync, writeJson } from '../lib/util.js';
+import { BoundedCache, CATEGORIES, SCHEMA_VERSION, appendJsonLine, dshHome, hourKey, listJsonlFiles, listJsonFiles, readJson, readJsonl, redactSecrets, withFileLockSync, writeJson } from '../lib/util.js';
 import { migrateStore, planMigrations } from '../lib/migrate.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
@@ -8100,6 +8100,25 @@ test('export refuses destinations outside the memory root', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('redactSecrets covers quoted JSON keys and quoted values', () => {
+  const json = '{"api_key": "json-secret-123456"}';
+  assert.equal(redactSecrets(json).includes('json-secret-123456'), false);
+  assert.match(redactSecrets(json), /\[REDACTED\]/);
+
+  const single = "{'password': 'single-secret-123456'}";
+  assert.equal(redactSecrets(single).includes('single-secret-123456'), false);
+
+  const prefixed = '{"db_password": "db-secret-123456"}';
+  assert.equal(redactSecrets(prefixed).includes('db-secret-123456'), false);
+
+  assert.equal(redactSecrets('password: "yaml-secret-123456"').includes('yaml-secret-123456'), false);
+  assert.equal(redactSecrets('api_key=plain-secret-123456').includes('plain-secret-123456'), false);
+  assert.equal(redactSecrets('DB_PASSWORD=hunter2hunter2').includes('hunter2hunter2'), false);
+  // Unrelated JSON must survive untouched.
+  assert.equal(redactSecrets('{"note": "hello world"}'), '{"note": "hello world"}');
+  assert.equal(redactSecrets('{"api_key_policy": "abcdef123456"}').includes('abcdef123456'), true);
 });
 
 test('stored artifacts are private and secrets are redacted', () => {
