@@ -50,6 +50,8 @@
 
 - **老数据自动迁移**：插件启动时读 `schema.json`，比当前版本旧就按 `lib/migrate.js` 里的 `MIGRATIONS` 顺序执行迁移；每一步只跑一次，整条链成功后才把版本号写回，链断了（缺某一步）会直接报错而不是跳过。v1→v2 是「把 0.5.7 之前落盘的旧数据全库脱敏」，逐文件备份、幂等，并遵守 `redactSecrets` 开关。
 - **迁移前自动备份**：每一步声明它要改写的文件，迁移开始前先把这些文件复制到 `backups/schema-v<旧版本>-<时间戳>/`（保留相对路径）。迁移中途失败可以按备份还原，不需要你提前手工备份。
+- **备份的体积与内容**：备份是整份语料的完整副本——一份 3000 篇知识（约 1180 字符/篇）+ 20 个上下文存档 + 21MB archive 的库实测约 36.9MB，迁移完成后磁盘占用直接翻倍。更要注意：备份保存的是**脱敏前**的原文，`backups/schema-v1-*/` 里可能还有明文密钥/口令（迁移的目的正是把它们清出语料），敏感等级高于当前语料本身。确认迁移成功后可手动删除；把 `backupRetentionDays` 设成正数（默认 0=永不清理）则保留清理会顺带删掉过期备份。
+- **迁移是同步且幂等的**：v1→v2 在 `Store.init()` 里同步执行并持锁，期间事件循环暂停、第二个 DSH 窗口会在锁上等待；自 0.5.12 起内容没有变化的文件不再重写（绝大多数字库没有密钥），JSONL 也改走 temp→fsync→rename，不会因中途被杀留下半截行。备份目录与记忆根一样是 0700。
 - **新数据拒绝降级**：`schema.json` 的版本比当前插件新时（例如从 0.6 回到 0.5），初始化直接报「数据由更新版本的插件写入」，宁可打不开也不按旧规则改写。
 - **没有 `schema.json` 的旧目录**：视为 v1（已知最早布局）并跑完整条迁移链，而不是当成最新版——迁移是幂等的，跳过才可能留下旧布局。
 - **加新迁移**：在 `lib/migrate.js` 的 `MIGRATIONS` 里追加 `{ from, to, description, files(store), run(store) }`，把 `SCHEMA_VERSION` 加一，并补一个用 v1 fixture 跑通迁移的测试（参考 `test/core.test.mjs` 的 migration 用例）。
@@ -92,6 +94,7 @@
 | `mcpToken` | 空 | 可选的 MCP Bearer 令牌；空=用开启时自动生成的 token 文件，面板不回显明文 |
 | `decisionRetentionDays` | 0 | 决策记录保留天数；0=不自动删 |
 | `autoDecisionRetentionDays` | 30 | 每轮自动活动记录（`decision_auto_*`）保留天数；只删这类记录，0=只看数量上限；`aim_decide` 审查记录不受它影响 |
+| `backupRetentionDays` | 0 | 迁移备份（`backups/schema-v*`）保留天数；0=永不自动清理，>0 时保留清理会删掉更旧的备份。备份含迁移前明文，确认迁移成功后建议清理 |
 | `autoDecisionLog` | `true` | 每轮把工具调用和本地文件改动自动记入决策层（outcome=observed，不进知识库） |
 | `ragMount` | false | 是否把 RAG 索引挂到检索 |
 | `externalBaseUrl` | 空 | 外部模型主地址；空=未配置，不发起探活或请求。示例见面板 placeholder |

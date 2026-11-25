@@ -2733,6 +2733,9 @@ test('config validator bounds auto settings', () => {
   assert.equal(validator({ autoDecisionRetentionDays: 120 }).value.autoDecisionRetentionDays, 120);
   assert.ok(validator({ autoDecisionRetentionDays: 4000 }).issues);
   assert.ok(validator({ autoDecisionRetentionDays: 90.5 }).issues);
+  assert.equal(validator({ backupRetentionDays: 30 }).value.backupRetentionDays, 30);
+  assert.ok(validator({ backupRetentionDays: 4000 }).issues);
+  assert.ok(validator({ backupRetentionDays: -1 }).issues);
   assert.ok(validator({ maxContextChars: 500 }).issues);
   assert.ok(validator({ keepRecentTurns: 0 }).issues);
   assert.ok(validator({ keepRecentTurns: 2.5 }).issues);
@@ -3013,7 +3016,9 @@ test('config validator accepts defaults and rejects wrong types', () => {
   assert.equal(validator({}).contextRetentionDays, 0);
   assert.equal(validator({}).decisionRetentionDays, 0);
   assert.equal(validator({}).autoDecisionRetentionDays, 30);
+  assert.equal(validator({}).backupRetentionDays, 0);
   assert.equal(normalizeConfig({ autoDecisionRetentionDays: 0 }).autoDecisionRetentionDays, 0);
+  assert.equal(normalizeConfig({ backupRetentionDays: 14 }).backupRetentionDays, 14);
   assert.equal(validator({}).requestAnchor, true);
   assert.equal(validator({ mcpEnabled: false }).mcpEnabled, false);
   assert.equal(validator({ mcpToken: 'secret' }).mcpToken, 'secret');
@@ -8051,6 +8056,12 @@ test('v1 to v2 migration redacts secrets already on disk', () => {
     fs.writeFileSync(path.join(root, 'staging', '20260101-00.jsonl'), `${JSON.stringify({
       id: 's1', content: 'DB_PASSWORD=hunter2', created_at: '2026-01-01T00:00:00.000Z',
     })}\n`);
+    // A file with no secret at all: the migration must not rewrite (and fsync)
+    // it. mtime is the observable proof.
+    const cleanFile = path.join(root, 'knowledge', 'clean.json');
+    fs.writeFileSync(cleanFile, JSON.stringify({ doc_id: 'clean', text: '没有密钥的事实', category: 'project_facts' }));
+    const cleanTime = new Date(Date.now() - 60000);
+    fs.utimesSync(cleanFile, cleanTime, cleanTime);
     writeJson(path.join(root, 'schema.json'), { schema_version: 1, updated_at: '2026-01-01T00:00:00.000Z' });
 
     const migrated = new MemoryStore(root);
@@ -8062,10 +8073,44 @@ test('v1 to v2 migration redacts secrets already on disk', () => {
     assert.ok(fs.readdirSync(path.join(root, 'backups')).length >= 1, '迁移前要备份');
     const backups = fs.readdirSync(path.join(root, 'backups'));
     assert.ok(backups.some((name) => fs.existsSync(path.join(root, 'backups', name, 'knowledge', 'doc.json'))));
+    assert.equal(Math.round(fs.statSync(cleanFile).mtimeMs), cleanTime.getTime(),
+      'an unchanged file must not be rewritten');
+    if (process.platform !== 'win32') {
+      const backupRoot = path.join(root, 'backups', backups[0]);
+      assert.equal(fs.statSync(backupRoot).mode & 0o777, 0o700, 'backups must be 0700 like the memory root');
+    }
 
     // Idempotent: a second open must not fail or re-redact.
     migrated.init();
     assert.equal(readJson(path.join(root, 'schema.json')).schema_version, 2);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('migration backups are pruned only when retention is enabled', () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root, { backupRetentionDays: 7 });
+    store.init();
+    const old = path.join(root, 'backups', 'schema-v1-2020-01-01');
+    const recent = path.join(root, 'backups', 'schema-v1-2026-01-01');
+    const foreign = path.join(root, 'backups', 'manual-copy');
+    fs.mkdirSync(old, { recursive: true });
+    fs.mkdirSync(recent, { recursive: true });
+    fs.mkdirSync(foreign, { recursive: true });
+    const ancient = new Date(Date.now() - 30 * 86400000);
+    fs.utimesSync(old, ancient, ancient);
+
+    assert.deepEqual(store.pruneRetention().backups, ['schema-v1-2020-01-01']);
+    assert.equal(fs.existsSync(old), false);
+    assert.equal(fs.existsSync(recent), true, 'a backup younger than the window stays');
+    assert.equal(fs.existsSync(foreign), true, 'only schema-v* backups are touched');
+
+    const keeping = new MemoryStore(root, { backupRetentionDays: 0 });
+    keeping.init();
+    assert.deepEqual(keeping.pruneBackups(), [], '0 means keep every backup');
+    assert.equal(fs.existsSync(recent), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

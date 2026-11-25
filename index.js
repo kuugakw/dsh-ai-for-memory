@@ -190,6 +190,11 @@ const DEFAULTS = Object.freeze({
   // conclusion: keep a month by default so the decision scan stays bounded.
   // Reviewed aim_decide records are covered only by decisionRetentionDays.
   autoDecisionRetentionDays: 30,
+  // Migration backups are a full copy of the corpus (including pre-redaction
+  // plaintext) and are the only rollback path, so pruning them is opt-in: 0
+  // keeps every backup forever, a positive number removes backups older than
+  // that many days when retention cleanup runs.
+  backupRetentionDays: 0,
   // When a harness checkpoint (time/schema/reload notice) arrives without a
   // new user request in this same step, append a short anchor so the model does
   // not answer an older topic. A real incoming request always wins. Off only
@@ -258,6 +263,7 @@ const NUMERIC_BOUNDS = Object.freeze({
   contextRetentionDays: [0, 3650],
   decisionRetentionDays: [0, 3650],
   autoDecisionRetentionDays: [0, 3650],
+  backupRetentionDays: [0, 3650],
   autoKnowledgeLimit: [1, 100],
   similarityThreshold: [0.01, 0.95, 'float'],
   externalTimeoutMs: [1000, 600000],
@@ -430,6 +436,7 @@ function storeOptions(config) {
     contextRetentionDays: config.contextRetentionDays,
     decisionRetentionDays: config.decisionRetentionDays,
     autoDecisionRetentionDays: config.autoDecisionRetentionDays,
+    backupRetentionDays: config.backupRetentionDays,
   };
 }
 
@@ -3949,7 +3956,8 @@ export function installContextManagement(ctx, config, deps, runtime) {
       if ((Number.isFinite(config.stagingRetentionDays) ? config.stagingRetentionDays : 30) > 0
         || (Number.isFinite(config.contextRetentionDays) ? config.contextRetentionDays : 0) > 0
         || (Number.isFinite(config.decisionRetentionDays) ? config.decisionRetentionDays : 0) > 0
-        || (Number.isFinite(config.autoDecisionRetentionDays) ? config.autoDecisionRetentionDays : 90) > 0) {
+        || (Number.isFinite(config.autoDecisionRetentionDays) ? config.autoDecisionRetentionDays : 90) > 0
+        || (Number.isFinite(config.backupRetentionDays) ? config.backupRetentionDays : 0) > 0) {
         try {
           const context = memoryContext(config, { agent: { session } }, deps, runtime);
           const store = writeSource(context, 'session').store;

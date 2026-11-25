@@ -12,6 +12,13 @@
 
 - **turn 模式的空闲释放与新 turn 的竞态**：原来只靠 `engineTurnStarted.has(id)` 挡停止，但新 turn 重启一个*已就绪*的引擎时根本不会再走 `engineTurnStarted.add(id)`——`ensureLocalEngines('turn')` 在 `localEngineStatus()` 里看到 `ready`/`starting` 就 `continue` 了，于是释放循环照杀，新 turn 从头到尾没有 embedding/rerank，RAG 静默退回 BM25。现在：`ensureLocalEngines('turn')` 在 `ready`/`starting` 分支显式认领（`turnMayClaimEngine`，只认领本插件启动的引擎，手工启动/收养的不动）；空闲释放带 generation，任何新 turn 都会让旧释放作废（`idleReleaseStillValid`）；新 turn 还会 `await idleStopInFlight`，与正在进行的释放串行化，释放结束后再决定是否重新拉起。新增回归用例覆盖认领与作废的两张真值表。
 
+### 迁移与磁盘
+
+- **没有密钥的文件不再被重写**：v1→v2 原来是「逐文件跑 `redactDeep` 再 `writeJson({durable:true})`」，即使一个字符都没变也要付一次 fsync + rename + 目录 fsync。3000 篇、单篇约 1180 字符的库实测：只比较不写约 2.4 s，而旧的全量 durable 重写约 13.6 s；现在 `JSON.stringify(next) === JSON.stringify(data)` 就 `continue`，未变化直接跳过。加上备份复制（约 2.0 s）后，`init` 从约 16 s 降到约 4.4 s（剩下的主要是备份本身），绝大多数字库升级不再冻住事件循环十几秒。
+- **JSONL 迁移改走原子写**：原来用裸 `fs.writeFileSync` 覆写 JSONL，迁移中途被杀会留下半截行；现在与 `writeJson` 同一套 temp→fsync→rename，坏行仍然原样保留（不是我们的数据，不删）。
+- **备份目录补 0700**：`migrate.js` 建目录时传了 `mode: 0o700`（之前裸 `mkdirSync`，在共享主机上别的账户能列举 `doc_id` / `snapshot_id` / 上下文 id）。备份里的文件本来就继承源文件 0600。
+- **备份可自动清理（默认不删）**：新增 `backupRetentionDays`（0=永不清理，默认），>0 时每日保留清理会删掉更旧的 `backups/schema-v*`；面板「保留与磁盘」加了字段，存储统计也单独显示 `backups` 占用了多少，不再让用户只看到磁盘莫名翻倍。文档写明备份是**整份语料**（实测 36.9MB 的库备份同样 36.9MB）且保存的是**脱敏前明文**，敏感等级高于当前语料。
+
 ### 安全与信噪比
 
 - **promote 的回显也加数据边界**：`aim_memory action=promote` 是最后一个把 store 正文原样拼进返回值的动作——`formatPromotion` 的「待确认改写提议」「新增知识」「合并进已有事实」三类行，以及外部模型提炼的预览/完成回显，之前都直接进 prompt。0.5.10 补了 `aim_context list`、0.5.11 补了 remember/learn/incident 的回显，promote 是同类路径里最后漏的一个，而且它恰好是唯一会把「未确认的模型自述」整段回显的动作。现在统一用 `wrapMemoryData('aim_memory/promote', …)` 包装，并在边界内注明「回显的是待确认/新写入的记忆正文，标为模型自述（未确认）的不能当项目事实」；正文里伪造的结束标记同样会被替换。

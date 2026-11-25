@@ -471,10 +471,12 @@ window.__ModuleLoader__.load({
         contextRetentionDays: '上下文存档保留天数（0=永不删）',
         decisionRetentionDays: '决策记录保留天数（0=永不删）',
         autoDecisionRetentionDays: '自动活动记录保留天数（只删每轮自动记录，0=永不删）',
+        backupRetentionDays: '迁移备份保留天数（0=永不清理；备份含迁移前明文）',
         requestAnchor: '系统检查点请求锚点',
         retentionNever: '0 = 永不自动删除',
         storageUsed: '当前记忆目录占用',
         storageContexts: '上下文存档',
+        storageBackups: '迁移备份',
         retentionCleanup: '立即执行保留清理',
         retentionConfirm: '立即删除超过保留期的存档？此操作不可撤销（已归档的过程记录会先确认已归档）。',
         retentionCleaning: '清理中…',
@@ -1039,10 +1041,12 @@ window.__ModuleLoader__.load({
         contextRetentionDays: 'Context archive retention days (0 = never)',
         decisionRetentionDays: 'Decision retention days (0 = never)',
         autoDecisionRetentionDays: 'Auto activity retention days (routine records only, 0 = never)',
+        backupRetentionDays: 'Migration backup retention days (0 = keep forever; backups hold pre-redaction plaintext)',
         requestAnchor: 'Harness checkpoint request anchor',
         retentionNever: '0 = never auto-delete',
         storageUsed: 'Current memory directory usage',
         storageContexts: 'Context archives',
+        storageBackups: 'Migration backups',
         retentionCleanup: 'Run retention cleanup now',
         retentionConfirm: 'Delete archives older than the retention window now? This cannot be undone (process records are only removed after archival).',
         retentionCleaning: 'Cleaning…',
@@ -1799,6 +1803,7 @@ window.__ModuleLoader__.load({
       const [formContextRetention, setFormContextRetention] = React.useState(0);
       const [formDecisionRetention, setFormDecisionRetention] = React.useState(0);
       const [formAutoDecisionRetention, setFormAutoDecisionRetention] = React.useState(90);
+      const [formBackupRetention, setFormBackupRetention] = React.useState(0);
       const [formRequestAnchor, setFormRequestAnchor] = React.useState(true);
       // RAG is mounted on the knowledge layer: the switch decides whether
       // aim_search uses the vector index; building the index is a separate click.
@@ -1967,6 +1972,7 @@ window.__ModuleLoader__.load({
           if (Number.isInteger(payload.contextRetentionDays)) setFormContextRetention(payload.contextRetentionDays);
           if (Number.isInteger(payload.decisionRetentionDays)) setFormDecisionRetention(payload.decisionRetentionDays);
           if (Number.isInteger(payload.autoDecisionRetentionDays)) setFormAutoDecisionRetention(payload.autoDecisionRetentionDays);
+          if (Number.isInteger(payload.backupRetentionDays)) setFormBackupRetention(payload.backupRetentionDays);
           if (typeof payload.requestAnchor === 'boolean') setFormRequestAnchor(payload.requestAnchor);
           if (typeof payload.externalBaseUrl === 'string') setFormExternalBase(payload.externalBaseUrl);
           if (typeof payload.externalModel === 'string') setFormExternalModel(payload.externalModel);
@@ -2250,6 +2256,7 @@ window.__ModuleLoader__.load({
           contextRetentionDays: Number(formContextRetention) || 0,
           decisionRetentionDays: Number(formDecisionRetention) || 0,
           autoDecisionRetentionDays: Number(formAutoDecisionRetention) || 0,
+          backupRetentionDays: Number(formBackupRetention) || 0,
           requestAnchor: formRequestAnchor,
           externalBaseUrl: formExternalBase.trim(),
           externalModel: formExternalModel.trim(),
@@ -2305,6 +2312,7 @@ window.__ModuleLoader__.load({
           && payload.contextRetentionDays === body.contextRetentionDays
           && payload.decisionRetentionDays === body.decisionRetentionDays
           && payload.autoDecisionRetentionDays === body.autoDecisionRetentionDays
+          && payload.backupRetentionDays === body.backupRetentionDays
           && payload.requestAnchor === body.requestAnchor
           && payload.externalBaseUrl === body.externalBaseUrl
           && payload.externalModel === body.externalModel
@@ -5581,12 +5589,16 @@ window.__ModuleLoader__.load({
               h('input', { style: styles.input, type: 'number', min: 0, max: 3650, value: formDecisionRetention, onChange: (event) => setFormDecisionRetention(event.target.value) })),
             h('label', { style: styles.label },
               t.autoDecisionRetentionDays,
-              h('input', { style: styles.input, type: 'number', min: 0, max: 3650, value: formAutoDecisionRetention, onChange: (event) => setFormAutoDecisionRetention(event.target.value) }))),
+              h('input', { style: styles.input, type: 'number', min: 0, max: 3650, value: formAutoDecisionRetention, onChange: (event) => setFormAutoDecisionRetention(event.target.value) })),
+            h('label', { style: styles.label },
+              t.backupRetentionDays,
+              h('input', { style: styles.input, type: 'number', min: 0, max: 3650, value: formBackupRetention, onChange: (event) => setFormBackupRetention(event.target.value) }))),
           h('p', { style: styles.hint }, t.retentionNever),
           h('p', { style: styles.hint },
             `${t.storageUsed}: ${formatBytes(data?.storage?.totalBytes ?? 0)}｜`
               + `${t.storageContexts}: ${counts.contexts ?? 0} 个 / ${formatBytes(data?.storage?.bytes?.contexts ?? 0)}｜`
-              + `${t.tabDecisions}: ${counts.decisions ?? 0} 个 / ${formatBytes(data?.storage?.bytes?.decisions ?? 0)}`),
+              + `${t.tabDecisions}: ${counts.decisions ?? 0} 个 / ${formatBytes(data?.storage?.bytes?.decisions ?? 0)}`
+              + `｜${t.storageBackups}: ${formatBytes(data?.storage?.bytes?.backups ?? 0)}`),
           h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' } },
             h('button', {
               type: 'button', className: 'aim-btn', style: styles.button,
