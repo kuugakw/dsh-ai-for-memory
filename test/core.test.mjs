@@ -8337,7 +8337,7 @@ test('crash consistency: a torn JSONL tail is skipped and does not swallow the n
   }
 });
 
-test('library cache evicts by byte budget and keeps search correct', () => {
+test('library cache keeps one over-budget library instead of thrashing', () => {
   const docs = Array.from({ length: 120 }, (_, i) => ({
     doc_id: `big-${i}`,
     text: `big 网关 超时 重试 排障 ${'补充说明 '.repeat(40)}`,
@@ -8348,13 +8348,37 @@ test('library cache evicts by byte budget and keeps search correct', () => {
     __setLibraryCacheBudget(1024);
     const hit = search(docs, '网关超时', { mode: 'hybrid', topK: 3 });
     assert.ok(hit.length >= 1);
-    assert.ok(__retrievalCacheStats().indexBytes <= 1024);
-    // Lifting the budget must make the same corpus searchable again: eviction
-    // only drops the cache entry, never the documents.
-    __setLibraryCacheBudget(64 * 1024 * 1024);
+    // A single library that alone exceeds the budget is still kept: evicting it
+    // would rebuild the whole inverted index on every search.
+    const first = __retrievalCacheStats();
+    assert.equal(first.indexEntries, 1);
+    assert.ok(first.indexBytes > 1024);
     const again = search(docs, '网关超时', { mode: 'hybrid', topK: 3 });
-    assert.ok(again.length >= 1);
+    const second = __retrievalCacheStats();
+    assert.equal(second.indexEntries, 1);
+    assert.equal(second.indexBytes, first.indexBytes, 'unchanged corpus must not rebuild');
     assert.equal(again[0].doc_id, hit[0].doc_id);
+  } finally {
+    __setLibraryCacheBudget(64 * 1024 * 1024);
+  }
+});
+
+test('library cache evicts older libraries once several are cached', () => {
+  const make = (tag) => Array.from({ length: 60 }, (_, i) => ({
+    doc_id: `${tag}-${i}`,
+    text: `${tag} 网关 超时 排障 ${'说明 '.repeat(20)}`,
+    category: tag,
+    scope: tag,
+  }));
+  try {
+    __setLibraryCacheBudget(1024);
+    search(make('alpha'), '网关超时', { mode: 'hybrid', topK: 3 });
+    const one = __retrievalCacheStats();
+    assert.equal(one.indexEntries, 1);
+    search(make('beta'), '网关超时', { mode: 'hybrid', topK: 3 });
+    const two = __retrievalCacheStats();
+    assert.equal(two.indexEntries, 1, 'the older library is evicted, the current one stays');
+    assert.ok(two.indexBytes > 1024);
   } finally {
     __setLibraryCacheBudget(64 * 1024 * 1024);
   }
