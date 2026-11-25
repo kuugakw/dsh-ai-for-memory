@@ -4,6 +4,10 @@
 
 ## 未发布
 
+### 锁与并发
+
+- **跨机器锁不再必然超时**：`lockOwnerState` 把「owner 记录来自另一台机器」也归进 `invalid`，而接管条件里没有它，只能等 `age > staleMs`（默认 10 s）；调用方默认 `timeoutMs` 是 5 s，于是先抛「等待文件锁超时」（appendJsonLine 传 5 s/8 s 才勉强够，其余默认参数的锁跨机器必超时）。现在单独返回 `foreign`：只有 foreign 持有者才把等待窗口延到 `staleMs + 一次轮询`，年龄过了 stale 即接管；同一台机器上的活锁仍按调用方的 `timeoutMs` 正常超时，不会被提前抢走。`owner.json` 解析失败按「崩溃窗口」处理（`missing`，1 秒宽限），不再当 foreign 等满 stale。
+
 ### 并发与引擎生命周期
 
 - **turn 模式的空闲释放与新 turn 的竞态**：原来只靠 `engineTurnStarted.has(id)` 挡停止，但新 turn 重启一个*已就绪*的引擎时根本不会再走 `engineTurnStarted.add(id)`——`ensureLocalEngines('turn')` 在 `localEngineStatus()` 里看到 `ready`/`starting` 就 `continue` 了，于是释放循环照杀，新 turn 从头到尾没有 embedding/rerank，RAG 静默退回 BM25。现在：`ensureLocalEngines('turn')` 在 `ready`/`starting` 分支显式认领（`turnMayClaimEngine`，只认领本插件启动的引擎，手工启动/收养的不动）；空闲释放带 generation，任何新 turn 都会让旧释放作废（`idleReleaseStillValid`）；新 turn 还会 `await idleStopInFlight`，与正在进行的释放串行化，释放结束后再决定是否重新拉起。新增回归用例覆盖认领与作废的两张真值表。

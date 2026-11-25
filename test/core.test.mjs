@@ -42,7 +42,7 @@ import {
   categoryOf, formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
 } from '../lib/knowledge-query.js';
 import { applyDisclosure, buildIndex, RRF_K, reciprocalRankFusion, search, snippetOf, tokenize, __retrievalCacheStats, __setLibraryCacheBudget } from '../lib/retrieval.js';
-import { BoundedCache, CATEGORIES, SCHEMA_VERSION, appendJsonLine, dshHome, hourKey, listJsonlFiles, listJsonFiles, readJson, readJsonl, redactSecrets, withFileLockSync, writeJson } from '../lib/util.js';
+import { BoundedCache, CATEGORIES, SCHEMA_VERSION, appendJsonLine, dshHome, hourKey, listJsonlFiles, listJsonFiles, readJson, readJsonl, redactSecrets, withFileLock, withFileLockSync, writeJson } from '../lib/util.js';
 import { migrateStore, planMigrations } from '../lib/migrate.js';
 import { buildUiState } from '../lib/ui-state.js';
 import { listLocalModels, listLocalModelsCached, resetLocalModelsCache } from '../lib/model-catalog.js';
@@ -7948,7 +7948,11 @@ test('file lock steals a stale lock and times out on a live one', () => {
     assert.equal(fs.existsSync(lockDir), false, '抢到锁后要释放');
 
     fs.mkdirSync(lockDir);
+    fs.writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({
+      pid: process.pid, host: os.hostname(), at: Date.now(),
+    }));
     try {
+      // A live same-host owner is not stolen by age; the caller's timeout wins.
       assert.throws(
         () => withFileLockSync(file, () => 'never', { timeoutMs: 100, staleMs: 60000 }),
         /等待文件锁超时/,
@@ -8118,6 +8122,53 @@ test('export refuses destinations outside the memory root', () => {
     const target = inner.files[0].path;
     assert.ok(target.startsWith(path.join(root, 'exports')), '导出只能落在 exports/ 内');
     assert.equal(fs.existsSync(target), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a foreign lock waits out staleMs and is taken over instead of timing out', async () => {
+  const root = tempRoot();
+  try {
+    const target = path.join(root, 'shared.json');
+    const lockDir = `${target}.lock`;
+    fs.mkdirSync(lockDir, { recursive: true });
+    fs.writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({
+      pid: 999999, host: 'another-machine', at: Date.now(),
+    }));
+    // Fresh directory: the age fallback cannot fire until staleMs passes, so a
+    // timeout shorter than staleMs must not abort before the takeover window.
+    const started = Date.now();
+    const syncResult = withFileLockSync(target, () => 'ok', { timeoutMs: 80, staleMs: 250 });
+    assert.equal(syncResult, 'ok');
+    assert.ok(Date.now() - started >= 200, 'must wait for the stale window before stealing');
+
+    fs.mkdirSync(lockDir, { recursive: true });
+    fs.writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({
+      pid: 999999, host: 'another-machine', at: Date.now(),
+    }));
+    const asyncStarted = Date.now();
+    const asyncResult = await withFileLock(target, async () => 'ok', { timeoutMs: 80, staleMs: 250 });
+    assert.equal(asyncResult, 'ok');
+    assert.ok(Date.now() - asyncStarted >= 200);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a corrupt owner record is treated as a crashed writer, not a foreign lock', () => {
+  const root = tempRoot();
+  try {
+    const target = path.join(root, 'corrupt.json');
+    const lockDir = `${target}.lock`;
+    fs.mkdirSync(lockDir, { recursive: true });
+    fs.writeFileSync(path.join(lockDir, 'owner.json'), 'not json{');
+    const old = new Date(Date.now() - 5000);
+    fs.utimesSync(lockDir, old, old);
+    const started = Date.now();
+    const result = withFileLockSync(target, () => 'ok', { timeoutMs: 60, staleMs: 60000 });
+    assert.equal(result, 'ok');
+    assert.ok(Date.now() - started < 1000, 'empty-directory grace applies, not the 60 s stale window');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
