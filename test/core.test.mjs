@@ -835,6 +835,7 @@ test('tools are registered and executable against the session workspace', async 
 
     const staged = await memory.execute({ action: 'stage', content: '用户点击设置', kind: 'action' }, exec);
     assert.match(staged, /已写入过程记录/);
+    assert.match(staged, /本次调用传入的 content/);
 
     const status = await memory.execute({ action: 'status' }, exec);
     assert.match(status, /过程记录层：1 个文件 \/ 1 条记录/);

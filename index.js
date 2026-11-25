@@ -1500,6 +1500,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             `范围：${source.label}（${source.scope === 'shared' ? '共享层' : shortSessionId(context.sessionId)}）`,
             `kind=${record.kind} → ${record.category}｜risk=${record.risk}｜verify=${record.verify}`,
             clip(record.content, 500),
+            '说明：以上正文是本次调用传入的 content（模型输入），不是从记忆库读出的旧数据；'
+              + '已按上面的 verify 状态保存。',
           ].join('\n');
         }
 
