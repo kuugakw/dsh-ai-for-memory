@@ -25,3 +25,7 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Run tests
         run: npm test
+      - name: Metadata check
+        # The checked-in plugin index must agree with package.json: a release
+        # that forgets `npm run market:build` would otherwise ship a stale index.
+        run: npm run check
