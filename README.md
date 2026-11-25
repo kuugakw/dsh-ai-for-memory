@@ -1,13 +1,13 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.5.10-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.5.10-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
+[![Status](https://img.shields.io/badge/status-stable%200.5.11-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.5.11-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.5.10 是记忆安全与一致性更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版把「0.5.7 起写时脱敏」补成闭环：`schema v2` 迁移会全库回填脱敏（逐文件备份、幂等，可用 `redactSecrets: false` 关闭）；锁释放改为校验持有者，被接管后旧持有者不会删掉新锁；检索改用倒排 postings 生成候选集；本地引擎空闲停止不再等权重加载；端点探测成功结果进程内长期缓存；插件索引的 `engines.dsh` 改用当前 manifest，DSH 0.3 用户不再被历史元数据挡住。
+> **0.5.11 是记忆安全与并发更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版收掉 0.5.10 的「已知限制」：库级缓存加 64 MB 字节预算、检索热路径与面板写改用异步锁（同步/异步不再互等）、`aim_memory` 回显也带数据边界；同时封堵 SQL 的 CTE 逗号自连接（`FROM x, x, x, x` 的 N⁴ 物化）和脱敏漏掉的带引号 JSON 键（`{"api_key": "…"}`）。
 >
-> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.10）。插件索引这类新渠道从当前版本（0.5.10）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
+> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.11）。插件索引这类新渠道从当前版本（0.5.11）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
 >
 > 升级前建议备份记忆目录；数据版本变化会走 `schema.json` 的迁移流程，迁移前自动把要改写的文件备份到 `backups/schema-v<旧版本>-<时间>/`，更详细的规则见 [配置与数据目录](docs/configuration.md#格式版本与迁移)。
 
@@ -127,7 +127,7 @@ verified: false
 ## 快速开始
 
 ```bash
-dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.10
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.11
 ```
 
 也可以在 DSH **设置 → 插件 → 添加插件** 中填 `dsh-ai-for-memory`。本地开发用目录安装：
@@ -210,10 +210,11 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 ## 更新内容
 
-当前版本 **0.5.10**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.5.11**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
+- **0.5.11**：库级缓存加 64 MB 字节预算（条数上限之外再按估算字节逐出）；`recordKnowledgeUsage` 与面板 `session.json` 写改异步锁，同步/异步不再互等；`aim_memory` 的 `remember`/`learn`/`incident` 回显带数据边界；SQL 校验拒绝 CTE 逗号自连接（含 `FROM (x, x)` 表组）；脱敏补上带引号的 JSON 键（`{"api_key": "…"}`、`{'password': '…'}`、`db_password` 前缀）；
 - **0.5.10**：v1→v2 迁移把 0.5.7 之前落盘的旧数据全库回填脱敏（备份、幂等、可关）；锁释放前校验 owner，被偷后旧持有者不再删新锁；检索用倒排 postings 生成候选集，不再全库三遍扫；本地引擎空闲停止立即取消加载；`Sec-Fetch-Site: none` 不再放行；端点探测成功长期缓存；插件索引 `engines.dsh` 改用当前 manifest；CI 增加 `npm run check`；
 - **0.5.9**：修复 0.5.8 的 Node 20 CI——`node:sqlite` 不可用时 SQL 用例现在正确跳过；产品代码与 0.5.8 相同；
 - **0.5.8**：记忆回灌带数据边界（`<<<MEMORY-DATA…>>>`，伪造结束标记会被替换）；新增掉电一致性测试（杀写入进程后 JSON 必须完整、JSONL 撕裂尾行跳过且不粘下一条）；崩溃进程遗留的锁按 owner pid / 空锁 1 秒规则立即接管；
