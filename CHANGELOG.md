@@ -12,6 +12,10 @@
 
 - **turn 模式的空闲释放与新 turn 的竞态**：原来只靠 `engineTurnStarted.has(id)` 挡停止，但新 turn 重启一个*已就绪*的引擎时根本不会再走 `engineTurnStarted.add(id)`——`ensureLocalEngines('turn')` 在 `localEngineStatus()` 里看到 `ready`/`starting` 就 `continue` 了，于是释放循环照杀，新 turn 从头到尾没有 embedding/rerank，RAG 静默退回 BM25。现在：`ensureLocalEngines('turn')` 在 `ready`/`starting` 分支显式认领（`turnMayClaimEngine`，只认领本插件启动的引擎，手工启动/收养的不动）；空闲释放带 generation，任何新 turn 都会让旧释放作废（`idleReleaseStillValid`）；新 turn 还会 `await idleStopInFlight`，与正在进行的释放串行化，释放结束后再决定是否重新拉起。新增回归用例覆盖认领与作废的两张真值表。
 
+### 安全与信噪比
+
+- **promote 的回显也加数据边界**：`aim_memory action=promote` 是最后一个把 store 正文原样拼进返回值的动作——`formatPromotion` 的「待确认改写提议」「新增知识」「合并进已有事实」三类行，以及外部模型提炼的预览/完成回显，之前都直接进 prompt。0.5.10 补了 `aim_context list`、0.5.11 补了 remember/learn/incident 的回显，promote 是同类路径里最后漏的一个，而且它恰好是唯一会把「未确认的模型自述」整段回显的动作。现在统一用 `wrapMemoryData('aim_memory/promote', …)` 包装，并在边界内注明「回显的是待确认/新写入的记忆正文，标为模型自述（未确认）的不能当项目事实」；正文里伪造的结束标记同样会被替换。
+
 ### 检索与资源
 
 - **单个超预算的库不再被逐出**：`evictTracked` 原来是 `map.size > 0 && …`，一个库自己超过 64 MB 字节预算就会在插入那一次被立即逐出，于是它每次检索都从零重建整张倒排索引——实测 2000 篇（1180 字符/篇）热检索 656 ms、3000 篇 1060 ms。现在逐出循环要求 `map.size > 1`，最新插入的库始终保留（超预算也不逐），实测 2000 篇热检索降到约 20–30 ms、3000 篇约 31 ms，1000–3000 篇全程 `indexEntries=1`。
