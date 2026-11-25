@@ -2,6 +2,26 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 未发布
+
+### 检索与资源
+
+- **库级缓存加字节预算**：`INDEX_CACHE`/`LIBRARY_VECTOR_CACHE` 原来只限 12 个条目，一个对话的文档量再大也只算一个——十二个库就能把堆撑爆。现在同时受 64 MB 估算字节约束，超预算按 LRU 逐出；逐文档 tokens 缓存仍在，重建只重扫文本。搜索改成只在 `applyIndexDocs` 真有增删时才重新估算（`changed > 0`），未变的检索不重复遍历 token 数组。
+
+### 并发与事件循环
+
+- **`recordKnowledgeUsage` 改异步锁**：检索每次命中都会记账，同步锁在争用时用 `Atomics.wait` 卡住事件循环。现在走 `withFileLock`（异步等待），调用方 `await`；新增「20 个并发写不丢计数」回归测试。
+- **面板的 `session.json` 写改异步**：`touchAsync`/`setPublic`/`setViewers` 走异步锁，HTTP 处理器 `await`；宿主钩子（`ensureSession`/`setTitle`）仍用同步锁（它们在回合内、频率低）。
+- **异步锁对同步回调不再跨微任务持有**：`withFileLock` 若回调返回非 Promise，会立即释放锁再返回；否则同进程里「异步持有 + 同步 `Atomics.wait` 等待」会互等到超时（已在跨对话测试里复现并修复）。
+
+### 安全与信噪比
+
+- **边界覆盖 `aim_memory` 回显**：`remember`/`learn`/`incident` 返回里带的知识正文（`clip(doc.text, …)`）现在也包进 `<<<MEMORY-DATA…>>>` 边界，`aim_memory` 不再是把记忆原文直接塞回上下文的缺口。
+
+### 测试
+
+- 全量 229 用例，226 通过、0 失败、3 跳过（Node 26）；Node 20.19 上 200 通过、0 失败、29 跳过。
+
 ## 0.5.10（2026-11-25）
 
 ### 安全与数据

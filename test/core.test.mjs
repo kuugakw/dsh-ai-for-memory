@@ -41,7 +41,7 @@ import { knowledgeDatabasePath, sqliteAvailable } from '../lib/knowledge-sqlite.
 import {
   categoryOf, formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
 } from '../lib/knowledge-query.js';
-import { applyDisclosure, buildIndex, RRF_K, reciprocalRankFusion, search, snippetOf, tokenize } from '../lib/retrieval.js';
+import { applyDisclosure, buildIndex, RRF_K, reciprocalRankFusion, search, snippetOf, tokenize, __retrievalCacheStats, __setLibraryCacheBudget } from '../lib/retrieval.js';
 import { BoundedCache, CATEGORIES, SCHEMA_VERSION, appendJsonLine, dshHome, hourKey, listJsonlFiles, listJsonFiles, readJson, readJsonl, withFileLockSync, writeJson } from '../lib/util.js';
 import { migrateStore, planMigrations } from '../lib/migrate.js';
 import { buildUiState } from '../lib/ui-state.js';
@@ -1302,8 +1302,8 @@ test('cross conversation search labels every hit', async () => {
 
     // Cross-conversation reads require an explicit open under the new default.
     const scopes = new MemoryScopes(memoryRoot);
-    scopes.setPublic(sessionKey('conv-alpha'), true);
-    scopes.setPublic(sessionKey('conv-beta'), true);
+    await scopes.setPublic(sessionKey('conv-alpha'), true);
+    await scopes.setPublic(sessionKey('conv-beta'), true);
 
     // A's own scope still only contains A's document.
     const own = await searchTool.execute({ query: '部署', scope: 'session' }, execA);
@@ -1388,7 +1388,7 @@ test('context archives stay per conversation and restore can cross', async () =>
 
     // Restoring another conversation's archive now requires opening it first.
     const scopes = new MemoryScopes(memoryRoot);
-    scopes.setPublic(sessionKey('conv-alpha'), true);
+    await scopes.setPublic(sessionKey('conv-alpha'), true);
 
     assert.match(await contextTool.execute({ action: 'list' }, execB), /本对话暂无上下文存档/);
     const all = await contextTool.execute({ action: 'list', scope: 'all' }, execB);
@@ -2409,7 +2409,7 @@ test('verification clears a model claim and incidents are compact unverified pro
   }
 });
 
-test('ui state exposes knowledge provenance and pending count', () => {
+test('ui state exposes knowledge provenance and pending count', async () => {
   const root = tempRoot();
   try {
     const store = new MemoryStore(root);
@@ -2422,7 +2422,7 @@ test('ui state exposes knowledge provenance and pending count', () => {
     });
     store.stage({ content: '提交前必须先跑测试', kind: 'action' });
     const stored = store.documents()[0];
-    store.recordKnowledgeUsage([stored.doc_id]);
+    await store.recordKnowledgeUsage([stored.doc_id]);
     const state = buildUiState([{ store, scope: 'session', label: '本对话' }]);
     assert.equal(state.counts.knowledge, 1);
     assert.equal(state.knowledgeTotal, 1);
@@ -2627,7 +2627,7 @@ test('closed conversations are invisible to other conversations', async () => {
 
     const scopes = new MemoryScopes(memoryRoot);
     const keyA = sessionKey('conv-open');
-    scopes.setPublic(keyA, false);
+    await scopes.setPublic(keyA, false);
 
     // The other conversation can still search its own knowledge only.
     const cross = await searchTool.execute({ query: '部署', scope: 'all' }, execB);
@@ -2645,7 +2645,7 @@ test('closed conversations are invisible to other conversations', async () => {
     assert.match(conversations, /另有 1 个对话未对外开放/);
 
     // Re-opening makes it visible again.
-    scopes.setPublic(keyA, true);
+    await scopes.setPublic(keyA, true);
     const reopened = await searchTool.execute({ query: '部署', scope: 'all' }, execB);
     assert.match(reopened, /open_doc/);
   } finally {
@@ -2681,8 +2681,8 @@ test('cross-conversation search folds the same fact into one hit', async () => {
     }, execB);
 
     const scopes = new MemoryScopes(memoryRoot);
-    scopes.setPublic(sessionKey('conv-dup-a'), true);
-    scopes.setPublic(sessionKey('conv-dup-b'), true);
+    await scopes.setPublic(sessionKey('conv-dup-a'), true);
+    await scopes.setPublic(sessionKey('conv-dup-b'), true);
 
     const result = await searchTool.execute({
       query: '发布前必须跑测试', scope: 'all', top_k: 5,
@@ -6354,7 +6354,7 @@ test('harness checkpoints get a current-request anchor, not a repeated answer', 
   }
 });
 
-test('知识权重按最近使用衰减，且只作用于本对话', () => {
+test('知识权重按最近使用衰减，且只作用于本对话', async () => {
   const now = Date.parse('2026-11-17T12:00:00.000Z');
   const day = 24 * 60 * 60 * 1000;
   assert.equal(recencyWeight(new Date(now).toISOString(), now), 1);
@@ -6377,14 +6377,14 @@ test('知识权重按最近使用衰减，且只作用于本对话', () => {
   assert.equal(doc.needs_confirm, undefined);
 
   // 刚用过：A 权重=1；B 从未使用
-  a.recordKnowledgeUsage([doc.doc_id], { at: new Date(now).toISOString() });
+  await a.recordKnowledgeUsage([doc.doc_id], { at: new Date(now).toISOString() });
   assert.ok(a.knowledgeWeight(doc.doc_id, now) > 0.999);
   assert.equal(b.knowledgeWeight(doc.doc_id, now), 0);
   assert.equal(a.knowledgeUsage()[doc.doc_id].count, 1);
 
   // A returned hit from B must not be written into A's usage log. B is empty,
   // so this is a foreign doc even though doc_id exists in A.
-  b.recordKnowledgeUsage([doc.doc_id], { at: new Date(now - 28 * day).toISOString() });
+  await b.recordKnowledgeUsage([doc.doc_id], { at: new Date(now - 28 * day).toISOString() });
   assert.equal(b.knowledgeWeight(doc.doc_id, now), 0);
   assert.equal(b.knowledgeUsage()[doc.doc_id], undefined);
 
@@ -6395,7 +6395,7 @@ test('知识权重按最近使用衰减，且只作用于本对话', () => {
     source: 'user',
   }, { confirm: true });
   assert.equal(bDoc.doc_id, doc.doc_id);
-  b.recordKnowledgeUsage([doc.doc_id], { at: new Date(now - 28 * day).toISOString() });
+  await b.recordKnowledgeUsage([doc.doc_id], { at: new Date(now - 28 * day).toISOString() });
   assert.ok(Math.abs(b.knowledgeWeight(doc.doc_id, now) - 0.25) < 1e-9);
   assert.ok(a.knowledgeWeight(doc.doc_id, now) > 0.999);
 
@@ -8307,6 +8307,74 @@ test('crash consistency: a torn JSONL tail is skipped and does not swallow the n
     assert.equal(last.n, 'next');
     assert.equal(last.pad, 'ok');
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('library cache evicts by byte budget and keeps search correct', () => {
+  const docs = Array.from({ length: 120 }, (_, i) => ({
+    doc_id: `big-${i}`,
+    text: `big 网关 超时 重试 排障 ${'补充说明 '.repeat(40)}`,
+    category: 'notes',
+    scope: 's',
+  }));
+  try {
+    __setLibraryCacheBudget(1024);
+    const hit = search(docs, '网关超时', { mode: 'hybrid', topK: 3 });
+    assert.ok(hit.length >= 1);
+    assert.ok(__retrievalCacheStats().indexBytes <= 1024);
+    // Lifting the budget must make the same corpus searchable again: eviction
+    // only drops the cache entry, never the documents.
+    __setLibraryCacheBudget(64 * 1024 * 1024);
+    const again = search(docs, '网关超时', { mode: 'hybrid', topK: 3 });
+    assert.ok(again.length >= 1);
+    assert.equal(again[0].doc_id, hit[0].doc_id);
+  } finally {
+    __setLibraryCacheBudget(64 * 1024 * 1024);
+  }
+});
+
+test('recordKnowledgeUsage serialises concurrent writers without losing counts', async () => {
+  const root = tempRoot();
+  try {
+    const store = new MemoryStore(root).init();
+    const doc = store.remember({ text: '并发写入测试', category: 'notes', source: 'user' }, { confirm: true });
+    await Promise.all(Array.from({ length: 20 }, () => store.recordKnowledgeUsage([doc.doc_id])));
+    assert.equal(store.knowledgeUsage()[doc.doc_id].count, 20);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('aim_memory wraps its memory text in the data boundary', async () => {
+  const root = tempRoot();
+  const previousHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = path.join(root, 'dsh-home');
+  try {
+    const registered = [];
+    const ctx = {
+      tools: { register: (tool) => { registered.push(tool); return () => {}; } },
+      effect: (fn) => fn(),
+      on: () => () => {},
+      get: () => undefined,
+    };
+    apply(ctx, {});
+    const memory = registered.find((tool) => tool.name === 'aim_memory');
+    const exec = fakeExec(root);
+    const remembered = await memory.execute({
+      action: 'remember', doc_id: 'bnd_remember', text: '带边界的内容', category: 'notes',
+    }, exec);
+    assert.match(remembered, /<<<MEMORY-DATA/);
+    assert.match(remembered, /<<<END-MEMORY-DATA>>>/);
+    assert.match(remembered, /带边界的内容/);
+    const learned = await memory.execute({
+      action: 'learn', items: [{ text: '批量边界内容', category: 'notes' }],
+    }, exec);
+    assert.match(learned, /<<<MEMORY-DATA/);
+    assert.match(learned, /<<<END-MEMORY-DATA>>>/);
+    assert.match(learned, /批量边界内容/);
+  } finally {
+    process.env.DSH_HOME = previousHome;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

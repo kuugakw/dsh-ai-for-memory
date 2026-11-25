@@ -1039,7 +1039,7 @@ export async function searchWithRag(config, sources, query, options = {}) {
       (hit.origin_key ?? '') === (callerOwner.key ?? '')
       && (hit.origin_scope ?? 'session') === (callerOwner.scope ?? 'session')
     ));
-    callerStore.recordKnowledgeUsage(ownedHits.map((hit) => hit.doc_id));
+    await callerStore.recordKnowledgeUsage(ownedHits.map((hit) => hit.doc_id));
   }
   const channelSummary = `RAG ${ragRows.length} 条（Embedding + Rerank）+ 本地 BM25 ${localRows.length} 条 → RRF(k=${RRF_K})`;
   return {
@@ -1591,9 +1591,9 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           // Writing a document counts as using it: it becomes the most recent
           // knowledge in this conversation and ranks higher on next search.
           if (typeof source.store.recordKnowledgeUsage === 'function') {
-            source.store.recordKnowledgeUsage([doc.doc_id]);
+            await source.store.recordKnowledgeUsage([doc.doc_id]);
           }
-          return [
+          return wrapMemoryData('aim_memory/remember', [
             `${doc.merged
               ? ((doc.changes?.length ?? 0) > 0 ? '知识已更新' : '知识已合并')
               : '知识已写入'}（${source.label}）：${doc.doc_id}`,
@@ -1604,7 +1604,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             `修订：${doc.revision ?? 1}`
               + ((doc.changes?.length ?? 0) > 0 ? `｜最近变化：${doc.changes[doc.changes.length - 1].kind}` : ''),
             clip(doc.text, 400),
-          ].join('\n');
+          ].join('\n'));
         }
 
         if (action === 'learn') {
@@ -1640,7 +1640,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           }
           const merged = written.filter((doc) => doc.merged).length;
           if (written.length > 0 && typeof source.store.recordKnowledgeUsage === 'function') {
-            source.store.recordKnowledgeUsage(written.map((doc) => doc.doc_id));
+            await source.store.recordKnowledgeUsage(written.map((doc) => doc.doc_id));
           }
           const lines = [
             `已写入知识 ${written.length} 条（新增 ${written.length - merged}，合并 ${merged}）`
@@ -1656,7 +1656,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             lines.push(formatConflict(doc));
           }
           for (const row of failed.slice(0, 5)) lines.push(`  ! ${row}`);
-          return lines.join('\n');
+          return wrapMemoryData('aim_memory/learn', lines.join('\n'));
         }
 
         if (action === 'incident') {
@@ -1680,15 +1680,15 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             source: args?.source,
             tags: args?.tags,
           });
-          if (typeof store.recordKnowledgeUsage === 'function') store.recordKnowledgeUsage([doc.doc_id]);
-          return [
+          if (typeof store.recordKnowledgeUsage === 'function') await store.recordKnowledgeUsage([doc.doc_id]);
+          return wrapMemoryData('aim_memory/incident', [
             `事故已写入知识库（${source.label}）：${doc.doc_id}`,
             `分类：incidents（独立类型「事故」）｜严重度：${severity}｜状态：${incidentStatus}`,
             `知识状态：模型自述（未确认）｜置信度：${doc.confidence}；面板确认后清除黄标`,
             clip(doc.text, 800),
             '事故记录不触发知识冲突闸门，也不会被普通知识的冲突确认拦下；'
               + '之后可用 aim_search（category=incidents 或直接搜「事故」）检索。',
-          ].join('\n');
+          ].join('\n'));
         }
 
         if (action === 'promote') {
@@ -1948,7 +1948,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           (hit.origin_key ?? '') === callerOwner.key
           && (hit.origin_scope ?? 'session') === callerOwner.scope
         );
-        const localRun = () => {
+        const localRun = async () => {
           const weights = typeof callerStore.knowledgeWeights === 'function'
             ? callerStore.knowledgeWeights()
             : {};
@@ -1992,7 +1992,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           // A returned hit counts as "used" for the caller's conversation, which
           // lifts it on later searches here (and only here).
           if (typeof callerStore.recordKnowledgeUsage === 'function') {
-            callerStore.recordKnowledgeUsage(disclosed.filter(ownedHit).map((hit) => hit.doc_id));
+            await callerStore.recordKnowledgeUsage(disclosed.filter(ownedHit).map((hit) => hit.doc_id));
           }
           return {
             empty: false,
@@ -2019,10 +2019,10 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
             picked = { empty: rag.empty === true, text: rag.text };
           } else {
             fallbackNote += `${rag.note}\n`;
-            picked = localRun();
+            picked = await localRun();
           }
         } else {
-          picked = localRun();
+          picked = await localRun();
         }
 
         // Vector zero hits: SQL may still answer the metric/exact part.

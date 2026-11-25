@@ -22,13 +22,13 @@ function sourceKeys(sources) {
   return sources.filter((source) => source.scope === 'session').map((source) => source.key);
 }
 
-test('conversation access: setViewers keeps a clean allowlist and drops self', () => {
+test('conversation access: setViewers keeps a clean allowlist and drops self', async () => {
   const root = tempRoot();
   try {
     const scopes = makeScopes(root);
     const keyA = scopes.ensureSession('conv-a', { label: 'A' });
     scopes.ensureSession('conv-b', { label: 'B' });
-    scopes.setViewers(keyA, ['conv-b', 'conv-b', '', 'conv-a', 42, ' conv-c ']);
+    await scopes.setViewers(keyA, ['conv-b', 'conv-b', '', 'conv-a', 42, ' conv-c ']);
 
     const row = scopes.listSessions().find((candidate) => candidate.key === keyA);
     // Duplicates collapse, blanks and non-strings are dropped, self is dropped,
@@ -37,7 +37,7 @@ test('conversation access: setViewers keeps a clean allowlist and drops self', (
     assert.deepEqual(scopes.readMeta(keyA).viewers, ['conv-b', 'conv-c']);
     assert.equal(row.public, false);
 
-    scopes.setViewers(keyA, []);
+    await scopes.setViewers(keyA, []);
     const cleared = scopes.listSessions().find((candidate) => candidate.key === keyA);
     assert.deepEqual(cleared.viewers, []);
   } finally {
@@ -57,14 +57,14 @@ test('conversation access: self, public and named viewers decide visibility', ()
   assert.equal(scopeVisibleTo({ key: 'k1', sessionId: 's1', public: false, viewers: [] }, 'k2', 's2'), false);
 });
 
-test('conversation access: a named-viewer conversation is readable only by its viewers', () => {
+test('conversation access: a named-viewer conversation is readable only by its viewers', async () => {
   const root = tempRoot();
   try {
     const scopes = makeScopes(root);
     const keyA = scopes.ensureSession('conv-a', { label: 'A' });
     const keyB = scopes.ensureSession('conv-b', { label: 'B' });
     const keyC = scopes.ensureSession('conv-c', { label: 'C' });
-    scopes.setViewers(keyA, ['conv-b']);
+    await scopes.setViewers(keyA, ['conv-b']);
 
     // B may read A; C may not.
     assert.deepEqual(sourceKeys(memorySources({ scopes, sessionId: 'conv-b' }, 'all')).sort(),
@@ -72,7 +72,7 @@ test('conversation access: a named-viewer conversation is readable only by its v
     assert.deepEqual(sourceKeys(memorySources({ scopes, sessionId: 'conv-c' }, 'all')), [keyC]);
 
     // Opening A to everyone adds it for C, and the named list is irrelevant.
-    scopes.setPublic(keyA, true);
+    await scopes.setPublic(keyA, true);
     assert.deepEqual(sourceKeys(memorySources({ scopes, sessionId: 'conv-c' }, 'all')).sort(),
       [keyA, keyC].sort());
   } finally {
@@ -80,14 +80,14 @@ test('conversation access: a named-viewer conversation is readable only by its v
   }
 });
 
-test('conversation access: summaries count only readable conversations', () => {
+test('conversation access: summaries count only readable conversations', async () => {
   const root = tempRoot();
   try {
     const scopes = makeScopes(root);
     const keyA = scopes.ensureSession('conv-a', { label: 'A' });
     const keyB = scopes.ensureSession('conv-b', { label: 'B' });
     scopes.ensureSession('conv-c', { label: 'C' });
-    scopes.setViewers(keyA, ['conv-b']);
+    await scopes.setViewers(keyA, ['conv-b']);
 
     const forB = { scopes, sessionId: 'conv-b' };
     assert.deepEqual(readableConversations(forB).map((row) => row.key).sort(),
