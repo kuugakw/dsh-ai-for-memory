@@ -76,6 +76,7 @@
 - **出口收口（第一步）**：边界实现移到 `lib/egress.js` 单一定义（`wrapMemoryData`、`containsMemoryBoundary`、伪造结束标记替换），`index.js` 只做 re-export；新增不变量测试遍历所有会回显记忆正文的 action（`remember`/`learn`/`incident`/`promote`/`search`），断言输出带边界、且伪造结束标记只出现一处（被中和）。`stage` 的回显是调用方输入、不是库里的旧数据，按 0.5.12 的设计不走边界，改为在正文里标注来源。
 - **路径收口**：`lib/safe-path.js` 的 `resolveRelativeWithin` + `realPathInside` 成为唯一解析器，导出目标与 `aim_repair` 的会话日志符号链接复核都已改用它。
 - **动作分类强制**：测试枚举每个工具的 `action` 枚举值，要求每个 `(tool, action)` 都在 `EGRESS_CLASSIFICATION` 里被显式分类（memory / caller-input / external / other）。新增 action 必须先回答「它的输出里有没有库里的正文」才能提交；memory 类由出口测试实际执行（`context restore` 检查的是 `agent.inject` 的正文，而不是工具状态行）。
+- **出口收口（试点）**：`aim_search` 改成单一出口——本地检索、向量/RRF、SQL 兜底各分支只拼纯文本，最后统一走 `renderMemoryText('aim_search', composed)` 包一次边界（此前只包住向量那一段，SQL 行和兜底说明在边界外）。`lib/egress.js` 新增 `tagMemory`/`renderTagged`/`renderMemoryText`，其余 action 可按同一形态逐步迁移，不再每个分支各写一次 wrap。
 - **仍未做**：store 读取返回信任标签、formatter 自动包裹。原因：工具当前直接拼字符串（`return parts.join('\n')`），自动包裹需要先把 store 读取接口改成返回 tagged 值、所有 action 走统一 formatter，属于跨 13 个 action 的重构，单独排期。
 - **控制面**：10 处路由内重复的 `isTrustedRequest` 已注释关闭（保留原文作为语义标记），并新增静态扫描测试：`lib/api.js` 里未注释的 gate 调用只允许 2 处（`register()` 包装器 + POST 读体器），有人再复制一份就会失败。
 

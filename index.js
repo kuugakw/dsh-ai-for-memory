@@ -26,7 +26,7 @@ import { isSessionActive, markActivity } from './lib/activity.js';
 import { evaluateDecision } from './lib/decision.js';
 import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
 import { defaultRegistryDir, listRootRows, rememberRoot } from './lib/registry.js';
-import { wrapMemoryData } from './lib/egress.js';
+import { renderMemoryText, wrapMemoryData } from './lib/egress.js';
 import { installApi } from './lib/api.js';
 
 // The boundary implementation lives in lib/egress.js; re-exported for the
@@ -1041,12 +1041,14 @@ export async function searchWithRag(config, sources, query, options = {}) {
     ok: true,
     empty: false,
     rag_via: reranked.via,
-    text: wrapMemoryData('aim_search/RRF 融合', `检索方式：RRF 融合（${channelSummary}）｜${covers}\n`
+    // Plain text: aim_search applies the memory boundary once at its single exit
+    // so the SQL part, the vector part and the notes are covered together.
+    text: `检索方式：RRF 融合（${channelSummary}）｜${covers}\n`
       + formatHits(query, disclosed, 'rrf', folded, detail)
       + '\n（RAG 通道先用 Embedding 召回，再经 Rerank 重排；Rerank 不可用时不会把只靠 Embedding 的结果当作 RAG。'
       + '索引会按语义去重；被索引去重掉的旧文档仍由本地 BM25 通道带回，不再出现“知识库里有、RAG 里没有”的两套结论。'
       + 'RAG#/BM25# 是通道内先按使用率、确认状态和置信度重排后的名次；RRF 只融合名次，最终分不再乘先验。'
-      + '关闭「RAG 挂载」则只走本地 BM25。）'),
+      + '关闭「RAG 挂载」则只走本地 BM25。）',
   };
 }
 
@@ -1995,8 +1997,8 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           }
           return {
             empty: false,
-            text: wrapMemoryData('aim_search', `检索范围：${sources.map((source) => source.label).join(' + ')}`
-              + `（排序含本对话最近使用权重）\n${formatHits(query, disclosed, mode, folded, detail)}`),
+            text: `检索范围：${sources.map((source) => source.label).join(' + ')}`
+              + `（排序含本对话最近使用权重）\n${formatHits(query, disclosed, mode, folded, detail)}`,
           };
         };
 
@@ -2035,14 +2037,19 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           }
         }
 
+        let composed;
         if (routed.route === 'hybrid') {
           const parts = [];
           if (sqlResult?.ok === true) parts.push(formatSqlResult(query, sqlResult));
           else if (sqlResult) parts.push(`SQL 部分未执行：${sqlResult.error ?? '无法翻译'}`);
           parts.push(`— 向量补充 —\n${picked.text}`);
-          return parts.join('\n\n');
+          composed = parts.join('\n\n');
+        } else {
+          composed = fallbackNote + picked.text;
         }
-        return fallbackNote + picked.text;
+        // Single exit: every branch here hands back store text (hits, SQL rows,
+        // fallback notes), so the boundary is applied once instead of per branch.
+        return renderMemoryText('aim_search', composed);
       },
     },
     {
