@@ -211,6 +211,19 @@ test('every action is classified for the memory-data boundary', () => {
   }
 });
 
+test('every formatHits call goes through taggedText', () => {
+  const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  const bare = source
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => !line.startsWith('//'))
+    .filter((line) => line.includes('formatHits(')
+      && !line.startsWith('function formatHits')
+      && !line.includes('taggedText(formatHits(')
+      && !line.includes('renderTagged(formatHits('));
+  assert.deepEqual(bare, [], 'formatHits returns a tagged value; compose it with taggedText()');
+});
+
 test('memory-returning actions all wrap their text in the data boundary', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-egress-'));
   const previousHome = process.env.DSH_HOME;
