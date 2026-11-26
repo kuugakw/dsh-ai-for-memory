@@ -8427,11 +8427,18 @@ test('crash consistency: a torn JSONL tail is skipped and does not swallow the n
       '}',
     ].join('\n'));
     const cp = spawn(process.execPath, [child, file], { stdio: 'ignore' });
-    await new Promise((resolve) => { setTimeout(resolve, 120); });
+    // Wait until the child has at least one complete record instead of a fixed
+    // 120 ms: cold starts on CI runners can take longer than that.
+    const deadline = Date.now() + 5000;
+    let ready = false;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => { setTimeout(resolve, 50); });
+      if (fs.existsSync(file) && readJsonl(file).length >= 1) { ready = true; break; }
+    }
     cp.kill('SIGKILL');
     await new Promise((resolve) => { cp.once('exit', resolve); });
 
-    assert.ok(fs.existsSync(file), '子进程在 120ms 内至少写入一条记录');
+    assert.ok(ready, '子进程在 5s 内至少写入一条完整记录');
     const lines = fs.readFileSync(file, 'utf8').split('\n').filter((line) => line.trim() !== '');
     const records = readJsonl(file);
     // A power cut can leave at most one torn last line; readers skip it and
