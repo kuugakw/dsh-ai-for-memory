@@ -257,17 +257,18 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 ## 开发与测试
 
-要求 Node.js 20+。会话日志体检/修复依赖 Node 的 zstd，需要 Node 22.15+；在 Node 20 上插件其余功能正常，诊断页会明确标记这一项不可用，而不是等用户点下去才报错。
+插件运行时要求 Node.js 20+。会话日志体检/修复依赖 Node 的 zstd，需要 Node 22.15+；在 Node 20 上插件其余功能正常，诊断页会明确标记这一项不可用，而不是等用户点下去才报错。开发（lint）要求 Node 20.19+ / 22.13+ / 24+，这是 ESLint 10 的下限。
 
-测试共 193 项；Node 20 上 13 项依赖 `node:sqlite` 或 zstd 的用例按运行时能力跳过（180 pass / 13 skip），另有 2 项使用 shell 包装器的引擎用例只在 POSIX 上运行（Windows 上 178 pass / 15 skip）。Node 22 在 Linux / macOS 全过，Windows 上 190 pass / 3 skip。CI 覆盖 Linux / Windows / macOS × Node 20 / 22。“全绿”指没有失败，不等于每个平台都跑满 193 项。
+测试共 255 项；Node 26 上 252 通过、3 跳过，Node 20 上依赖 `node:sqlite` 或 zstd 的用例按运行时能力跳过。CI 覆盖 Linux / Windows / macOS × Node 20 / 22。“全绿”指没有失败，不等于每个平台都跑满 255 项。
 
 ```bash
-npm test
-# 等价于
-node --test test/core.test.mjs
+npm ci          # 安装 lint 依赖
+npm test        # 单元测试
+npm run lint    # ESLint（只查正确性，不做格式审查）
+npm run check   # lint + 版本引用/索引一致性
 ```
 
-代码结构、测试覆盖和发布流程见 [开发与测试](docs/development.md)。
+代码结构、质量门禁和发布流程见 [开发与测试](docs/development.md)。
 
 ---
 

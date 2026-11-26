@@ -1307,7 +1307,7 @@ window.__ModuleLoader__.load({
         body: options?.body === undefined ? undefined : JSON.stringify(options.body),
       });
       const text = await response.text();
-      let payload = null;
+      let payload;
       try {
         payload = text === '' ? null : JSON.parse(text);
       } catch {
@@ -1747,7 +1747,7 @@ window.__ModuleLoader__.load({
       const [memoryAction, setMemoryAction] = React.useState('remember');
       const [memoryText, setMemoryText] = React.useState('');
       const [memoryName, setMemoryName] = React.useState('');
-      const [askAction, setAskAction] = React.useState('models');
+      const [, setAskAction] = React.useState('models');
       const [askText, setAskText] = React.useState('ping');
       const [askDocs, setAskDocs] = React.useState('');
       const [askBusy, setAskBusy] = React.useState(false);
@@ -4465,11 +4465,7 @@ window.__ModuleLoader__.load({
           setNotice({ kind: 'err', text: String(revealError?.message ?? revealError) });
         }
       };
-      const downloadRecord = (kind, id, scope, session) => {
-        const params = new URLSearchParams({ root: selectedRoot, kind, id, scope: scope ?? 'session' });
-        if (session) params.set('session', session);
-        window.open(`/ai-for-memory/api/record/download?${params.toString()}`, '_blank', 'noopener');
-      };
+      
       const bulkConversations = async (action) => {
         if (selectedConversations.size === 0) return;
         setBulkBusy(action);

@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MemoryStore } from '../lib/store.js';
 import { defaultMemoryDirIgnoreStatus, ensureDefaultMemoryDirIgnored, ensureGitignoreEntry } from '../lib/gitignore.js';
 import { MemoryScopes, sessionKey } from '../lib/scopes.js';
-import { decodeWorkspaceBucket, dshSessionsDir, encodeWorkspace, resolveWorkspacePath, workspaceIndex } from '../lib/dsh-workspace.js';
+import { decodeWorkspaceBucket, dshSessionsDir, encodeWorkspace, resolveWorkspacePath } from '../lib/dsh-workspace.js';
 import { userModelsDir } from '../lib/model-paths.js';
 import { isDestructiveShellCommand, summarizeTurnActivity } from '../lib/turn-activity.js';
 import { isSessionActive } from '../lib/activity.js';

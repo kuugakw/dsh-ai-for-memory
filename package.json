@@ -47,7 +47,8 @@
     "test": "node --test test/core.test.mjs test/security-invariants.test.mjs test/session-doctor.test.mjs test/conversation-access.test.mjs",
     "prepublishOnly": "npm test",
     "market:build": "node scripts/market/build-index.mjs",
-    "check": "node scripts/check-metadata.mjs"
+    "check": "npm run lint && node scripts/check-metadata.mjs",
+    "lint": "eslint ."
   },
   "publishConfig": {
     "access": "public",
@@ -84,5 +85,10 @@
     "compaction",
     "repair"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0"
+  }
 }

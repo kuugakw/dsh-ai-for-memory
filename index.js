@@ -505,7 +505,7 @@ export function memoryContext(config, exec, deps = {}, runtime = undefined) {
   // `.gitignore`, add the directory before its first creation so `git add .`
   // cannot sweep the archive into a public repository. Custom roots are left
   // alone; the README tells users to ignore those themselves.
-  let gitignore = null;
+  let gitignore;
   try {
     gitignore = ensureDefaultMemoryDirIgnored(root, workspace, config.directoryName);
   } catch (error) {
@@ -790,7 +790,7 @@ function foldDuplicateHits(rows, topK) {
     }
   }
   return {
-    hits: kept.slice(0, topK).map(({ tokens, ...hit }) => hit),
+    hits: kept.slice(0, topK).map(({ tokens: _droppedTokens, ...hit }) => hit),
     folded,
   };
 }
@@ -3081,7 +3081,6 @@ export function installContextManagement(ctx, config, deps, runtime) {
         });
         if (engineSkipLogged.get(id) !== base) {
           engineSkipLogged.set(id, base);
-          // eslint-disable-next-line no-console
           console.log(`[ai-for-memory] ${reason}：${id}`);
         }
         continue;
@@ -3113,11 +3112,9 @@ export function installContextManagement(ctx, config, deps, runtime) {
           return;
         }
         engineStartFailures.set(id, Date.now() + ENGINE_START_COOLDOWN_MS);
-        // eslint-disable-next-line no-console
         console.warn(`[ai-for-memory] 本地引擎自动启动失败：${id}：${result?.error ?? '未知错误'}`);
       }).catch((error) => {
         engineStartFailures.set(id, Date.now() + ENGINE_START_COOLDOWN_MS);
-        // eslint-disable-next-line no-console
         console.warn(`[ai-for-memory] 本地引擎自动启动失败：${id}：${error?.message ?? error}`);
       });
       // Do not await the model load: the pre-step caller must never wait for
@@ -3130,7 +3127,6 @@ export function installContextManagement(ctx, config, deps, runtime) {
       // Any turn that started after the release was scheduled cancels it: that
       // turn owns the engines now.
       if (generation !== turnGeneration) {
-        // eslint-disable-next-line no-console
         console.log('[ai-for-memory] 新一轮已开始，取消本地引擎空闲释放');
         return;
       }
@@ -3149,10 +3145,8 @@ export function installContextManagement(ctx, config, deps, runtime) {
           // is the very thing this stop exists to free.
           await stopLocalEngine(id, { cancelStart: true });
           engineOwned.delete(id);
-          // eslint-disable-next-line no-console
           console.log(`[ai-for-memory] 每轮模式空闲，已释放本地引擎 ${id}`);
         } catch (error) {
-          // eslint-disable-next-line no-console
           console.warn(`[ai-for-memory] 每轮模式停止本地引擎失败：${id}：${error?.message ?? error}`);
         }
       }
@@ -3334,7 +3328,6 @@ export function installContextManagement(ctx, config, deps, runtime) {
       if (title !== '') context.scopes.setTitle(key, title);
       return key;
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.warn(`[ai-for-memory] 创建对话记忆目录失败：${error?.message ?? error}`);
       return null;
     }
@@ -3379,7 +3372,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
     const seen = new Set();
     for (const candidate of [store, sharedStore]) {
       if (!candidate || typeof candidate.search !== 'function') continue;
-      let hits = [];
+      let hits;
       try {
         hits = candidate.search(text, {
           topK: RESET_RELATED_LIMIT,
@@ -3770,7 +3763,6 @@ export function installContextManagement(ctx, config, deps, runtime) {
         context: saved.context_id,
         threshold: selection.threshold,
       });
-      // eslint-disable-next-line no-console
       console.log(`[ai-for-memory] ${hardReset ? '已全量清出' : '已按话题相似度清出'} ${turnCount} 轮 / ${shadowed} 个节点`
         + `（保留 ${resetPlan ? resetPlan.keptTurns.length : selection.keep.length} 轮），存档 ${saved.context_id}`);
       return shadowed > 0;
@@ -3784,7 +3776,6 @@ export function installContextManagement(ctx, config, deps, runtime) {
     if (options.immediate === true) {
       return clearNow().catch((error) => {
         record({ state: 'error', session: String(session.id), error: String(error?.message ?? error), via: 'pre-step' });
-        // eslint-disable-next-line no-console
         console.error(`[ai-for-memory] 上下文立即清理失败：${error?.message ?? error}`);
       });
     }
@@ -3814,7 +3805,6 @@ export function installContextManagement(ctx, config, deps, runtime) {
         }
       } catch (error) {
         record({ state: 'error', session: String(session.id), error: String(error?.message ?? error) });
-        // eslint-disable-next-line no-console
         console.error(`[ai-for-memory] 上下文清理失败：${error?.message ?? error}`);
       }
     })();
@@ -3889,7 +3879,6 @@ export function installContextManagement(ctx, config, deps, runtime) {
     const record = recorderOf(storeOfSession(session));
     if (!agent || !compaction || typeof compaction.compactNow !== 'function') {
       record({ state: 'unavailable', error: 'compaction 服务不可用' });
-      // eslint-disable-next-line no-console
       console.warn('[ai-for-memory] 上下文已归档，但当前 profile 未启用 compaction，无法清理会话上下文');
       return;
     }
@@ -3906,12 +3895,10 @@ export function installContextManagement(ctx, config, deps, runtime) {
           noop: result === null,
         });
         if (result) {
-          // eslint-disable-next-line no-console
           console.log(`[ai-for-memory] 上下文已压缩：${result.shadowedSeqs?.length ?? 0} 条历史，约 ${result.shadowedTokenCount ?? 0} tokens`);
         }
       } catch (error) {
         record({ state: 'error', session: String(session.id), error: String(error?.message ?? error) });
-        // eslint-disable-next-line no-console
         console.error(`[ai-for-memory] 上下文压缩失败：${error?.message ?? error}`);
       }
     })();
@@ -3985,7 +3972,7 @@ export function installContextManagement(ctx, config, deps, runtime) {
     // model request of a turn; the start is fire-and-forget so a slow model
     // load never delays the request (evidence/RAG falls back until it is up).
     // A configured endpoint that already answers suppresses the start entirely.
-    if (!Boolean(session.header?.parentSession)) void ensureLocalEngines(config.engineLifecycle);
+    if (!session.header?.parentSession) void ensureLocalEngines(config.engineLifecycle);
     if (!request || typeof request !== 'object' || request.mode !== 'immediate') {
       await maybePressureReset(session, payload);
       await maybeAnchorRequest(session, payload);
@@ -4063,7 +4050,6 @@ export function installContextManagement(ctx, config, deps, runtime) {
             store.pruneRetention();
           }
         } catch (error) {
-          // eslint-disable-next-line no-console
           console.warn(`[ai-for-memory] 保留策略清理失败：${error?.message ?? error}`);
         }
       }
@@ -4101,14 +4087,12 @@ export function installContextManagement(ctx, config, deps, runtime) {
               },
             });
             const removed = pruneAutoSnapshots(store, config.autoSnapshotMax);
-            // eslint-disable-next-line no-console
             console.log(`[ai-for-memory] 自动快照：${info.snapshot_id}（第 ${built.turnFrom}-${built.turnTo} 轮）`
               + (removed.length > 0
                 ? `；清理 ${removed.length} 个（${removed.map((row) => `${row.snapshot_id} 相似度 ${row.similarity}`).join('，')}）`
                 : ''));
           }
         } catch (error) {
-          // eslint-disable-next-line no-console
           console.error(`[ai-for-memory] 自动快照失败：${error?.message ?? error}`);
         }
       } else {
@@ -4126,7 +4110,6 @@ export function installContextManagement(ctx, config, deps, runtime) {
         const activity = summarizeTurnActivity(session.ownEvents(), id, event.data?.turn);
         if (activity) store.recordDecision(activity);
       } catch (error) {
-        // eslint-disable-next-line no-console
         console.warn(`[ai-for-memory] 自动决策记录失败：${error?.message ?? error}`);
       }
     }
@@ -4152,7 +4135,6 @@ export function installContextManagement(ctx, config, deps, runtime) {
         else counters.set(id, count);
         const trigger = byUsage ? 'usage' : 'rounds';
         const percent = usagePercentOf(pressure);
-        // eslint-disable-next-line no-console
         console.log(`[ai-for-memory] 自动整理触发：${byUsage
           ? `上下文占用 ${formatPressure(pressure)} ≥ ${config.contextUsagePercent}%`
           : `每 ${config.autoEveryRounds} 轮（当前占用 ${formatPressure(pressure)}）`}`);
@@ -4172,12 +4154,10 @@ export function installContextManagement(ctx, config, deps, runtime) {
             try {
               promoted = store.promoteKnowledge({ limit: config.autoKnowledgeLimit });
             } catch (error) {
-              // eslint-disable-next-line no-console
               console.warn(`[ai-for-memory] 自动提炼知识失败：${error?.message ?? error}`);
               promoted = null;
             }
             if (promoted && (promoted.added.length > 0 || (promoted.pending?.length ?? 0) > 0)) {
-              // eslint-disable-next-line no-console
               console.log(`[ai-for-memory] 自动提炼知识：新增 ${promoted.added.length} 篇，合并 ${promoted.merged.length} 篇`
                 + `${(promoted.pending?.length ?? 0) > 0 ? `，待确认更新 ${promoted.pending.length} 条（未写入）` : ''}`);
             }
@@ -4186,7 +4166,6 @@ export function installContextManagement(ctx, config, deps, runtime) {
           try {
             store.pruneRetention();
           } catch (error) {
-            // eslint-disable-next-line no-console
             console.warn(`[ai-for-memory] 保留策略清理失败：${error?.message ?? error}`);
           }
           if (config.topicalClear === false && trigger !== 'usage') {
@@ -4201,7 +4180,6 @@ export function installContextManagement(ctx, config, deps, runtime) {
               // The object carries the trigger, but `reason` is rounds so
               // runClear still takes the legacy compaction path.
               pending.set(id, { kind: 'auto', reason: trigger, percent, context: saved.context_id });
-              // eslint-disable-next-line no-console
               console.log(`[ai-for-memory] 自动整理：已归档上下文 ${saved.context_id}（第 ${saved.turn_from}-${saved.turn_to} 轮）`);
             }
           } else {
@@ -4211,7 +4189,6 @@ export function installContextManagement(ctx, config, deps, runtime) {
             pending.set(id, { kind: 'auto', reason: trigger, percent });
           }
         } catch (error) {
-          // eslint-disable-next-line no-console
           console.error(`[ai-for-memory] 自动归档上下文失败：${error?.message ?? error}`);
         }
       }
@@ -4289,7 +4266,6 @@ export function apply(ctx, config) {
       const report = runSecurityCheck({ root: resolved.root, config: resolved, registryDir });
       if (!report.ok) {
         const failed = report.checks.filter((check) => !check.ok).map((check) => check.id).join(', ');
-        // eslint-disable-next-line no-console
         console.error(`[ai-for-memory] 安全体检未通过：${failed}（面板查看 /api/security/check）`);
         auditCapability('self-check', false, failed, registryDir);
       }
@@ -4304,7 +4280,6 @@ export function apply(ctx, config) {
   if (resolved.mcpEnabled === true && resolved.capabilityMcp !== true) {
     resolved.mcpEnabled = false;
     auditCapability('mcp', false, 'mcpEnabled=true 但没有 capabilityMcp', registryDir);
-    // eslint-disable-next-line no-console
     console.error('[ai-for-memory] MCP 出口未启用：capabilityMcp 未授权（在配置里设 capabilityMcp: true 后才生效）。');
   }
 
@@ -4357,7 +4332,6 @@ export function apply(ctx, config) {
   try {
     installContextManagement(ctx, resolved, deps, runtime);
   } catch (error) {
-    // eslint-disable-next-line no-console
     console.error(`[ai-for-memory] 上下文管理注册失败：${error?.message ?? error}`);
   }
 
@@ -4370,7 +4344,6 @@ export function apply(ctx, config) {
         ctx.tools.register(tool);
       }
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error(`[ai-for-memory] 工具 ${tool.name} 注册失败：${error?.message ?? error}`);
     }
   }
@@ -4382,7 +4355,6 @@ export function apply(ctx, config) {
   try {
     void restoreLocalEngines({ scanProcesses: true });
   } catch (error) {
-    // eslint-disable-next-line no-console
     console.error(`[ai-for-memory] 本地引擎接管失败：${error?.message ?? error}`);
   }
 
@@ -4413,7 +4385,6 @@ export function apply(ctx, config) {
       mcpTokenFile: mcpAccess.file,
     });
   } catch (error) {
-    // eslint-disable-next-line no-console
     console.error(`[ai-for-memory] 面板 API 注册失败：${error?.message ?? error}`);
   }
 }

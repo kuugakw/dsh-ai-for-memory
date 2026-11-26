@@ -48,17 +48,20 @@ npm 上的包名是 `dsh-ai-for-memory`；`package.json` 已移除 `private`，�
 
 ## 开发与测试
 
-要求 Node.js 20+。
+插件运行时要求 Node.js 20+；开发（lint）要求 Node.js 20.19+ 或 22.13+ / 24+，因为 ESLint 10 的下限如此。
 
 ```bash
-npm test
-# 等价于
-node --test test/core.test.mjs test/session-doctor.test.mjs test/conversation-access.test.mjs
+npm ci          # 安装 lint 依赖（CI 使用同一条命令）
+npm test        # 单元测试
+npm run lint    # ESLint flat config：只查正确性（未定义名、未用变量、重复键、ASI 陷阱等）
+npm run check   # lint + 元数据一致性（README/docs/CHANGELOG/package.json/market 索引）
 ```
 
-当前测试覆盖六层读写、对话隔离、上下文清理/恢复、知识冲突、模型自述确认、事故记录、SQL 路由、RAG 构建、导出、面板数据组装，以及本地引擎的 GGUF 发现和 llama.cpp 启动参数等。
+当前测试覆盖六层读写、对话隔离、上下文清理/恢复、知识冲突、模型自述确认、事故记录、SQL 路由、RAG 构建、导出、面板数据组装、安全不变量，以及本地引擎的 GGUF 发现和 llama.cpp 启动参数等。
 
-全套 193 个用例。Node 20 上 13 项依赖 `node:sqlite` 或 zstd 的用例会 skip（180 pass / 13 skip），另有 2 项使用 shell 包装器的引擎用例只在 POSIX 上运行（Windows 上 178 pass / 15 skip）；Node 22 在 Linux / macOS 全过（Windows 190 pass / 3 skip）。CI 同时跑 Node 20 与 22。新用例若依赖运行时能力，用 `t.skip()` 标注原因，保持这条边界可核对。
+全套 255 个用例，Node 26 上 252 通过、3 跳过；Node 20 上依赖 `node:sqlite` 与 zstd 的用例按运行时能力 `skip()`（与 0.5.9 修复的边界一致），CI 同时跑 Node 20 与 22。新用例若依赖运行时能力，用 `t.skip()` 标注原因，保持这条边界可核对。
+
+**质量门禁**：CI 的 `tests` 工作流在 ubuntu/windows/macos × Node 20/22 上执行 `npm ci && npm test && npm run check`；`publish` 工作流在 tag 上同样先跑 `npm ci && npm run check && npm test`，再 `npm publish --provenance`。README 徽章、安装命令、当前版本行、`docs/features.md` 的对应版本、`CHANGELOG.md` 的小节都必须与 `package.json` 一致，否则 `npm run check` 直接失败。Lint 规则只覆盖 correctness，不引入格式审查，避免大范围重排掩盖真实改动。
 
 主要代码：
 
@@ -79,7 +82,12 @@ lib/context.js            # 上下文保存 / 恢复
 lib/decision.js           # 决策审查
 lib/external.js           # OpenAI 兼容外部服务
 lib/export.js             # 知识库 / SQL / RAG 导出
+lib/egress.js             # 记忆数据边界与信任标记（唯一定义）
+lib/safe-path.js          # 允许目录内的路径解析（唯一定义）
+lib/security-check.js     # 只读安全体检
+lib/audit.js              # 面板审计日志
 test/core.test.mjs        # 测试
+test/security-invariants.test.mjs  # 安全不变量
 ```
 
 ---
