@@ -77,7 +77,8 @@
 - **路径收口**：`lib/safe-path.js` 的 `resolveRelativeWithin` + `realPathInside` 成为唯一解析器，导出目标与 `aim_repair` 的会话日志符号链接复核都已改用它。
 - **动作分类强制**：测试枚举每个工具的 `action` 枚举值，要求每个 `(tool, action)` 都在 `EGRESS_CLASSIFICATION` 里被显式分类（memory / caller-input / external / other）。新增 action 必须先回答「它的输出里有没有库里的正文」才能提交；memory 类由出口测试实际执行（`context restore` 检查的是 `agent.inject` 的正文，而不是工具状态行）。
 - **出口收口**：`aim_search` 先改为单一出口——本地检索、向量/RRF、SQL 兜底各分支只拼纯文本，最后统一 `renderMemoryText` 包一次边界（此前只包住向量段，SQL 行和兜底说明在边界外）。随后 `aim_memory` 的 remember/learn/incident/promote、`aim_context` 的 list/restore 注入、`aim_search` 的 SQL 早退也都换到同一个出口函数；旧的 `wrapMemoryData(...)` 调用保留为一行注释备查。边界实现仍然只有 `lib/egress.js` 一处。
-- **仍未做**：store 读取返回信任标签、formatter 自动包裹。原因：工具当前直接拼字符串（`return parts.join('\n')`），自动包裹需要先把 store 读取接口改成返回 tagged 值、所有 action 走统一 formatter，属于跨 13 个 action 的重构，单独排期。
+- **信任标签（试点）**：`formatHits` 不再返回裸字符串，而是返回 `tagMemory('aim_search/hits', …)` 标记；`aim_search` 的两个组装点必须用 `taggedText(...)` 取正文，出口再 `renderMemoryText` 包一次。把标记直接插进模板会得到 `[object Object]`，动作的内容测试立刻失败——新调用方没法悄悄丢掉标签。面板的 `/search` 走的是同一个工具、返回的本来就是带边界的文本，不受影响。
+- **仍未做**：把信任标签推广到其余 formatter / store 读取（context、知识列表），以及给「忘记取正文」加静态扫描。原因：工具当前直接拼字符串（`return parts.join('\n')`），自动包裹需要先把 store 读取接口改成返回 tagged 值、所有 action 走统一 formatter，属于跨 13 个 action 的重构，单独排期。
 - **控制面**：10 处路由内重复的 `isTrustedRequest` 已注释关闭（保留原文作为语义标记），并新增静态扫描测试：`lib/api.js` 里未注释的 gate 调用只允许 2 处（`register()` 包装器 + POST 读体器），有人再复制一份就会失败。
 
 ### P2

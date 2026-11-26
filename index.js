@@ -26,7 +26,7 @@ import { isSessionActive, markActivity } from './lib/activity.js';
 import { evaluateDecision } from './lib/decision.js';
 import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
 import { defaultRegistryDir, listRootRows, rememberRoot } from './lib/registry.js';
-import { renderMemoryText, wrapMemoryData } from './lib/egress.js';
+import { renderMemoryText, tagMemory, taggedText, wrapMemoryData } from './lib/egress.js';
 import { installApi } from './lib/api.js';
 
 // The boundary implementation lives in lib/egress.js; re-exported for the
@@ -751,8 +751,7 @@ function foldDuplicateHits(rows, topK) {
 }
 
 function formatHits(query, hits, mode, folded = 0, detail = 'summary') {
-  if (hits.length === 0) return `没有命中「${query}」的知识文档（mode=${mode}）。`;
-  const claimCount = hits.filter((hit) => hit.unverified === true).length;
+  if (hits.length === 0) return `没有命中「${query}」的知识文档（mode=${mode}）。`;  const claimCount = hits.filter((hit) => hit.unverified === true).length;
   const lines = [`命中 ${hits.length} 条（mode=${mode}`
     + (folded > 0 ? `，已折叠跨来源重复 ${folded} 条` : '')
     + (detail === 'full' ? '，全文' : '，摘要；需要全文用 detail=full') + '）：'];
@@ -791,7 +790,11 @@ function formatHits(query, hits, mode, folded = 0, detail = 'summary') {
       lines.push(`   （全文 ${hit.text_chars ?? '?'} 字，已折叠为摘要）`);
     }
   });
-  return lines.join('\n');
+  // Tagged, not wrapped: aim_search composes several channels and applies the
+  // boundary once at its exit. Interpolating this without taggedText() yields
+  // "[object Object]" and fails the action's content tests, so a new caller
+  // cannot silently drop it.
+  return tagMemory('aim_search/hits', lines.join('\n'));
 }
 
 /**
@@ -1044,7 +1047,7 @@ export async function searchWithRag(config, sources, query, options = {}) {
     // Plain text: aim_search applies the memory boundary once at its single exit
     // so the SQL part, the vector part and the notes are covered together.
     text: `检索方式：RRF 融合（${channelSummary}）｜${covers}\n`
-      + formatHits(query, disclosed, 'rrf', folded, detail)
+      + taggedText(formatHits(query, disclosed, 'rrf', folded, detail))
       + '\n（RAG 通道先用 Embedding 召回，再经 Rerank 重排；Rerank 不可用时不会把只靠 Embedding 的结果当作 RAG。'
       + '索引会按语义去重；被索引去重掉的旧文档仍由本地 BM25 通道带回，不再出现“知识库里有、RAG 里没有”的两套结论。'
       + 'RAG#/BM25# 是通道内先按使用率、确认状态和置信度重排后的名次；RRF 只融合名次，最终分不再乘先验。'
@@ -2007,7 +2010,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
           return {
             empty: false,
             text: `检索范围：${sources.map((source) => source.label).join(' + ')}`
-              + `（排序含本对话最近使用权重）\n${formatHits(query, disclosed, mode, folded, detail)}`,
+              + `（排序含本对话最近使用权重）\n${taggedText(formatHits(query, disclosed, mode, folded, detail))}`,
           };
         };
 
