@@ -12,7 +12,8 @@
 - **路径解析收敛到一处**：新增 `lib/safe-path.js`（`resolveRelativeWithin` / `realPathInside`），导出的目标解析与 `aim_repair` 的会话日志符号链接复核都改用它，绝对路径、盘符、`..`、符号链接四类拒绝只在一处实现。
 - **控制面去重**：`lib/api.js` 里 10 处路由内重复的 `isTrustedRequest` 已注释关闭（保留作为语义标记），并加静态扫描测试：未注释的 gate 调用只允许 2 处（`register()` 包装器 + POST 读体器），再复制一份就会失败。
 - **动作出口分类强制**：测试枚举全部工具的 `action` 枚举，要求每个 `(tool, action)` 在分类表里显式标为 memory / caller-input / external / other；新增 action 不分类就无法通过测试，memory 类由出口不变量测试实际执行（含 `context restore` 的注入正文）。
-- **`aim_search` 单出口**：本地检索、向量/RRF、SQL 兜底各分支只拼纯文本，出口统一包一次边界；此前只包住向量段，SQL 行与兜底说明在边界外。`lib/egress.js` 提供 `tagMemory`/`renderTagged`/`renderMemoryText`，其余 action 可逐步迁移到同一形态。
+- **`aim_search` 单出口**：本地检索、向量/RRF、SQL 兜底各分支只拼纯文本，出口统一包一次边界；此前只包住向量段，SQL 行与兜底说明在边界外。`lib/egress.js` 提供 `tagMemory`/`renderTagged`/`renderMemoryText`。
+- **其余回显动作也收口**：`aim_memory` 的 remember/learn/incident/promote、`aim_context` 的 list 与 restore 注入、`aim_search` 的 SQL 早退统一改用 `renderMemoryText`；旧的 `wrapMemoryData(...)` 调用保留成一行注释备查，边界实现仍只有 `lib/egress.js` 一处。顺带修正快照列表的边界 `来源=` 标签（原误写成 `aim_context/list`）。
 
 ## 0.5.12（2026-11-25）
 
