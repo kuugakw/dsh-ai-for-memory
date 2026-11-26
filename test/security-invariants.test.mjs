@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createTools, normalizeConfig } from '../index.js';
 import { installApi, isTrustedRequest } from '../lib/api.js';
+import { MemoryStore } from '../lib/store.js';
 import {
   autoWrapMemoryReads, boundaryMarkerCounts, MEMORY_DATA_END, MEMORY_DATA_START,
   noteMemoryRead, runWithMemoryLedger, tagMemory, taggedText,
@@ -235,6 +236,23 @@ test('the read ledger wraps a leaked body but not a status line', async () => {
     return autoWrapMemoryReads('unit', longBody, { exempt: true });
   });
   assert.equal(exempted, longBody, 'exempt actions keep their explicit formatting');
+});
+
+test('store-level tagging: hits carry tags while the panel path stays plain', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-store-tag-'));
+  try {
+    const store = new MemoryStore(root).init();
+    store.remember({ text: '归档分类要稳定', category: 'project_facts', source: 'user' });
+
+    const plain = store.search('归档', { mode: 'bm25' });
+    assert.equal(typeof plain[0].text, 'string', 'panel reads plain strings');
+
+    const tagged = store.search('归档', { mode: 'bm25', tagText: true });
+    assert.equal(taggedText(tagged[0].text), '归档分类要稳定');
+    assert.throws(() => `${tagged[0].text}`, /taggedText\(\)/, 'a formatter that forgets taggedText() throws');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('a tagged memory value refuses to be coerced to a string', () => {

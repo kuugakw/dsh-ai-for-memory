@@ -2,6 +2,12 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 未发布
+
+### 安全与信噪比
+
+- **标签下沉到 store 读取层**：MemoryStore.search() 新增 	agText 开关，命中项的 	itle/	ext 在 store 边界成为 	agMemory 标记；im_search 的两个检索通道都打开它，ormatHits、oldDuplicateHits、summarizeHits 改用 	aggedText(...) 取正文。绕过 formatter 的新代码只要直接插值命中文本就会抛错；面板不带开关，返回的仍是纯 JSON。新增不变量测试覆盖「工具路径带标记、面板路径是字符串」。
+
 ## 0.5.13（2026-11-26）
 
 ### 安全与架构

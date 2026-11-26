@@ -79,7 +79,8 @@
 - **出口收口**：`aim_search` 先改为单一出口——本地检索、向量/RRF、SQL 兜底各分支只拼纯文本，最后统一 `renderMemoryText` 包一次边界（此前只包住向量段，SQL 行和兜底说明在边界外）。随后 `aim_memory` 的 remember/learn/incident/promote、`aim_context` 的 list/restore 注入、`aim_search` 的 SQL 早退也都换到同一个出口函数；旧的 `wrapMemoryData(...)` 调用保留为一行注释备查。边界实现仍然只有 `lib/egress.js` 一处。
 - **信任标签**：`formatHits`、`formatSnapshotList`、`formatRestoreContext` 不再返回裸字符串，而是返回 `tagMemory(...)` 标记；组装点必须用 `taggedText(...)` 取正文，出口再 `renderMemoryText` 包一次。标记对象在字符串化时**直接抛错**（不是 `[object Object]`），所以任何忘记取正文的插值都会在出错的那一行报「必须用 taggedText() 取值」；另有静态守卫扫描三处 formatter 的调用行。面板 `/search` 等走同一工具，返回的本来就是带边界的文本，不受影响。
 - **运行期兜底（读取台账）**：每次工具调用跑在 `AsyncLocalStorage` 台账里（`lib/egress.js` 的 `runWithMemoryLedger`），`MemoryStore` 的 `search()` / `documents()` 读到正文时记一笔；工具出口由 `withMemoryLedger` 包装，发现「本次读过库 + 结果是 ≥120 字符的长文本 + 没有边界」就整段补包并注明是自动兜底。短状态行（如 restore 的「将在下一步生效」）与显式豁免动作（`aim_context:restore`）不受影响；面板不在台账里读库，JSON 保持纯净。
-- **仍未做**：把标签从 formatter 层下沉到 store 读取层（现在 store 只记台账，不返回标记）。原因：工具当前直接拼字符串（`return parts.join('\n')`），自动包裹需要先把 store 读取接口改成返回 tagged 值、所有 action 走统一 formatter，属于跨 13 个 action 的重构，单独排期。
+- **标签下沉到 store 读取层**：`MemoryStore.search()` 支持 `tagText: true`——命中项的 `title`/`text` 在 store 边界就变成 `tagMemory` 标记（`knowledge/search/text`），工具的两个检索通道都带这个开关，`formatHits`/`foldDuplicateHits`/`summarizeHits` 用 `taggedText` 取正文。这样即使新代码绕过 formatter 直接拿 store 命中做拼装，只要忘了取正文就会在那一行抛错；面板调用 `search()` 不带开关，依旧是纯 JSON。
+- **仍未做**：`documents()` 的列表回显走的是同一条路（面板要纯数组），需要时可加同样的 `tagText` 开关。
 - **控制面**：10 处路由内重复的 `isTrustedRequest` 已注释关闭（保留原文作为语义标记），并新增静态扫描测试：`lib/api.js` 里未注释的 gate 调用只允许 2 处（`register()` 包装器 + POST 读体器），有人再复制一份就会失败。
 
 ### P2

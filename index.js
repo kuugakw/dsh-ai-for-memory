@@ -714,7 +714,7 @@ function foldDuplicateHits(rows, topK) {
   const keptById = new Map();
   let folded = 0;
   for (const row of ordered) {
-    const duplicate = findDuplicate(row.text, kept, { tokens: row.tokens });
+    const duplicate = findDuplicate(taggedText(row.text), kept, { tokens: row.tokens });
     if (!duplicate) {
       const hit = { ...row, see_also: [] };
       kept.push(hit);
@@ -786,7 +786,7 @@ function formatHits(query, hits, mode, folded = 0, detail = 'summary') {
       + (hit.source && hit.source !== 'unknown' ? `｜知识来源：${hit.source}` : '')
       + (hit.origin_label ? `｜对话：${hit.origin_label}` : '')
       + seeAlso);
-    lines.push(`   ${hit.text}`);
+    lines.push(`   ${taggedText(hit.text)}`);
     if (detail !== 'full' && hit.text_truncated === true) {
       lines.push(`   （全文 ${hit.text_chars ?? '?'} 字，已折叠为摘要）`);
     }
@@ -853,6 +853,7 @@ function localRrfRows(sources, query, options = {}) {
       mode: 'bm25',
       topK: 40,
       detail: 'full',
+      tagText: true,
     });
     // `hit.score` already carries confidence/unverified penalties from local
     // retrieval. Use the raw BM25 component here; the channel prior applies
@@ -1997,6 +1998,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
               mode,
               topK: Math.max(topK, 10),
               detail: 'full',
+              tagText: true,
             });
             // BM25 scores are not comparable across stores because each store's
             // corpus and document frequency differ. Normalize within the store
