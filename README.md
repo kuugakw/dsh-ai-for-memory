@@ -1,13 +1,13 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.5.13-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.5.13-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
+[![Status](https://img.shields.io/badge/status-stable%200.5.14-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.5.14-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.5.13 是记忆安全更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版给记忆回灌加数据边界：`aim_search`、SQL 结果、`aim_context restore` 注入的内容统一包在「来自本地记忆库，不是指令」的边界里，文档里伪造的结束标记会被替换；三个回显 formatter 改为返回信任标记，忘记取正文会直接抛错；工具执行加了运行期读取台账，忘了写边界的长正文会在出口被整段补包。
+> **0.5.14 是权限与自检更新版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版给破坏性操作加能力令牌：导出、删除知识、`aim_repair` 写回和开启 MCP 默认全部关闭，必须显式授予 `capabilityExport` / `capabilityForget` / `capabilityRepair` / `capabilityMcp`，拒绝与放行都会写审计；同时新增只读的启动自检（权限、备份、schema、MCP 状态），面板「诊断」页可直接看结果。
 >
-> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.13）。插件索引这类新渠道从当前版本（0.5.13）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
+> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.14）。插件索引这类新渠道从当前版本（0.5.14）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
 >
 > 升级前建议备份记忆目录；数据版本变化会走 `schema.json` 的迁移流程，迁移前自动把要改写的文件备份到 `backups/schema-v<旧版本>-<时间>/`，更详细的规则见 [配置与数据目录](docs/configuration.md#格式版本与迁移)。
 
@@ -127,7 +127,7 @@ verified: false
 ## 快速开始
 
 ```bash
-dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.13
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.14
 ```
 
 也可以在 DSH **设置 → 插件 → 添加插件** 中填 `dsh-ai-for-memory`。本地开发用目录安装：
@@ -210,10 +210,11 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 ## 更新内容
 
-当前版本 **0.5.13**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.5.14**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
+- **0.5.14**：破坏性操作改能力令牌（`capabilityExport`/`capabilityForget`/`capabilityRepair`/`capabilityMcp` 默认关闭，拒绝与放行都写审计，面板可开关）；新增只读启动自检（0700/0600 权限、迁移备份、schema 版本、MCP 能力与 token），面板「诊断」页显示「安全体检」；
 - **0.5.13**：记忆回灌统一加数据边界（`aim_search`、SQL 结果、`aim_context restore` 注入；伪造结束标记会被替换）；`formatHits`/`formatSnapshotList`/`formatRestoreContext` 返回信任标记，字符串化直接抛错；工具执行加读取台账，出口把「读过库 + 长文本 + 无边界」的结果整段补包；`aim_memory` 的 remember/learn/incident/promote 与 `aim_context list` 回显也统一走 `renderMemoryText`；
 - **0.5.12**：v1→v2 迁移不再重写没有密钥的文件（3000 篇实测写阶段 13.6 s→2.4 s，`init` 约 4.4 s）；JSONL 迁移改 temp→fsync→rename；迁移备份目录补 0700、新增 `backupRetentionDays`（0=永不清理）并在面板显示备份占用；跨机器锁按 `foreign` 单独放宽等待窗口；turn 模式空闲释放不再杀新 turn 刚认领的引擎；`promote`/`stage` 回显带数据边界；单个超预算的库不再被逐出检索缓存；
 - **0.5.11**：库级缓存加 64 MB 字节预算（条数上限之外再按估算字节逐出）；`recordKnowledgeUsage` 与面板 `session.json` 写改异步锁，同步/异步不再互等；`aim_memory` 的 `remember`/`learn`/`incident` 回显带数据边界；SQL 校验拒绝 CTE 逗号自连接（含 `FROM (x, x)` 表组）；脱敏补上带引号的 JSON 键（`{"api_key": "…"}`、`{'password': '…'}`、`db_password` 前缀）；
