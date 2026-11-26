@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createTools, normalizeConfig } from '../index.js';
 import { installApi, isTrustedRequest } from '../lib/api.js';
-import { MEMORY_DATA_END, MEMORY_DATA_START, boundaryMarkerCounts } from '../lib/egress.js';
+import { MEMORY_DATA_END, MEMORY_DATA_START, boundaryMarkerCounts, tagMemory, taggedText } from '../lib/egress.js';
 import { realPathInside, resolveRelativeWithin } from '../lib/safe-path.js';
 
 const HOST = '127.0.0.1:57578';
@@ -208,6 +208,27 @@ test('every action is classified for the memory-data boundary', () => {
   }
   for (const key of Object.keys(EGRESS_CLASSIFICATION)) {
     assert.ok(found.includes(key), `${key} no longer exists; drop it from EGRESS_CLASSIFICATION`);
+  }
+});
+
+test('a tagged memory value refuses to be coerced to a string', () => {
+  const tagged = tagMemory('unit-test', '机密正文');
+  assert.equal(taggedText(tagged), '机密正文');
+  // The boundary would be lost silently if `${tagged}` produced text; it throws
+  // at the line that forgot taggedText()/renderTagged() instead.
+  assert.throws(() => `${tagged}`, /taggedText\(\)/);
+});
+
+test('tagged formatters are only composed through taggedText', () => {
+  const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  const names = ['formatHits', 'formatSnapshotList', 'formatRestoreContext'];
+  for (const line of source.split('\n').map((row) => row.trim())) {
+    if (line.startsWith('//') || line.startsWith('function ')) continue;
+    for (const name of names) {
+      if (!line.includes(`${name}(`)) continue;
+      if (line.includes(`taggedText(${name}(`) || line.includes(`renderTagged(${name}(`)) continue;
+      assert.fail(`${name} returns a tagged value; compose it with taggedText()`);
+    }
   }
 });
 

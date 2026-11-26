@@ -14,6 +14,7 @@
 - **动作出口分类强制**：测试枚举全部工具的 `action` 枚举，要求每个 `(tool, action)` 在分类表里显式标为 memory / caller-input / external / other；新增 action 不分类就无法通过测试，memory 类由出口不变量测试实际执行（含 `context restore` 的注入正文）。
 - **`aim_search` 单出口**：本地检索、向量/RRF、SQL 兜底各分支只拼纯文本，出口统一包一次边界；此前只包住向量段，SQL 行与兜底说明在边界外。`lib/egress.js` 提供 `tagMemory`/`renderTagged`/`renderMemoryText`。
 - **信任标签试点（`aim_search`）**：`formatHits` 返回 `tagMemory` 标记而不是裸字符串，组装处必须用 `taggedText(...)` 取正文、出口 `renderMemoryText` 包边界；直接插值会变成 `[object Object]` 让内容测试失败，防止新调用点悄悄丢掉标签。面板 `/search` 返回的仍是同一工具输出，不受影响。
+- **信任标签推广到快照与恢复**：`formatSnapshotList`、`formatRestoreContext` 同样返回标记；标记对象被字符串化时直接抛错（报「必须用 taggedText() 取值」），比 `[object Object]` 更早暴露问题；静态守卫同时扫描三处 formatter 的调用行。对应测试改为 `taggedText(formatRestoreContext(...))`。
 - **其余回显动作也收口**：`aim_memory` 的 remember/learn/incident/promote、`aim_context` 的 list 与 restore 注入、`aim_search` 的 SQL 早退统一改用 `renderMemoryText`；旧的 `wrapMemoryData(...)` 调用保留成一行注释备查，边界实现仍只有 `lib/egress.js` 一处。顺带修正快照列表的边界 `来源=` 标签（原误写成 `aim_context/list`）。
 
 ## 0.5.12（2026-11-25）

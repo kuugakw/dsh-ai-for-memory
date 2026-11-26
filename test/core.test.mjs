@@ -54,6 +54,7 @@ import {
 } from '../lib/git-sync.js';
 import { collectTurnDigest } from '../lib/auto.js';
 import { buildContextSnapshot, collectTurns, formatContextMarkdown, formatRestoreContext, snapshotOfTurns } from '../lib/context.js';
+import { taggedText } from '../lib/egress.js';
 import { handleMcpMessage, MCP_MAX_BATCH, MCP_PATH, mcpToolNames } from '../lib/mcp.js';
 import { packageVersion } from '../lib/version.js';
 import { ensureMcpToken, mcpTokenPath } from '../lib/mcp-token.js';
@@ -1204,7 +1205,7 @@ test('restore keeps the newest turns within the restore budget', () => {
       { turn: 4, user: `第四轮内容${'丁'.repeat(80)}`, assistant: '第四轮回答' },
     ],
   };
-  const restored = formatRestoreContext(record, { maxChars: 220 });
+  const restored = taggedText(formatRestoreContext(record, { maxChars: 220 }));
   assert.match(restored, /预算恢复最近/);
   assert.match(restored, /第四轮内容/);
   assert.doesNotMatch(restored, /第一轮旧内容/);
@@ -1214,13 +1215,13 @@ test('restore keeps the newest turns within the restore budget', () => {
 
   // Records from older versions/imports may have no turns[]; fall back to a
   // clipped text instead of injecting the whole archive.
-  const fallback = formatRestoreContext({
+  const fallback = taggedText(formatRestoreContext({
     context_id: 'context_no_turns',
     turn_from: 1,
     turn_to: 1,
     created_at: '2026-11-18T00:00:00.000Z',
     text: '很长的旧正文'.repeat(100),
-  }, { maxChars: 80 });
+  }, { maxChars: 80 }));
   assert.match(fallback, /预算恢复最近内容/);
   assert.ok(fallback.length < 400);
 });
@@ -3225,7 +3226,7 @@ test('raw context archives keep tool results and untruncated message tails', () 
     ...snapshot,
     raw_events: events.map((event, seq) => ({ ...event, seq })),
   };
-  const restored = formatRestoreContext(record, { maxChars: 100000 });
+  const restored = taggedText(formatRestoreContext(record, { maxChars: 100000 }));
   assert.match(restored, /TOOL_OUTPUT_MARKER/);
   assert.match(restored, /TAIL_MARKER/);
 });
@@ -3433,7 +3434,7 @@ test('raw context restore keeps the newest segments when the budget is small', (
     turn_to: 2,
     raw_events: events.map((event, seq) => ({ ...event, seq })),
   };
-  const restored = formatRestoreContext(record, { maxChars: 30 });
+  const restored = taggedText(formatRestoreContext(record, { maxChars: 30 }));
   assert.match(restored, /TAIL_MARKER/);
   assert.doesNotMatch(restored, /EARLY_MARKER/);
   assert.match(restored, /按 30 字符预算恢复最近 3\/6 段/);
@@ -3455,7 +3456,7 @@ test('raw restore renders tool calls, developer messages, and caps tool results'
     turn_to: 1,
     raw_events: events.map((event, seq) => ({ ...event, seq })),
   };
-  const restored = formatRestoreContext(record, { maxChars: 100000 });
+  const restored = taggedText(formatRestoreContext(record, { maxChars: 100000 }));
   assert.match(restored, /CALL_ARG_MARKER/);
   assert.match(restored, /DEV_MARKER/);
   assert.match(restored, /工具结果已截断/);
