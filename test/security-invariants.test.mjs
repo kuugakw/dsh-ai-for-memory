@@ -129,6 +129,20 @@ test('the MCP route is absent when the egress is disabled', async () => {
 });
 
 /** Every action that hands store text back must ship it inside the boundary. */
+test('the trusted-request gate is written once, not copied into every handler', () => {
+  const source = fs.readFileSync(new URL('../lib/api.js', import.meta.url), 'utf8');
+  const active = source
+    .split('\n')
+    .map((line) => line.replace(/\r$/, ''))
+    .filter((line) => !line.trimStart().startsWith('//'));
+  const calls = active.filter((line) => /isTrustedRequest\(request(?:,|\))/.test(line)
+    && !line.includes('function isTrustedRequest'));
+  // The register() wrapper is the gate; the POST reader re-checks with
+  // allowNonBrowser. Any third call site means a handler started keeping its
+  // own copy again.
+  assert.equal(calls.length, 2, `expected 2 active gate call sites, saw ${calls.length}`);
+});
+
 test('memory-returning actions all wrap their text in the data boundary', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-egress-'));
   const previousHome = process.env.DSH_HOME;

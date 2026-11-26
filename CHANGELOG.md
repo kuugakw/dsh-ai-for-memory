@@ -9,7 +9,8 @@
 - **安全不变量测试**：`test/security-invariants.test.mjs` 用假的 web server 捕获 `installApi()` 注册的全部面板路由，断言未带 Fetch Metadata 的请求一律 403、同源请求放行、MCP 无 token 401、MCP 关闭 404。新增路由自动纳入覆盖，不再依赖「记得给每条路由补检查」。
 - **安全架构文档**：新增 [安全架构](docs/security-architecture.md)，写清威胁模型、五条不变量与唯一执行点、逐点补丁的差距，以及 P1/P2 路线图（出口收口、路径收口、能力令牌、启动自检）。
 - **边界实现收敛到一处**：`wrapMemoryData` 等常量与函数移到 `lib/egress.js`（`index.js` 只 re-export）；新增「记忆正文出口」不变量测试，遍历 `remember`/`learn`/`incident`/`promote`/`search`，断言都带边界且伪造结束标记被中和。
-- **路径解析收敛到一处**：新增 `lib/safe-path.js`（`resolveRelativeWithin` / `realPathInside`），导出的目标解析改用它，绝对路径、盘符、`..`、符号链接四类拒绝只在一处实现。
+- **路径解析收敛到一处**：新增 `lib/safe-path.js`（`resolveRelativeWithin` / `realPathInside`），导出的目标解析与 `aim_repair` 的会话日志符号链接复核都改用它，绝对路径、盘符、`..`、符号链接四类拒绝只在一处实现。
+- **控制面去重**：`lib/api.js` 里 10 处路由内重复的 `isTrustedRequest` 已注释关闭（保留作为语义标记），并加静态扫描测试：未注释的 gate 调用只允许 2 处（`register()` 包装器 + POST 读体器），再复制一份就会失败。
 
 ## 0.5.12（2026-11-25）
 
