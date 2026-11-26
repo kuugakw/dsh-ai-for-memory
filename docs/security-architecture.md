@@ -85,8 +85,8 @@
 
 ### P2
 
-- **能力令牌**：破坏性操作（`export`、`aim_repair`、`forget`、`prune`、启用 MCP）在配置里显式授予能力，操作审计事件带能力 id；默认全部关闭，用户按需打开。
-- **启动自检**：初始化时检查文件权限、MCP 状态、备份存在、schema 版本、异常 0600 文件，生成一份「安全体检」给面板展示；不通过时在面板顶部提示而不是只写日志。
+- **能力令牌（已实现）**：`capabilityExport` / `capabilityForget` / `capabilityRepair` / `capabilityMcp` 四个布尔能力默认全部关闭。删除知识、导出记忆、`aim_repair` 写回、开启 MCP 都要先显式授权；未授权时工具返回带能力名的说明，拒绝事件写审计（`capability.denied`，带能力 id），放行事件写 `capability.granted`。面板「设置 → 破坏性能力」可开关，配置里直接改同样生效；`mcpEnabled=true` 但缺 `capabilityMcp` 时 MCP 保持关闭并写明原因。
+- **启动自检（已实现）**：新增 `lib/security-check.js`，只读检查记忆根/知识/快照/导出目录的 0700、知识文件抽样 0600、`audit.jsonl` 0600、迁移备份的存在与数量、schema 版本、MCP 能力与 token 文件是否匹配。插件启动时若配置了固定 `root` 就检查一次并写日志；面板「诊断」页新增「安全体检」区显示每条结果（不通过标明原因），也可直接 `GET /ai-for-memory/api/security/check`。自检永不阻塞操作。
 
 ## 6. 明确不做（以及为什么）
 

@@ -26,6 +26,8 @@ import { isSessionActive, markActivity } from './lib/activity.js';
 import { evaluateDecision } from './lib/decision.js';
 import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
 import { defaultRegistryDir, listRootRows, rememberRoot } from './lib/registry.js';
+import { appendAudit } from './lib/audit.js';
+import { runSecurityCheck } from './lib/security-check.js';
 import { autoWrapMemoryReads, renderMemoryText, runWithMemoryLedger, tagMemory, taggedText, wrapMemoryData } from './lib/egress.js';
 import { installApi } from './lib/api.js';
 
@@ -211,6 +213,13 @@ const DEFAULTS = Object.freeze({
   // it on in the panel generates `$DSH_HOME/ai-for-memory/mcp-token`.
   mcpEnabled: false,
   mcpToken: '',
+  // Capability tokens for destructive operations. All off by default: a
+  // prompt-injected agent must not be able to delete, export or rewrite memory
+  // just because the tool exists. Grant the specific operation, not "all".
+  capabilityExport: false,
+  capabilityForget: false,
+  capabilityRepair: false,
+  capabilityMcp: false,
 });
 
 /**
@@ -331,7 +340,42 @@ export function normalizeConfig(raw) {
   value.knowledgeBackend = canonicalKnowledgeBackend(value.knowledgeBackend);
   if (!['json', 'sqlite'].includes(value.knowledgeBackend)) value.knowledgeBackend = 'json';
   if (!['manual', 'always', 'turn'].includes(value.engineLifecycle)) value.engineLifecycle = 'manual';
+  // Capabilities are booleans: anything but an explicit true is "not granted".
+  for (const key of Object.values(CAPABILITY_KEYS)) {
+    value[key] = input[key] === true;
+  }
   return value;
+}
+
+const CAPABILITY_KEYS = Object.freeze({
+  export: 'capabilityExport',
+  forget: 'capabilityForget',
+  repair: 'capabilityRepair',
+  mcp: 'capabilityMcp',
+});
+
+/**
+ * Human-readable denial for a destructive capability that was not granted.
+ * Returns '' when the capability is on.
+ */
+export function capabilityDenied(config, name) {
+  const key = CAPABILITY_KEYS[name];
+  if (config?.[key] === true) return '';
+  return `「${name}」能力未开启（默认关闭）。破坏性操作需要显式授权：在插件配置里设置 ${key}: true，`
+    + '或在 cordis.patch.yml 的 ai-for-memory 行里加上它；面板「安全」区也可以打开。';
+}
+
+/** Append one capability decision to the audit log; never throws. */
+function auditCapability(name, granted, detail = '', registryDir = '') {
+  try {
+    appendAudit(registryDir, {
+      action: granted ? 'capability.granted' : 'capability.denied',
+      root: '',
+      detail: `${name}${detail !== '' ? `：${detail}` : ''}`,
+    });
+  } catch {
+    // Auditing must never break the operation it describes.
+  }
 }
 
 // ---- tool schema helpers -------------------------------------------------
@@ -1787,6 +1831,12 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         }
 
         if (action === 'forget') {
+          const denied = capabilityDenied(config, 'forget');
+          if (denied !== '') {
+            auditCapability('forget', false, `doc_id=${args?.doc_id ?? ''}`, deps?.registryDir);
+            return denied;
+          }
+          auditCapability('forget', true, `doc_id=${args?.doc_id ?? ''}`, deps?.registryDir);
           const removed = store.forgetKnowledge(args?.doc_id);
           if (!removed.deleted) return `未删除：${removed.reason}`;
           return `已删除知识：${removed.doc_id}（${source.label}）`;
@@ -1817,6 +1867,12 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
         }
 
         if (action === 'export') {
+          const denied = capabilityDenied(config, 'export');
+          if (denied !== '') {
+            auditCapability('export', false, `dest=${args?.dest ?? ''}`, deps?.registryDir);
+            return denied;
+          }
+          auditCapability('export', true, `dest=${args?.dest ?? ''}`, deps?.registryDir);
           const written = writeExportArtifacts(store, {
             scope: source.scope === 'shared' ? 'shared' : 'session',
             label: source.label,
@@ -2645,6 +2701,17 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
       async execute(args, exec) {
         const sessionsDir = dshSessionsDir();
         const action = typeof args?.action === 'string' ? args.action : 'scan';
+        // Reading (scan/deep) is free; every path that writes a session log
+        // requires the repair capability.
+        const writes = args?.apply === true;
+        if (writes) {
+          const denied = capabilityDenied(config, 'repair');
+          if (denied !== '') {
+            auditCapability('repair', false, `${action} apply=true`, deps?.registryDir);
+            return denied;
+          }
+          auditCapability('repair', true, `${action} apply=true`, deps?.registryDir);
+        }
         if (action === 'scan') {
           const scan = await scanSessionLogs(sessionsDir, { deep: args?.deep === true });
           return formatScanReport(scan, { limit: 40 });
@@ -4213,6 +4280,33 @@ export function apply(ctx, config) {
   };
   const deps = { workingDirectory, registryDir, getService };
   const runtime = { counters: new Map(), pending: new Map(), activity: new Map() };
+
+  // Startup self-check, only when the memory root is fixed in the config: a
+  // failing check is reported once and never blocks the plugin. The panel can
+  // re-run it at any time through GET /ai-for-memory/api/security/check.
+  if (typeof resolved.root === 'string' && resolved.root !== '') {
+    try {
+      const report = runSecurityCheck({ root: resolved.root, config: resolved, registryDir });
+      if (!report.ok) {
+        const failed = report.checks.filter((check) => !check.ok).map((check) => check.id).join(', ');
+        // eslint-disable-next-line no-console
+        console.error(`[ai-for-memory] 安全体检未通过：${failed}（面板查看 /api/security/check）`);
+        auditCapability('self-check', false, failed, registryDir);
+      }
+    } catch {
+      // A read-only inspection must never prevent startup.
+    }
+  }
+
+  // Enabling MCP is itself a capability: it opens a second HTTP surface on the
+  // loopback listener. Requesting it without the grant keeps it off (and says
+  // so), instead of silently exposing the surface.
+  if (resolved.mcpEnabled === true && resolved.capabilityMcp !== true) {
+    resolved.mcpEnabled = false;
+    auditCapability('mcp', false, 'mcpEnabled=true 但没有 capabilityMcp', registryDir);
+    // eslint-disable-next-line no-console
+    console.error('[ai-for-memory] MCP 出口未启用：capabilityMcp 未授权（在配置里设 capabilityMcp: true 后才生效）。');
+  }
 
   /**
    * Run one existing memory tool for an MCP caller. The caller supplies a

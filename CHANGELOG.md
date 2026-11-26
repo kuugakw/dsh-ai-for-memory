@@ -6,7 +6,9 @@
 
 ### 安全与信噪比
 
-- **标签下沉到 store 读取层**：MemoryStore.search() 新增 	agText 开关，命中项的 	itle/	ext 在 store 边界成为 	agMemory 标记；im_search 的两个检索通道都打开它，ormatHits、oldDuplicateHits、summarizeHits 改用 	aggedText(...) 取正文。绕过 formatter 的新代码只要直接插值命中文本就会抛错；面板不带开关，返回的仍是纯 JSON。新增不变量测试覆盖「工具路径带标记、面板路径是字符串」。
+- **标签下沉到 store 读取层**：`MemoryStore.search()` 新增 `tagText` 开关，命中项的 `title`/`text` 在 store 边界成为 `tagMemory` 标记；`aim_search` 的两个检索通道都打开它，`formatHits`、`foldDuplicateHits`、`summarizeHits` 改用 `taggedText(...)` 取正文。绕过 formatter 的新代码只要直接插值命中文本就会抛错；面板不带开关，返回的仍是纯 JSON。新增不变量测试覆盖「工具路径带标记、面板路径是字符串」。
+- **能力令牌**：新增 `capabilityExport` / `capabilityForget` / `capabilityRepair` / `capabilityMcp` 四个布尔配置，默认全部关闭。导出、删除知识、`aim_repair` 写回与开启 MCP 都需要显式授权；未授权时返回带能力名的说明，并写审计 `capability.denied`（带能力 id），放行写 `capability.granted`。`mcpEnabled=true` 但缺 `capabilityMcp` 时 MCP 保持关闭并在日志说明；面板「设置 → 破坏性能力」可开关。
+- **启动自检**：新增 `lib/security-check.js`（只读检查 0700/0600 权限、迁移备份、schema 版本、MCP 能力与 token 文件），插件启动时若配置了固定 `root` 就检查一次并写日志；面板「诊断」页新增「安全体检」区，也可 `GET /ai-for-memory/api/security/check`；自检永不阻塞操作。
 
 ## 0.5.13（2026-11-26）
 

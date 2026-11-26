@@ -92,6 +92,10 @@
 | `requestAnchor` | `true` | 检查点到达且本步没有新用户请求时，加一条“上一轮请求参考”；有新请求则不注入 |
 | `mcpEnabled` | `false` | 是否启用 `/ai-for-memory/mcp` MCP 出口（默认关闭；开启后才生成 `mcp-token`，且仍受回环 Host 校验） |
 | `mcpToken` | 空 | 可选的 MCP Bearer 令牌；空=用开启时自动生成的 token 文件，面板不回显明文 |
+| `capabilityExport` | `false` | 允许 `aim_memory action=export` 把记忆导出到 `exports/`；默认关闭，只有显式设为 `true` 才生效 |
+| `capabilityForget` | `false` | 允许 `aim_memory action=forget` 和面板删除知识；默认关闭 |
+| `capabilityRepair` | `false` | 允许 `aim_repair` 在 `apply=true` 时写回会话日志（`scan` 与预演不受限）；默认关闭 |
+| `capabilityMcp` | `false` | 允许真正开启 MCP 出口；`mcpEnabled=true` 但未授权时 MCP 保持关闭并在日志说明 |
 | `decisionRetentionDays` | 0 | 决策记录保留天数；0=不自动删 |
 | `autoDecisionRetentionDays` | 30 | 每轮自动活动记录（`decision_auto_*`）保留天数；只删这类记录，0=只看数量上限；`aim_decide` 审查记录不受它影响 |
 | `backupRetentionDays` | 0 | 迁移备份（`backups/schema-v*`）保留天数；0=永不自动清理，>0 时保留清理会删掉更旧的备份。备份含迁移前明文，确认迁移成功后建议清理 |

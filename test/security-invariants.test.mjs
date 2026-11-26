@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createTools, normalizeConfig } from '../index.js';
 import { installApi, isTrustedRequest } from '../lib/api.js';
 import { MemoryStore } from '../lib/store.js';
+import { runSecurityCheck } from '../lib/security-check.js';
 import {
   autoWrapMemoryReads, boundaryMarkerCounts, MEMORY_DATA_END, MEMORY_DATA_START,
   noteMemoryRead, runWithMemoryLedger, tagMemory, taggedText,
@@ -236,6 +237,17 @@ test('the read ledger wraps a leaked body but not a status line', async () => {
     return autoWrapMemoryReads('unit', longBody, { exempt: true });
   });
   assert.equal(exempted, longBody, 'exempt actions keep their explicit formatting');
+});
+
+test('security self-check flags an ungranted MCP surface without touching disk', () => {
+  const missing = path.join(os.tmpdir(), `aim-missing-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const clean = runSecurityCheck({ root: missing, config: {}, registryDir: '' });
+  assert.equal(clean.ok, true);
+  assert.ok(clean.checks.some((check) => check.id === 'mcp-disabled' && check.ok === true));
+
+  const ungranted = runSecurityCheck({ root: missing, config: { mcpEnabled: true }, registryDir: '' });
+  assert.equal(ungranted.ok, false);
+  assert.ok(ungranted.checks.some((check) => check.id === 'mcp-capability' && check.ok === false));
 });
 
 test('store-level tagging: hits carry tags while the panel path stays plain', () => {

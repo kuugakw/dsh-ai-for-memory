@@ -2273,7 +2273,7 @@ test('knowledge tools write, learn in batch and preview promotion', async () => 
       on: () => () => {},
       get: () => undefined,
     };
-    apply(ctx, { root: memoryRoot });
+    apply(ctx, { root: memoryRoot, capabilityForget: true });
     const memory = registered.find((tool) => tool.name === 'aim_memory');
     const exec = { agent: { session: { id: 'session-k', header: { cwd: root }, ownEvents: () => [] } } };
 
@@ -8589,4 +8589,82 @@ test('aim_memory promote wraps its mined bodies in the data boundary', async () 
     process.env.DSH_HOME = previousHome;
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('destructive capabilities are denied until granted', async () => {
+  const root = tempRoot();
+  const previousHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = path.join(root, 'home');
+  try {
+    const registered = [];
+    const ctx = {
+      tools: { register: (tool) => { registered.push(tool); return () => {}; } },
+      effect: (fn) => fn(),
+      on: () => () => {},
+      get: () => undefined,
+    };
+    apply(ctx, { root });
+    const memory = registered.find((tool) => tool.name === 'aim_memory');
+    const repair = registered.find((tool) => tool.name === 'aim_repair');
+    const exec = { agent: { session: { id: 'session-cap', header: { cwd: root }, ownEvents: () => [] } } };
+
+    assert.match(await memory.execute({ action: 'forget', doc_id: 'nope' }, exec), /能力未开启/);
+    assert.match(await memory.execute({ action: 'export' }, exec), /能力未开启/);
+    assert.match(await repair.execute({ action: 'repair', session: 'nope', apply: true }, exec), /能力未开启/);
+
+    // Dry runs are reads: the capability gate must not block them.
+    let dry;
+    try {
+      dry = await repair.execute({ action: 'repair', session: 'nope', apply: false }, exec);
+    } catch (error) {
+      dry = String(error?.message ?? error);
+    }
+    assert.doesNotMatch(String(dry), /能力未开启/);
+
+    // Denials are audited with the capability id.
+    const auditFile = path.join(process.env.DSH_HOME, 'ai-for-memory', 'audit.jsonl');
+    const rows = fs.readFileSync(auditFile, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    assert.ok(rows.some((row) => row.action === 'capability.denied' && row.detail.startsWith('forget')));
+  } finally {
+    process.env.DSH_HOME = previousHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('granted capabilities enable export and forget', async () => {
+  const root = tempRoot();
+  try {
+    const registered = [];
+    const ctx = {
+      tools: { register: (tool) => { registered.push(tool); return () => {}; } },
+      effect: (fn) => fn(),
+      on: () => () => {},
+      get: () => undefined,
+    };
+    apply(ctx, { root, capabilityExport: true, capabilityForget: true });
+    const memory = registered.find((tool) => tool.name === 'aim_memory');
+    const exec = { agent: { session: { id: 'session-cap2', header: { cwd: root }, ownEvents: () => [] } } };
+
+    await memory.execute({ action: 'remember', text: '可以删除的一条', category: 'project_facts' }, exec);
+    const scopes = new MemoryScopes(root);
+    const conversation = scopes.sessionStoreFor('session-cap2', { workspace: root });
+    const docId = conversation.store.documents()[0].doc_id;
+    assert.match(await memory.execute({ action: 'forget', doc_id: docId }, exec), /已删除知识/);
+
+    const exported = await memory.execute({ action: 'export' }, exec);
+    assert.match(exported, /已导出/);
+    assert.ok(fs.existsSync(path.join(conversation.store.root, 'exports')));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('capability config defaults to off and only accepts explicit true', () => {
+  const off = normalizeConfig({});
+  assert.equal(off.capabilityExport, false);
+  assert.equal(off.capabilityForget, false);
+  assert.equal(off.capabilityRepair, false);
+  assert.equal(off.capabilityMcp, false);
+  assert.equal(normalizeConfig({ capabilityExport: true }).capabilityExport, true);
+  assert.equal(normalizeConfig({ capabilityExport: 'yes' }).capabilityExport, false);
 });

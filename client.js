@@ -68,6 +68,11 @@ window.__ModuleLoader__.load({
         diagNoUsage: '还没有知识条目。',
         diagAvailable: '可用',
         diagUnavailable: '不可用',
+        diagSecurityTitle: '安全体检',
+        diagSecurityHint: '文件权限、MCP 出口与 schema 版本的自检；不通过时说明原因，不会阻塞操作。',
+        diagSecurityEmpty: '尚未体检（点右上角刷新）',
+        diagSecurityOk: '全部通过',
+        diagSecurityFail: '存在未通过项',
         diagNoSnapshotCompare: '至少需要两个快照。',
         diagNoConversations: '还没有对话记忆。',
         diagSessionLogs: '会话日志体检与修复',
@@ -560,6 +565,12 @@ window.__ModuleLoader__.load({
         mcpTitle: 'MCP 出口',
         mcpHint: '把记忆开放给其他 MCP 工具：同一台机器上的客户端连这个地址即可，默认只监听回环地址。工具：aim_roots / aim_search / aim_remember / aim_status / aim_context_list / aim_context_restore。',
         mcpEnabledLabel: '启用 MCP 出口',
+        capabilityTitle: '破坏性能力',
+        capabilityHint: '删除知识、导出记忆、修复会话日志和 MCP 出口默认关闭；打开后对应工具与面板按钮才可用。',
+        capabilityExportLabel: '允许导出记忆',
+        capabilityForgetLabel: '允许删除知识',
+        capabilityRepairLabel: '允许修复会话日志',
+        capabilityMcpLabel: '允许启用 MCP 出口',
         mcpUrlLabel: 'MCP 地址',
         mcpTokenLabel: '访问令牌（可选）',
         mcpTokenSaved: '已设置，留空或填 - 切回自动令牌',
@@ -638,6 +649,11 @@ window.__ModuleLoader__.load({
         diagNoUsage: 'No knowledge entries yet.',
         diagAvailable: 'available',
         diagUnavailable: 'unavailable',
+        diagSecurityTitle: 'Security self-check',
+        diagSecurityHint: 'File permissions, MCP egress and schema version; failures explain themselves and never block operations.',
+        diagSecurityEmpty: 'Not checked yet (refresh top-right)',
+        diagSecurityOk: 'All checks passed',
+        diagSecurityFail: 'Some checks failed',
         diagNoSnapshotCompare: 'At least two snapshots are required.',
         diagNoConversations: 'No conversation memory yet.',
         diagSessionLogs: 'Session logs: check and repair',
@@ -1130,6 +1146,12 @@ window.__ModuleLoader__.load({
         mcpTitle: 'MCP egress',
         mcpHint: 'Expose memory to other MCP tools: a client on this machine can connect to this URL; the listener stays loopback-only. Tools: aim_roots / aim_search / aim_remember / aim_status / aim_context_list / aim_context_restore.',
         mcpEnabledLabel: 'Enable MCP egress',
+        capabilityTitle: 'Destructive capabilities',
+        capabilityHint: 'Deleting knowledge, exporting memory, repairing session logs and MCP egress are off by default; enable only what the workflow needs.',
+        capabilityExportLabel: 'Allow memory export',
+        capabilityForgetLabel: 'Allow knowledge deletion',
+        capabilityRepairLabel: 'Allow session log repair',
+        capabilityMcpLabel: 'Allow MCP egress',
         mcpUrlLabel: 'MCP URL',
         mcpTokenLabel: 'Access token (optional)',
         mcpTokenSaved: 'Stored; leave empty or enter - to use the automatic token',
@@ -1735,6 +1757,7 @@ window.__ModuleLoader__.load({
       // conversation bytes and the panel action audit in one place.
       const [diagnostics, setDiagnostics] = React.useState(null);
       const [diagnosticsBusy, setDiagnosticsBusy] = React.useState(false);
+      const [securityCheck, setSecurityCheck] = React.useState(null);
       const [selectedConversations, setSelectedConversations] = React.useState(() => new Set());
       const [bulkBusy, setBulkBusy] = React.useState('');
       const [sessionLogScan, setSessionLogScan] = React.useState(null);
@@ -1811,6 +1834,10 @@ window.__ModuleLoader__.load({
       // MCP egress for other local tools. The token is write-only: state only
       // reports whether one is stored, never the value.
       const [formMcpEnabled, setFormMcpEnabled] = React.useState(false);
+      const [formCapabilityExport, setFormCapabilityExport] = React.useState(false);
+      const [formCapabilityForget, setFormCapabilityForget] = React.useState(false);
+      const [formCapabilityRepair, setFormCapabilityRepair] = React.useState(false);
+      const [formCapabilityMcp, setFormCapabilityMcp] = React.useState(false);
       const [formMcpToken, setFormMcpToken] = React.useState('');
       const [mcpHasToken, setMcpHasToken] = React.useState(false);
       const [mcpTokenFile, setMcpTokenFile] = React.useState('');
@@ -1939,6 +1966,10 @@ window.__ModuleLoader__.load({
           if (typeof payload.topicalClear === 'boolean') setFormTopical(payload.topicalClear);
           if (typeof payload.ragMount === 'boolean') setFormRagMount(payload.ragMount);
           if (typeof payload.mcpEnabled === 'boolean') setFormMcpEnabled(payload.mcpEnabled);
+          if (typeof payload.capabilityExport === 'boolean') setFormCapabilityExport(payload.capabilityExport);
+          if (typeof payload.capabilityForget === 'boolean') setFormCapabilityForget(payload.capabilityForget);
+          if (typeof payload.capabilityRepair === 'boolean') setFormCapabilityRepair(payload.capabilityRepair);
+          if (typeof payload.capabilityMcp === 'boolean') setFormCapabilityMcp(payload.capabilityMcp);
           setMcpHasToken(payload.mcpHasToken === true);
           setMcpTokenFile(typeof payload.mcpTokenFile === 'string' ? payload.mcpTokenFile : '');
           setFormMcpToken('');
@@ -2236,6 +2267,10 @@ window.__ModuleLoader__.load({
           ragMount: formRagMount,
           mcpEnabled: formMcpEnabled,
           mcpToken: formMcpToken.trim(),
+          capabilityExport: formCapabilityExport,
+          capabilityForget: formCapabilityForget,
+          capabilityRepair: formCapabilityRepair,
+          capabilityMcp: formCapabilityMcp,
           knowledgeBackend: formStorage,
           similarityThreshold: Number(formThreshold) || 0.05,
           keepRecentTurns: Number(formKeepRecent) || 2,
@@ -2291,6 +2326,10 @@ window.__ModuleLoader__.load({
           && payload.topicalClear === body.topicalClear
           && payload.ragMount === body.ragMount
           && payload.mcpEnabled === body.mcpEnabled
+          && payload.capabilityExport === body.capabilityExport
+          && payload.capabilityForget === body.capabilityForget
+          && payload.capabilityRepair === body.capabilityRepair
+          && payload.capabilityMcp === body.capabilityMcp
           && payload.mcpHasToken === expectedHasToken
           && payload.knowledgeBackend === body.knowledgeBackend
           && payload.similarityThreshold === body.similarityThreshold
@@ -4404,6 +4443,12 @@ window.__ModuleLoader__.load({
         try {
           const payload = await callApi(`/diagnostics?root=${encodeURIComponent(selectedRoot)}`);
           setDiagnostics(payload ?? null);
+          try {
+            const checkPayload = await callApi(`/security/check?root=${encodeURIComponent(selectedRoot)}`);
+            setSecurityCheck(checkPayload?.report ?? null);
+          } catch {
+            setSecurityCheck(null);
+          }
         } catch (diagError) {
           setNotice({ kind: 'err', text: String(diagError?.message ?? diagError) });
         } finally {
@@ -4479,6 +4524,21 @@ window.__ModuleLoader__.load({
             },
             h('span', { style: { color: colors.secondary, flex: '0 0 96px' } }, label),
             h('span', { style: { ...styles.mono, overflowWrap: 'anywhere' } }, String(value)))))),
+        h('section', { style: styles.card },
+          h('h3', { style: styles.cardTitle }, t.diagSecurityTitle),
+          h('p', { style: styles.hint }, t.diagSecurityHint),
+          securityCheck === null
+            ? h(Empty, { text: t.diagSecurityEmpty })
+            : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '2px' } },
+              h('p', { style: { ...styles.hint, color: securityCheck.ok ? colors.success : colors.error, margin: '0 0 4px' } },
+                securityCheck.ok ? t.diagSecurityOk : t.diagSecurityFail),
+              ...securityCheck.checks.map((check) => h('div', {
+                key: check.id,
+                style: { display: 'flex', gap: '8px', fontSize: '12px', padding: '3px 0', borderTop: `1px solid ${colors.border}` },
+              },
+              h('span', { style: { flex: '0 0 120px', color: check.ok ? colors.success : colors.error } },
+                check.ok ? t.diagAvailable : t.diagUnavailable),
+              h('span', { style: { ...styles.mono, overflowWrap: 'anywhere' } }, `${check.id}：${check.detail}`))))),
         sessionLogCard(false),
         h('section', { style: styles.card },
           h('h3', { style: styles.cardTitle }, t.diagUsage),
@@ -5912,6 +5972,38 @@ window.__ModuleLoader__.load({
           mcpTokenFile
             ? h('p', { style: styles.hint }, `${t.mcpTokenAuto}: ${mcpTokenFile}`)
             : null),
+          h('div', {
+            style: {
+              borderTop: '1px solid rgba(127,127,127,0.22)',
+              marginTop: '14px',
+              paddingTop: '12px',
+            },
+          },
+          h('h4', { style: { ...styles.cardTitle, margin: '0 0 6px' } }, t.capabilityTitle),
+          h('p', { style: styles.hint }, t.capabilityHint),
+          ...[
+            [t.capabilityExportLabel, formCapabilityExport, setFormCapabilityExport],
+            [t.capabilityForgetLabel, formCapabilityForget, setFormCapabilityForget],
+            [t.capabilityRepairLabel, formCapabilityRepair, setFormCapabilityRepair],
+            [t.capabilityMcpLabel, formCapabilityMcp, setFormCapabilityMcp],
+          ].map(([label, value, setter], index) => h('div', { key: `capability-${index}`, style: styles.modeRow },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, label),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': value === true,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(value === true ? styles.switchOptionOn : {}) },
+              onClick: () => setter(true),
+            }, t.switchOn),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': value !== true,
+              className: 'aim-switch',
+              style: { ...styles.switchOption, ...(value !== true ? styles.switchOptionOn : {}) },
+              onClick: () => setter(false),
+            }, t.switchOff)))),
           h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' } },
             h('button', {
               type: 'button',
