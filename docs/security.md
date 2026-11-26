@@ -1,6 +1,6 @@
 # 隐私与安全
 
-> 返回 [主 README](../README.md)。
+> 返回 [主 README](../README.md)。系统性的威胁模型、不变量与路线图见 [安全架构](security-architecture.md)。
 
 - 记忆默认保存在本地，不需要联网；
 - 面板 API 只接受回环连接，且要求 `Host` 是字面量回环地址（`127.0.0.1` / `localhost` / `[::1]`，端口与监听端口一致）、`Origin` 同源；`Host` 为外部域名时直接 403，防 DNS rebinding；
