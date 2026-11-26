@@ -76,6 +76,7 @@ index.js                  # 插件入口：apply() 与工具注册（约 200 行
 lib/tools.js              # 六个 aim_* 工具定义 + 格式化/检索辅助
 lib/context-management.js # 上下文清理、恢复、自动整理与锚点
 lib/config.js             # 默认值、配置校验、能力令牌与审计
+lib/schema.js             # 工具/MCP 参数的 JSON Schema 校验
 client.js                 # Web 面板
 lib/store.js              # 文件存储和六层数据
 lib/scopes.js             # 对话隔离、共享层、工作区分组

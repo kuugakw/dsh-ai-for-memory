@@ -2,6 +2,13 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 0.5.16（2026-11-26）
+
+### 工程规范
+
+- **工具参数 schema 真正生效**：新增 `lib/schema.js`（零依赖的 JSON Schema 子集校验器：type/enum/required/properties/items/additionalProperties/minimum/maximum/minLength/maxItems 等）。此前 schema 只是给模型看的说明，传错类型会直接进处理器；现在 DSH 工具注册（`toRegistrableTool`）在调用前校验，非法参数返回逐条说明文本而不执行；MCP `tools/call` 对类型/枚举/范围/多传参数返回 `-32602`，缺 `root` 仍由 MCP 路由给出带已登记根列表的友好错误。
+- **新增 test/schema.test.mjs**：覆盖校验器关键字、注册工具拒绝非法参数（处理器不执行）、MCP `-32602` 路径。
+
 ## 0.5.15（2026-11-26）
 
 ### 工程规范
