@@ -26,7 +26,7 @@ import { isSessionActive, markActivity } from './lib/activity.js';
 import { evaluateDecision } from './lib/decision.js';
 import { CATEGORIES, KINDS, RISKS, VERIFIES, clip } from './lib/util.js';
 import { defaultRegistryDir, listRootRows, rememberRoot } from './lib/registry.js';
-import { renderMemoryText, tagMemory, taggedText, wrapMemoryData } from './lib/egress.js';
+import { autoWrapMemoryReads, renderMemoryText, runWithMemoryLedger, tagMemory, taggedText, wrapMemoryData } from './lib/egress.js';
 import { installApi } from './lib/api.js';
 
 // The boundary implementation lives in lib/egress.js; re-exported for the
@@ -1264,8 +1264,32 @@ export function formatChatTrace({ endpoint, result, inputText, output, truncated
  * @param {ReturnType<typeof normalizeConfig>} config
  * @returns {object[]} raw definitions (parameters still a property map).
  */
+/**
+ * Run one tool invocation inside the memory-read ledger (lib/egress.js) and let
+ * the exit helper wrap a long, boundary-less result that came after a read.
+ *
+ * This is the last line of defence: formatters and actions are expected to
+ * apply the boundary explicitly. Status-only actions opt out because they read
+ * the store but return a message, not a body.
+ */
+const AUTO_WRAP_EXEMPT = new Set(['aim_context:restore']);
+
+function withMemoryLedger(tool) {
+  const execute = tool.execute;
+  if (typeof execute !== 'function') return tool;
+  return {
+    ...tool,
+    execute: (args, exec) => runWithMemoryLedger(async () => {
+      const result = await execute(args, exec);
+      return autoWrapMemoryReads(`${tool.name}/${args?.action ?? ''}`, result, {
+        exempt: AUTO_WRAP_EXEMPT.has(`${tool.name}:${args?.action ?? ''}`),
+      });
+    }),
+  };
+}
+
 export function createTools(config, deps = {}, runtime = { counters: new Map(), pending: new Map(), activity: new Map() }) {
-  return [
+  const tools = [
     {
       name: 'aim_memory',
       description:
@@ -2653,6 +2677,7 @@ export function createTools(config, deps = {}, runtime = { counters: new Map(), 
       },
     },
   ];
+  return tools.map((tool) => withMemoryLedger(tool));
 }
 
 // ---- plugin entry --------------------------------------------------------

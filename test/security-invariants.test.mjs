@@ -5,7 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { createTools, normalizeConfig } from '../index.js';
 import { installApi, isTrustedRequest } from '../lib/api.js';
-import { MEMORY_DATA_END, MEMORY_DATA_START, boundaryMarkerCounts, tagMemory, taggedText } from '../lib/egress.js';
+import {
+  autoWrapMemoryReads, boundaryMarkerCounts, MEMORY_DATA_END, MEMORY_DATA_START,
+  noteMemoryRead, runWithMemoryLedger, tagMemory, taggedText,
+} from '../lib/egress.js';
 import { realPathInside, resolveRelativeWithin } from '../lib/safe-path.js';
 
 const HOST = '127.0.0.1:57578';
@@ -209,6 +212,29 @@ test('every action is classified for the memory-data boundary', () => {
   for (const key of Object.keys(EGRESS_CLASSIFICATION)) {
     assert.ok(found.includes(key), `${key} no longer exists; drop it from EGRESS_CLASSIFICATION`);
   }
+});
+
+test('the read ledger wraps a leaked body but not a status line', async () => {
+  const longBody = '记忆正文'.repeat(40);
+  assert.equal(autoWrapMemoryReads('unit', longBody), longBody, 'outside a tool call nothing is wrapped');
+
+  const wrapped = await runWithMemoryLedger(async () => {
+    noteMemoryRead();
+    return autoWrapMemoryReads('unit', longBody);
+  });
+  assert.ok(wrapped.includes(MEMORY_DATA_START), 'a long body read from the store must be wrapped');
+
+  const status = await runWithMemoryLedger(async () => {
+    noteMemoryRead();
+    return autoWrapMemoryReads('unit', '已恢复上下文，将在下一步生效。');
+  });
+  assert.ok(!status.includes(MEMORY_DATA_START), 'short status lines stay unwrapped');
+
+  const exempted = await runWithMemoryLedger(async () => {
+    noteMemoryRead();
+    return autoWrapMemoryReads('unit', longBody, { exempt: true });
+  });
+  assert.equal(exempted, longBody, 'exempt actions keep their explicit formatting');
 });
 
 test('a tagged memory value refuses to be coerced to a string', () => {
