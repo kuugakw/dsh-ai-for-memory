@@ -52,10 +52,16 @@ npm 上的包名是 `dsh-ai-for-memory`；`package.json` 已移除 `private`，�
 
 ```bash
 npm ci          # 安装 lint 依赖（CI 使用同一条命令）
-npm test        # 单元测试
+npm test        # 单元测试（含面板冒烟测试）
 npm run lint    # ESLint flat config：只查正确性（未定义名、未用变量、重复键、ASI 陷阱等）
+npm run typecheck # tsc --noEmit：检查带 `// @ts-check` 的文件
 npm run check   # lint + 元数据一致性（README/docs/CHANGELOG/package.json/market 索引）
+npm run coverage # 覆盖率门禁：行 ≥80%、函数 ≥80%、分支 ≥65%
 ```
+
+类型检查采用**逐文件 ratchet**：`tsconfig.json` 里 `checkJs=false`，只有文件头写了 `// @ts-check` 的模块会被 `tsc` 检查（目前覆盖 `lib/config.js`、`lib/egress.js`、`lib/safe-path.js`、`lib/api.js` 之外的 17 个 lib 模块）；新增或改动的模块应加上这一行，后续把剩余的大文件（`api.js`、`store.js`、`session-repair.js`、`local-engine.js`）逐个迁入即可，不需要一次性修完 500+ 条推断错误。CI 只在 ubuntu + Node 22 上跑覆盖率与类型检查，避免六个矩阵任务重复付费。
+
+`test/client-smoke.test.mjs` 在 VM 里加载 `client.js`，用假的 `window.__ModuleLoader__` 和真实 React 跑 `factory()` + `apply()`，断言面板注册了侧栏入口与主面板、双语标题正确——这是目前唯一覆盖面板代码的测试。
 
 当前测试覆盖六层读写、对话隔离、上下文清理/恢复、知识冲突、模型自述确认、事故记录、SQL 路由、RAG 构建、导出、面板数据组装、安全不变量，以及本地引擎的 GGUF 发现和 llama.cpp 启动参数等。
 
@@ -66,8 +72,10 @@ npm run check   # lint + 元数据一致性（README/docs/CHANGELOG/package.json
 主要代码：
 
 ```text
-index.js                  # 插件入口和六个工具
-lib/session-repair.js     # DSH 会话日志体检与修复（zstd 多帧、格式校验、备份/原子写回）
+index.js                  # 插件入口：apply() 与工具注册（约 200 行）
+lib/tools.js              # 六个 aim_* 工具定义 + 格式化/检索辅助
+lib/context-management.js # 上下文清理、恢复、自动整理与锚点
+lib/config.js             # 默认值、配置校验、能力令牌与审计
 client.js                 # Web 面板
 lib/store.js              # 文件存储和六层数据
 lib/scopes.js             # 对话隔离、共享层、工作区分组
@@ -88,6 +96,7 @@ lib/security-check.js     # 只读安全体检
 lib/audit.js              # 面板审计日志
 test/core.test.mjs        # 测试
 test/security-invariants.test.mjs  # 安全不变量
+test/client-smoke.test.mjs        # 面板冒烟
 ```
 
 ---

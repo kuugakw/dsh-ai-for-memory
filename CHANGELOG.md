@@ -2,6 +2,18 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 0.5.15（2026-11-26）
+
+### 工程规范
+
+- **拆分入口文件**：`index.js` 从 4390 行降到约 200 行，只保留 `apply()` 与注册；六个工具与格式化/检索辅助移入 `lib/tools.js`（约 2400 行），上下文清理/恢复/自动整理移入 `lib/context-management.js`（约 1500 行），配置默认值、校验与能力令牌移入 `lib/config.js`（约 300 行）。入口继续 re-export 原有的公开符号，测试与外部调用不需要改。
+- **ESLint 10（flat config）**：只查正确性（未定义名、未用变量、重复键、ASI 陷阱等），修复了全部报告项，包括 `lib/api.js` 三个重复的配置键、`lib/rag.js` 与 `lib/session-repair.js` 丢弃 `cause` 的抛错。
+- **类型检查 ratchet**：新增 `tsconfig.json` 与 `npm run typecheck`（`tsc --noEmit`）；采用逐文件 opt-in，文件头写 `// @ts-check` 才检查。目前覆盖 `lib/config.js`、`lib/egress.js`、`lib/safe-path.js` 等 17 个模块；剩余大文件（`api.js`、`store.js`、`session-repair.js`、`local-engine.js`）按同一门禁逐步迁入。
+- **面板冒烟测试**：在 VM 里加载 `client.js`，用假的 `window.__ModuleLoader__` 和真实 React 跑 `factory()` + `apply()`，断言侧栏入口、主面板与中英标题。
+- **覆盖率门禁**：`npm run coverage` 用 Node 内置覆盖率强制行 ≥80%、函数 ≥80%、分支 ≥65%（当前 83.76 / 86.71 / 70.74）。
+- **元数据门禁**：`npm run check` = lint + 检查 README 徽章/安装命令/当前版本、`docs/features.md` 对应版本、`CHANGELOG` 小节与 `package.json` 一致，并校验发布清单完整性。
+- **仓库卫生**：新增 `.editorconfig`、`.gitattributes`（索引统一 LF）与 `package-lock.json`；CI 在三个平台 × Node 20/22 上 `npm ci && npm test && npm run check`，ubuntu + Node 22 额外跑覆盖率与类型检查；发布工作流在 tag 上同样先过 `check` 再 `npm publish`。
+
 ## 0.5.14（2026-11-26）
 
 ### 安全与信噪比

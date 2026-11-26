@@ -33,3 +33,13 @@ jobs:
         # README/docs version references must move with the manifest; a release
         # that forgets either would otherwise ship stale metadata.
         run: npm run check
+      - name: Coverage gate
+        # One job only: the thresholds are about the whole suite, and Node 20's
+        # test runner has no coverage threshold flags.
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        run: npm run coverage
+      - name: Type check
+        # Opt-in `// @ts-check` files only (see docs/development.md); the rest of
+        # lib is migrated onto the same gate incrementally.
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        run: npm run typecheck
