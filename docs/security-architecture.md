@@ -50,9 +50,9 @@
 |---|---|---|---|
 | I1 | 所有面板 HTTP 请求先过环回 + Host + Origin/Sec-Fetch 检查 | `lib/api.js` `register()` 的包装器（`isTrustedRequest`） | 已成立；11 个路由内还有冗余副本 |
 | I2 | MCP 出口额外要求 Bearer token（配置了才要求） | MCP 路由内部 `bearerMatches` | 已成立 |
-| I3 | 所有「记忆正文出门」都包在 `<<<MEMORY-DATA…>>>` 里，伪造结束标记被替换 | `index.js` `wrapMemoryData()` | **逐点**：13 个调用点，靠人记得 |
+| I3 | 所有「记忆正文出门」都包在 `<<<MEMORY-DATA…>>>` 里，伪造结束标记被替换 | `lib/egress.js` `wrapMemoryData()` | 单一定义 + 不变量测试（出口仍逐调用点，未自动） |
 | I4 | 所有写入走 store 方法：校验 + 脱敏 + 配额 + 锁 + 0600/0700 | `lib/store.js` 的写方法 / `lib/util.js` 的 `writeJson`/`appendJsonLine`/`ensureDir` | 基本成立；导出、迁移各自有旁路 |
-| I5 | 所有文件操作落在允许目录内 | `exports/` 解析、`sessions/` 校验、记忆根 | **分散**：4–5 个 resolver 各管一段 |
+| I5 | 所有文件操作落在允许目录内 | `lib/safe-path.js`（`resolveRelativeWithin`/`realPathInside`） | 导出已收口；`aim_repair` 的 sessions 树仍单列 |
 
 **已经做对的部分**：I1/I2 是真正的单点，`register()` 天然覆盖未来所有路由；I4 的 `writeJson`/`appendJsonLine` 也只有一个落盘入口（fsync、0600、临时文件重命名都在里面）。问题集中在 I3/I5：**出口和路径还是「每个功能自己记得」**。
 
@@ -71,11 +71,12 @@
 - **把「单点」写进测试**：上述 403 断言是遍历捕获到的 `routes` 的；任何绕过 `register()` 直接 `server.register()` 的路由也会被抓进循环并因缺少统一门而失败。
 - 文档化信任等级与出口规则（本文）。
 
-### P1（0.6）
+### P1（本版部分完成）
 
-- **出口收口**：store 的读取 API 返回带标签的结果（如 `{ text, trust: 'memory' }`），由统一 formatter 负责 wrap/脱敏/截断；删除 `index.js` 里 13 个手工 `wrapMemoryData` 调用，改为「formatter 只对 trust=memory 的内容加边界」。验收：新增一个返回 store 正文的 action，不写任何 wrap 代码也自动带边界；测试断言所有工具结果中不存在未包裹的 memory 原文。
-- **控制面收口**：删除 11 处冗余 `isTrustedRequest`；提供唯一的 `registerApiRoute()`，静态测试扫描 `lib/api.js` 中不存在直接 `server.register(`。
-- **路径收口**：一个 `resolveWithin(root, requested, allowlist)` 供 export/repair/SQLite/打开目录共用；测试覆盖 `..`、绝对路径、盘符、符号链接四种输入。
+- **出口收口（第一步）**：边界实现移到 `lib/egress.js` 单一定义（`wrapMemoryData`、`containsMemoryBoundary`、伪造结束标记替换），`index.js` 只做 re-export；新增不变量测试遍历所有会回显记忆正文的 action（`remember`/`learn`/`incident`/`promote`/`search`），断言输出带边界、且伪造结束标记只出现一处（被中和）。`stage` 的回显是调用方输入、不是库里的旧数据，按 0.5.12 的设计不走边界，改为在正文里标注来源。
+- **路径收口**：`lib/safe-path.js` 的 `resolveRelativeWithin` + `realPathInside` 成为唯一解析器，导出目标已改用它（绝对路径、盘符、`..`、符号链接四类拒绝集中在一处，测试只证明这一处）。
+- **仍未做**：store 读取返回信任标签、formatter 自动包裹。原因：工具当前直接拼字符串（`return parts.join('\n')`），自动包裹需要先把 store 读取接口改成返回 tagged 值、所有 action 走统一 formatter，属于跨 13 个 action 的重构，单独排期。
+- **控制面**：11 处冗余 `isTrustedRequest` 保留（无害，但与「单点」叙事矛盾），下一步删除并加静态扫描禁止裸 `server.register(`。
 
 ### P2
 
