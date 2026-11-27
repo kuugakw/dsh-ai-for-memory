@@ -263,7 +263,7 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 插件运行时要求 Node.js 20+。会话日志体检/修复依赖 Node 的 zstd，需要 Node 22.15+；在 Node 20 上插件其余功能正常，诊断页会明确标记这一项不可用，而不是等用户点下去才报错。开发（lint）要求 Node 20.19+ / 22.13+ / 24+，这是 ESLint 10 的下限。
 
-测试共 255 项；Node 26 上 252 通过、3 跳过，Node 20 上依赖 `node:sqlite` 或 zstd 的用例按运行时能力跳过。CI 覆盖 Linux / Windows / macOS × Node 20 / 22。“全绿”指没有失败，不等于每个平台都跑满 255 项。
+测试数以 `npm test` 输出为准；依赖 `node:sqlite`、zstd 或平台符号链接/权限能力的用例按运行时能力跳过。CI 覆盖 Linux / Windows / macOS × Node 20 / 22。“全绿”指没有失败，不等于每个平台都跑满同样多的用例。
 
 ```bash
 npm ci          # 安装 lint 依赖

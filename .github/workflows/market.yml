@@ -2,10 +2,15 @@ name: market
 
 # Publishes the plugin index that DSH's experimental "Custom plugin indexes"
 # feature can be pointed at (index.json + icons/ under market/).
+#
+# This runs after the `publish` workflow succeeds instead of starting next to it
+# on the same tag: the old tag trigger raced npm publish, so the wait loop often
+# expired and the job failed. workflow_run also means a failed publish never
+# deploys an index that points at a version npm does not have.
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_run:
+    workflows: [publish]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -19,37 +24,58 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The publish run checked out the tagged commit; deploy that commit,
+          # not whatever happens to be on main when the run starts.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Wait until npm serves this version
+      # The version endpoint can return 200 before the packument lists the
+      # version; build-index reads the packument, so wait for that.
+      - name: Wait until the npm packument lists this version
         run: |
           set -euo pipefail
           version=$(node -p "require('./package.json').version")
-          # The registry CDN can lag several minutes behind a successful publish.
-          # Query the version endpoint directly (no npm cache) and allow 10 min.
-          url="https://registry.npmjs.org/dsh-ai-for-memory/$version"
           for _ in $(seq 1 60); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)
-            if [ "$code" = "200" ]; then
-              echo "npm serves $version"
+            if VERSION="$version" node -e '
+              fetch("https://registry.npmjs.org/dsh-ai-for-memory", {
+                headers: { "user-agent": "dsh-ai-for-memory-market" },
+              }).then((res) => res.json())
+                .then((doc) => process.exit(doc.versions?.[process.env.VERSION] ? 0 : 1))
+                .catch(() => process.exit(1));
+            '; then
+              echo "packument lists $version"
               exit 0
             fi
-            sleep 10
+            sleep 20
           done
-          echo "npm never served dsh-ai-for-memory@$version (last HTTP $code)" >&2
+          echo "npm never listed dsh-ai-for-memory@$version" >&2
           exit 1
 
       - name: Build index
         run: node scripts/market/build-index.mjs
+
+      - name: Assert the deployed index points at this version
+        run: |
+          VERSION=$(node -p "require('./package.json').version") node -e '
+            const index = require("./market/index.json");
+            const newest = index.plugins?.[0]?.versions?.[0]?.version;
+            if (newest !== process.env.VERSION) {
+              console.error(`index newest ${newest} != ${process.env.VERSION}`);
+              process.exit(1);
+            }
+            console.log(`index newest ${newest}`);
+          '
 
       - uses: actions/configure-pages@v5
 

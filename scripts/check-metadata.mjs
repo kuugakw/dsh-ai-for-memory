@@ -32,13 +32,23 @@ for (const entry of plugin?.versions ?? []) {
 
 // Version references that must move together.
 const versionChecks = [
+  ['README.md', `status-stable%20${version}`, '状态徽章'],
   ['README.md', `version-${version}`, '版本徽章'],
   ['README.md', `dsh-ai-for-memory@${version}`, '安装命令'],
   ['README.md', `当前版本 **${version}**`, '当前版本行'],
   ['docs/features.md', `对应版本：**${version}**`, '功能页对应版本'],
+  ['docs/installation.md', `dsh-ai-for-memory@${version}`, '安装文档版本'],
 ];
 for (const [file, needle, label] of versionChecks) {
   if (!readText(file).includes(needle)) problems.push(`${file} 缺少${label}：${needle}`);
+}
+
+// The lockfile root version must follow the manifest too; npm ci tolerates a
+// stale root version, so without this check it silently drifts for releases.
+const lock = JSON.parse(readText('package-lock.json'));
+if (lock.version !== version) problems.push(`package-lock.json version=${lock.version}，应为 ${version}`);
+if (lock.packages?.['']?.version !== version) {
+  problems.push(`package-lock.json packages[""].version=${lock.packages?.['']?.version}，应为 ${version}`);
 }
 
 const changelog = readText('CHANGELOG.md');
