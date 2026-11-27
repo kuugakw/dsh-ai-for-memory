@@ -5844,6 +5844,9 @@ test('raw SQL is accepted only as one read-only statement', () => {
   assert.equal(isSafeSelect("SELECT * FROM pragma_table_info('knowledge_docs')"), false);
   assert.equal(isSafeSelect('SELECT * FROM (SELECT * FROM sqlite_master)'), false);
   assert.equal(isSafeSelect('WITH bad AS (SELECT * FROM sqlite_master) SELECT * FROM bad'), false);
+  // A schema qualifier is judged by the table name, not the schema name.
+  assert.equal(isSafeSelect('SELECT * FROM main.knowledge_docs'), true);
+  assert.equal(isSafeSelect('SELECT * FROM main.sqlite_master'), false);
   // Quoted columns and strings in a non-recursive CTE are still ordinary data.
   assert.equal(isSafeSelect('WITH "c" AS (SELECT 1) SELECT * FROM "c"'), true);
   assert.equal(isSafeSelect('WITH x AS (SELECT "text" AS t FROM knowledge_docs) SELECT * FROM x'), true);
