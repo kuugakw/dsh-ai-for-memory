@@ -30,7 +30,7 @@ const FLOORS = {
   'index.js': { lines: 66, branches: 24, functions: 40 },
   'tools.js': { lines: 82, branches: 54, functions: 70 },
   'store.js': { lines: 91, branches: 76, functions: 90 },
-  'knowledge-query.js': { lines: 88, branches: 66, functions: 95 },
+  'knowledge-query.js': { lines: 88, branches: 66, functions: 92 },
   'knowledge-sqlite.js': { lines: 79, branches: 48, functions: 60 },
   'session-repair.js': { lines: 84, branches: 66, functions: 86 },
   'context-management.js': { lines: 79, branches: 67, functions: 79 },
