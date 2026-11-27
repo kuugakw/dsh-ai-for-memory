@@ -73,7 +73,7 @@ import {
 import { defaultRegistryDir, listRootRows, readRoots, rememberRoot, resolveRegisteredRoot } from '../lib/registry.js';
 import { appendAudit, readAudit } from '../lib/audit.js';
 import {
-  decodeSeqRanges, decodeZstdLog, encodeSeqRanges, encodeZstdLog, findSessionLogs, formatRepairReport,
+  decodeSeqRanges, decodeZstdLog, DEFAULT_MAX_DECODED_BYTES, encodeSeqRanges, encodeZstdLog, findSessionLogs, formatRepairReport,
   formatScanReport, repairSessionLog, resolveSessionLogTarget, scanSessionLogs, scanZstdFrames,
   validateMessageShapes, validateSessionEvents, zstdAvailable as zstdSupported,
 } from '../lib/session-repair.js';
@@ -5827,6 +5827,13 @@ test('raw SQL is accepted only as one read-only statement', () => {
     isSafeSelect('WITH c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM (knowledge_docs, c)) SELECT count(*) FROM c'),
     false,
   );
+  // A JSON table-valued function may be joined: it expands one column of the
+  // single knowledge_docs relation and cannot reach a second table.
+  assert.equal(isSafeSelect("SELECT j.value FROM knowledge_docs d JOIN json_each(d.tags) j ON j.value = 'x'"), true);
+  assert.equal(isSafeSelect('SELECT * FROM knowledge_docs d JOIN json_tree(d.tags) j'), true);
+  // Any other JOIN target is still rejected (cartesian product / second table).
+  assert.equal(isSafeSelect('SELECT * FROM knowledge_docs JOIN other_table'), false);
+  assert.equal(isSafeSelect('SELECT * FROM knowledge_docs JOIN knowledge_docs'), false);
   // Quoted columns and strings in a non-recursive CTE are still ordinary data.
   assert.equal(isSafeSelect('WITH "c" AS (SELECT 1) SELECT * FROM "c"'), true);
   assert.equal(isSafeSelect('WITH x AS (SELECT "text" AS t FROM knowledge_docs) SELECT * FROM x'), true);
@@ -5840,7 +5847,7 @@ test('SQL route answers counts and groups from the JSON base', (t) => {
     return;
   }
   const store = new MemoryStore(tempRoot()).init();
-  store.remember({ doc_id: 'k_abc12345', text: '界面按钮位置', category: 'ui_facts', source: 'agent' });
+  store.remember({ doc_id: 'k_abc12345', text: '界面按钮位置', category: 'ui_facts', source: 'agent', tags: ['ui'] });
   store.remember({ doc_id: 'k_b', text: '超时重试三次', category: 'errors_fixes', source: 'user' });
   store.remember({ doc_id: 'k_c', text: '发布前跑测试', category: 'errors_fixes', source: 'user' });
 
@@ -5862,6 +5869,18 @@ test('SQL route answers counts and groups from the JSON base', (t) => {
   const exact = runSqlQuery(store, 'k_abc12345 是什么');
   assert.equal(exact.ok, true);
   assert.equal(exact.rows[0].doc_id, 'k_abc12345');
+
+  // json_each() is usable both as the FROM relation and joined to the single
+  // knowledge_docs table; the latter used to be rejected by the blanket JOIN ban.
+  const jsonJoin = runSqlQuery(
+    store,
+    "SELECT d.doc_id, j.value AS tag FROM knowledge_docs d JOIN json_each(d.tags) j ON j.value = 'ui'",
+  );
+  assert.equal(jsonJoin.ok, true);
+  assert.deepEqual(jsonJoin.rows.map((row) => [row.doc_id, row.tag]), [['k_abc12345', 'ui']]);
+  const jsonFrom = runSqlQuery(store, "SELECT value FROM json_each('[1,2,3]')");
+  assert.equal(jsonFrom.ok, true);
+  assert.deepEqual(jsonFrom.rows.map((row) => row.value), [1, 2, 3]);
 
   const output = formatSqlResult('知识一共有多少条', total);
   assert.match(output, /检索路由：SQL/);
@@ -7363,6 +7382,30 @@ test('session repair: the zstd cap is checked before inflating a frame', async (
   assert.equal(decoded.text.length, payload.length);
 });
 
+test('session repair: the default decode cap is 256 MiB and is read from the frame header', async (t) => {
+  if (!zstdSupported()) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
+  assert.equal(DEFAULT_MAX_DECODED_BYTES, 256 * 1024 * 1024);
+  // Synthetic frame that declares 1 GiB of content in its header and carries
+  // one raw block. It must be rejected from the declaration, before any
+  // allocation, and the caller may not raise the cap back to 1 GiB.
+  const frame = Buffer.alloc(13);
+  frame.writeUInt32LE(0xFD2FB528, 0);
+  frame.writeUInt8(0xA0, 4); // contentSizeFlag=2 (4-byte size), single segment
+  frame.writeUInt32LE(1024 * 1024 * 1024, 5);
+  frame.writeUIntLE(9, 9, 3); // last block, raw, 1 byte
+  frame[12] = 0x78;
+  const [parsed] = scanZstdFrames(frame).frames;
+  assert.equal(parsed.contentSize, 1024 * 1024 * 1024);
+  await assert.rejects(
+    decodeZstdLog(frame),
+    new RegExp(`解压后的日志超过 ${DEFAULT_MAX_DECODED_BYTES} 字节上限`),
+  );
+  await assert.rejects(
+    decodeZstdLog(frame, { maxDecodedBytes: 1024 * 1024 * 1024 }),
+    new RegExp(`解压后的日志超过 ${DEFAULT_MAX_DECODED_BYTES} 字节上限`),
+  );
+});
+
 test('session repair: shallow scans cap the header frame before inflating it', async (t) => {
   if (!zstdSupported()) { t.skip('node:zlib zstd is unavailable on this Node'); return; }
   const root = tempRoot();
@@ -8194,6 +8237,33 @@ test('export refuses destinations outside the memory root', () => {
   }
 });
 
+test('export refuses an exports directory that is a symlink outside the root', () => {
+  const root = tempRoot();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-export-outside-'));
+  try {
+    const store = new MemoryStore(root);
+    store.init();
+    const exportsDir = path.join(root, 'exports');
+    fs.rmSync(exportsDir, { recursive: true, force: true });
+    // A junction is a directory symlink on Windows and needs no admin rights.
+    fs.symlinkSync(outside, exportsDir, 'junction');
+    const blocked = writeExportArtifacts(store, { dest: 'kb.md', types: ['knowledge'] });
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.error, /符号链接/);
+    assert.equal(fs.existsSync(path.join(outside, 'kb.md')), false, '符号链接不能把导出写到记忆目录之外');
+    // Nothing was written into the store either (fail closed).
+    assert.deepEqual(fs.readdirSync(outside), []);
+  } finally {
+    try {
+      fs.unlinkSync(path.join(root, 'exports'));
+    } catch {
+      // Already replaced/removed.
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('a foreign lock waits out staleMs and is taken over instead of timing out', async () => {
   const root = tempRoot();
   try {
@@ -8255,6 +8325,17 @@ test('redactSecrets covers quoted JSON keys and quoted values', () => {
   assert.equal(redactSecrets('password: "yaml-secret-123456"').includes('yaml-secret-123456'), false);
   assert.equal(redactSecrets('api_key=plain-secret-123456').includes('plain-secret-123456'), false);
   assert.equal(redactSecrets('DB_PASSWORD=hunter2hunter2').includes('hunter2hunter2'), false);
+  // Authorization headers: the scheme and key name are not secrets, the token is.
+  assert.equal(redactSecrets('Authorization: Bearer abcdef123456789').includes('abcdef123456789'), false);
+  assert.match(redactSecrets('Authorization: Bearer abcdef123456789'), /Authorization: \[REDACTED\]/);
+  assert.equal(redactSecrets('{"authorization": "Bearer hdr-secret-123456"}').includes('hdr-secret-123456'), false);
+  // Header/JSON key names that carry "secret" as a segment must redact too.
+  assert.equal(redactSecrets('{"x-secret-key": "hdr-secret-123456"}').includes('hdr-secret-123456'), false);
+  assert.deepEqual(
+    JSON.parse(redactSecrets('{"x-secret-key": "hdr-secret-123456"}')),
+    { 'x-secret-key': '[REDACTED]' },
+  );
+  assert.equal(redactSecrets('x-secret-key: hdr-secret-123456').includes('hdr-secret-123456'), false);
   // Unrelated JSON must survive untouched.
   assert.equal(redactSecrets('{"note": "hello world"}'), '{"note": "hello world"}');
   assert.equal(redactSecrets('{"api_key_policy": "abcdef123456"}').includes('abcdef123456'), true);

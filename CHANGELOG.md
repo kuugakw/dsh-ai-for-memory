@@ -2,6 +2,15 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 0.5.18（2026-11-27）
+
+### 安全与架构
+
+- **脱敏覆盖认证头与复合键名**：`redactSecrets()` 新增 `Authorization: Bearer/Basic/Digest …` 整段替换（兼容带引号的 JSON 键与 `curl -H`），并把 `secret` 作为 `-`/`_` 分段出现的键名（`x-secret-key`、`client_secret`）纳入；短占位值也能命中，`api_key_policy` 这类策略名仍不误杀。
+- **SQL 只读通道放开 JSON 表函数联接**：`isSafeSelect()` 不再一律拒绝 JOIN，`JOIN json_each()/json_tree()` 可用于标签查询；真实表、自联接与重复关系仍拒绝。`json_each` 现在既能作 FROM 关系，也能与 `knowledge_docs` 联接。
+- **导出拒绝符号链接逃逸**：`writeExportArtifacts()` 的边界检查从 `<root>/exports` 改为 `realpath(store.root)`，`exports/` 本身是外部链接时在 mkdir 前就拒绝；最终文件若是符号链接也拒绝覆盖。此前 `exports` 指向外部目录时可把文件写到记忆目录之外。
+- **会话日志解压上限收口**：`DEFAULT_MAX_DECODED_BYTES` 从 1 GiB 降到 256 MiB 并导出；`decodeZstdLog()` 改为硬上限（调用方只能调低），超限在帧头声明阶段就拒绝，不再分配后判断。新增导出符号链接与 1 GiB 声明帧的回归用例。
+
 ## 0.5.17（2026-11-27）
 
 ### 工程规范

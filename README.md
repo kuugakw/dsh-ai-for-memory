@@ -1,13 +1,13 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.5.17-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.5.17-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
+[![Status](https://img.shields.io/badge/status-stable%200.5.18-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.5.18-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.5.17 是配置与类型校验补齐版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版把配置 schema 也改成严格模式（未知键直接报错并列出允许的键，拼错的能力名不会再被静默忽略），并把类型检查从逐文件 ratchet 扩到 `index.js` + `lib/**/*.js` 全量覆盖；工具与 MCP 参数校验保持不变，工程门禁（ESLint、冒烟测试、覆盖率、元数据）继续生效。
+> **0.5.18 是安全收口版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版收口四类外部验证发现：脱敏补上 `Authorization: Bearer` 头与 `x-secret-key` 这类复合键名；SQL 只读通道允许 `JOIN json_each()/json_tree()`（仍拒绝真实表联接）；导出拒绝经 `exports/` 符号链接写到记忆目录之外；会话日志解压上限从 1 GiB 降到 256 MiB 并改为硬上限。工具与 MCP 参数校验、工程门禁（ESLint、冒烟测试、覆盖率、元数据）继续生效。
 >
-> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.17）。插件索引这类新渠道从当前版本（0.5.17）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
+> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.18）。插件索引这类新渠道从当前版本（0.5.18）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
 >
 > 升级前建议备份记忆目录；数据版本变化会走 `schema.json` 的迁移流程，迁移前自动把要改写的文件备份到 `backups/schema-v<旧版本>-<时间>/`，更详细的规则见 [配置与数据目录](docs/configuration.md#格式版本与迁移)。
 
@@ -127,7 +127,7 @@ verified: false
 ## 快速开始
 
 ```bash
-dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.17
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.18
 ```
 
 也可以在 DSH **设置 → 插件 → 添加插件** 中填 `dsh-ai-for-memory`。本地开发用目录安装：
@@ -210,10 +210,11 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 ## 更新内容
 
-当前版本 **0.5.17**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.5.18**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
+- **0.5.18**：安全收口——脱敏覆盖 `Authorization: Bearer` 与 `x-secret-key` 复合键名；SQL 只读通道允许 `JOIN json_each()/json_tree()`，真实表联接仍拒绝；导出拒绝经 `exports/` 符号链接写外部；会话日志解压上限 1 GiB→256 MiB 并改为硬上限；
 - **0.5.17**：配置 schema 严格模式（未知键拒绝并列出允许键）；类型检查改为全量 `checkJs`（index + lib 全部模块）；
 - **0.5.16**：工具参数 schema 校验生效（DSH 注册前校验并返回说明；MCP `tools/call` 返回 `-32602`），新增 `lib/schema.js` 与 `test/schema.test.mjs`；
 - **0.5.15**：工程规范化——`index.js` 拆成入口 + `lib/tools.js` / `lib/context-management.js` / `lib/config.js`；新增 ESLint、逐文件类型检查、面板冒烟测试、覆盖率门禁与更严格的元数据检查；CI 用 lockfile 跑完整门禁；
