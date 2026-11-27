@@ -1,13 +1,13 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.5.19-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.5.19-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
+[![Status](https://img.shields.io/badge/status-stable%200.5.20-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.5.20-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.5.19 是审计修复版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版按安全与工程两轮审计收口：SQL 只读通道只允许 `knowledge_docs`、JSON 表函数和 CTE（`sqlite_master`、`pragma_table_info(...)` 等内部表/表函数一律拒绝）；脱敏扩到 `tags` / `url` / `evidence`、上下文摘要、快照状态和审计明细，并补上 Cookie、Azure 密钥、空用户名 DSN、截断私钥等形态；MCP 路由恢复非浏览器客户端可用（仍要 token 与可信 Host）；导出目录/文件改为 0700/0600；发布门禁增加 tag 与版本一致性校验，市场索引改在 publish 成功后重建。工程门禁（ESLint、类型检查、全局+按文件覆盖率、元数据）继续生效。
+> **0.5.20 是兼容性收口版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版修正 SQL 只读通道对限定列引用的误杀（`json_each(knowledge_docs.tags)` 恢复可用，自连接仍拒绝），脱敏补上 `llm_key` / `openai_key_backup` 这类通用 `*_key` 名称并保留结构键名，同时把最低运行时提高到 **Node 22.15+**（`node:sqlite` 与 zstd 均内置），CI 矩阵改为 Node 22/24。工程门禁（ESLint、类型检查、全局+按文件覆盖率、元数据）继续生效。
 >
-> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.19）。插件索引这类新渠道从当前版本（0.5.19）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
+> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.20）。插件索引这类新渠道从当前版本（0.5.20）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
 >
 > 升级前建议备份记忆目录；数据版本变化会走 `schema.json` 的迁移流程，迁移前自动把要改写的文件备份到 `backups/schema-v<旧版本>-<时间>/`，更详细的规则见 [配置与数据目录](docs/configuration.md#格式版本与迁移)。
 
@@ -127,7 +127,7 @@ verified: false
 ## 快速开始
 
 ```bash
-dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.19
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.20
 ```
 
 也可以在 DSH **设置 → 插件 → 添加插件** 中填 `dsh-ai-for-memory`。本地开发用目录安装：
@@ -210,10 +210,11 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 ## 更新内容
 
-当前版本 **0.5.19**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.5.20**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
+- **0.5.20**：SQL 只读通道按 FROM 关系计数，不再误杀 `json_each(knowledge_docs.tags)` / 限定列引用；脱敏补 `*_key` 名称（保留 `primary_key`、`api_key_policy` 等结构名）；最低运行时提高到 Node 22.15+，CI 改为 Node 22/24；
 - **0.5.19**：安全与工程审计修复——SQL 只读通道拒绝 `sqlite_master`/`pragma_table_info` 等未授权关系；脱敏覆盖 `tags`/`url`/`evidence`、上下文摘要、快照与审计，并补 Cookie、Azure 密钥、空用户名 DSN、截断私钥等；MCP 恢复非浏览器客户端可用；导出权限 0700/0600；发布门禁校验 tag 版本，市场索引在 publish 成功后重建；覆盖率增加按文件地板；
 - **0.5.18**：安全收口——脱敏覆盖 `Authorization: Bearer` 与 `x-secret-key` 复合键名；SQL 只读通道允许 `JOIN json_each()/json_tree()`，真实表联接仍拒绝；导出拒绝经 `exports/` 符号链接写外部；会话日志解压上限 1 GiB→256 MiB 并改为硬上限；
 - **0.5.17**：配置 schema 严格模式（未知键拒绝并列出允许键）；类型检查改为全量 `checkJs`（index + lib 全部模块）；
@@ -262,9 +263,9 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 ## 开发与测试
 
-插件运行时要求 Node.js 20+。会话日志体检/修复依赖 Node 的 zstd，需要 Node 22.15+；在 Node 20 上插件其余功能正常，诊断页会明确标记这一项不可用，而不是等用户点下去才报错。开发（lint）要求 Node 20.19+ / 22.13+ / 24+，这是 ESLint 10 的下限。
+插件运行时要求 **Node.js 22.15+**（`node:sqlite` 与 zstd 都在这个版本可用）。开发（lint）要求 Node 22.15+ / 24+，这是 ESLint 10 的下限。
 
-测试数以 `npm test` 输出为准；依赖 `node:sqlite`、zstd 或平台符号链接/权限能力的用例按运行时能力跳过。CI 覆盖 Linux / Windows / macOS × Node 20 / 22。“全绿”指没有失败，不等于每个平台都跑满同样多的用例。
+测试数以 `npm test` 输出为准；依赖 `node:sqlite`、zstd 或平台符号链接/权限能力的用例按运行时能力跳过。CI 覆盖 Linux / Windows / macOS × Node 22 / 24。“全绿”指没有失败，不等于每个平台都跑满同样多的用例。
 
 ```bash
 npm ci          # 安装 lint 依赖

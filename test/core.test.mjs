@@ -5833,6 +5833,15 @@ test('raw SQL is accepted only as one read-only statement', () => {
     isSafeSelect('WITH c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM (knowledge_docs, c)) SELECT count(*) FROM c'),
     false,
   );
+  // A schema-qualified column reference names the table once. Counting the raw
+  // string `knowledge_docs` rejected `json_each(knowledge_docs.tags)` even
+  // though the FROM list had the table only once.
+  assert.equal(isSafeSelect('SELECT knowledge_docs.doc_id FROM knowledge_docs WHERE knowledge_docs.category = \'a\''), true);
+  assert.equal(
+    isSafeSelect('SELECT knowledge_docs.doc_id, j.value FROM knowledge_docs, json_each(knowledge_docs.tags) j'),
+    true,
+  );
+  assert.equal(isSafeSelect('SELECT * FROM knowledge_docs a, knowledge_docs b'), false);
   // A JSON table-valued function may be joined: it expands one column of the
   // single knowledge_docs relation and cannot reach a second table.
   assert.equal(isSafeSelect("SELECT j.value FROM knowledge_docs d JOIN json_each(d.tags) j ON j.value = 'x'"), true);
@@ -5899,6 +5908,13 @@ test('SQL route answers counts and groups from the JSON base', (t) => {
   );
   assert.equal(jsonJoin.ok, true);
   assert.deepEqual(jsonJoin.rows.map((row) => [row.doc_id, row.tag]), [['k_abc12345', 'ui']]);
+  // The qualified-column form names the table once; it must validate and run.
+  const jsonQualified = runSqlQuery(
+    store,
+    "SELECT knowledge_docs.doc_id, j.value AS tag FROM knowledge_docs, json_each(knowledge_docs.tags) j WHERE j.value = 'ui'",
+  );
+  assert.equal(jsonQualified.ok, true);
+  assert.deepEqual(jsonQualified.rows.map((row) => [row.doc_id, row.tag]), [['k_abc12345', 'ui']]);
   const jsonFrom = runSqlQuery(store, "SELECT value FROM json_each('[1,2,3]')");
   assert.equal(jsonFrom.ok, true);
   assert.deepEqual(jsonFrom.rows.map((row) => row.value), [1, 2, 3]);
@@ -8435,6 +8451,16 @@ test('redactSecrets covers quoted JSON keys and quoted values', () => {
     false,
   );
   assert.equal(redactSecrets('passphrase: correct horse battery staple').includes('correct horse'), false);
+  // Generic `*_key` names are treated as credentials; structural key names and
+  // a bare `key` stay readable so identifiers are not lost.
+  assert.equal(redactSecrets('llm_key=abcdef1234567890').includes('abcdef1234567890'), false);
+  assert.equal(
+    redactSecrets('{"openai_key_backup": "backup-secret-123456"}').includes('backup-secret-123456'),
+    false,
+  );
+  assert.equal(redactSecrets('primary_key=user-123456').includes('user-123456'), true);
+  assert.equal(redactSecrets('sort_key=cache-123456').includes('cache-123456'), true);
+  assert.equal(redactSecrets('key=some-long-value').includes('some-long-value'), true);
   // Unrelated JSON must survive untouched.
   assert.equal(redactSecrets('{"note": "hello world"}'), '{"note": "hello world"}');
   assert.equal(redactSecrets('{"api_key_policy": "abcdef123456"}').includes('abcdef123456'), true);

@@ -32,7 +32,7 @@ Install the bundle from the DSH plugin market, or load this repository as a loca
 npm test          # runs test/core.test.mjs
 ```
 
-CI runs the same suite on Linux, Windows and macOS with Node 20 and 22.
+CI runs the same suite on Linux, Windows and macOS with Node 22 and 24.
 
 ## Privacy
 

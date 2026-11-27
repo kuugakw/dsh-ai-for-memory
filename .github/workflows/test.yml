@@ -17,7 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        node: [20, 22]
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,8 +34,8 @@ jobs:
         # that forgets either would otherwise ship stale metadata.
         run: npm run check
       - name: Coverage gate
-        # One job only: the thresholds are about the whole suite, and Node 20's
-        # test runner has no coverage threshold flags.
+        # One job only: the thresholds are about the whole suite; running it once keeps the
+        # matrix cheap.
         if: matrix.os == 'ubuntu-latest' && matrix.node == 22
         run: npm run coverage
       - name: Type check

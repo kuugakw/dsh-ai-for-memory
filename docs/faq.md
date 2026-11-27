@@ -16,7 +16,7 @@ RAG 需要同时配置 Embedding 模型和 Rerank 模型。只有其中一个时
 
 **SQL 查询不可用？**
 
-SQL 通道和 SQLite 镜像需要运行时的 `node:sqlite`。Node 20 可以运行本地记忆，但没有这个内置模块；升级到 Node 22.5+ 或使用带 `node:sqlite` 的运行时。
+SQL 通道和 SQLite 镜像需要运行时的 `node:sqlite`。插件要求 **Node 22.15+**，该版本已内置 `node:sqlite` 与 zstd；更旧的运行时不再支持。
 
 **清空上下文后还能找回吗？**
 

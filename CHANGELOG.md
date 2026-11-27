@@ -2,6 +2,21 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 0.5.20（2026-11-27）
+
+### 安全修复
+
+- **SQL 只读通道不再按字符串出现次数判断 `knowledge_docs`**：旧的 `body.match(/\bknowledge_docs\b/g)` 会把 `json_each(knowledge_docs.tags)` 里的限定列引用和 `knowledge_docs.doc_id` 当成第二次表引用，合法查询被误杀。现在只由 FROM 关系计数（`hasDuplicateRelations`）判断自连接，`json_each(knowledge_docs.tags)` 与限定列引用恢复可用，`FROM knowledge_docs a, knowledge_docs b` 等自连接仍然拒绝。
+- **脱敏补通用 `*_key` 名称**：`llm_key`、`openai_key_backup`、`service_key` 这类键名此前不命中固定词根。现在 `key` 作为段出现即按凭证处理，但保留结构名：裸 `key`、`primary_key`、`foreign_key`、`sort_key`、`key_id`、`api_key_policy` 等不替换，避免把标识符或策略名变成占位符。
+
+### 破坏性变更
+
+- **最低运行时提高到 Node 22.15**：`node:sqlite`（22.5+）与 zstd（22.15+）此时都内置，不再需要为 Node 20 做能力降级。`engines.node` 改为 `>=22.15`，开发依赖 `@types/node` 对齐到 `^22.15`，CI 矩阵由 Node 20/22 改为 22/24，README、安装/FAQ/功能文档同步更新。
+
+### 工程
+
+- 测试补充限定列引用（校验与执行两条路径）和 `*_key` 脱敏用例；覆盖率地板在 Node 22 上复验通过。
+
 ## 0.5.19（2026-11-27）
 
 ### 安全修复
