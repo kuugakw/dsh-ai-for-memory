@@ -89,13 +89,13 @@
 - **能力令牌（已实现）**：`capabilityExport` / `capabilityForget` / `capabilityRepair` / `capabilityMcp` 四个布尔能力默认全部关闭。删除知识、导出记忆、`aim_repair` 写回、开启 MCP 都要先显式授权；未授权时工具返回带能力名的说明，拒绝事件写审计（`capability.denied`，带能力 id），放行事件写 `capability.granted`。面板「设置 → 破坏性能力」可开关，配置里直接改同样生效；`mcpEnabled=true` 但缺 `capabilityMcp` 时 MCP 保持关闭并写明原因。
 - **启动自检（已实现）**：新增 `lib/security-check.js`，只读检查记忆根/知识/快照/导出目录的 0700、知识文件抽样 0600、`audit.jsonl` 0600、迁移备份的存在与数量、schema 版本、MCP 能力与 token 文件是否匹配。插件启动时若配置了固定 `root` 就检查一次并写日志；面板「诊断」页新增「安全体检」区显示每条结果（不通过标明原因），也可直接 `GET /ai-for-memory/api/security/check`。自检永不阻塞操作。0.5.19 补齐 token 文件的 0600 检查、自定义 `mcpToken` 不要求自动 token 文件、Windows 上不再把不存在的 POSIX mode 报成失败。
 
-### P3（下一批，已排期）
+### P3（进行中）
 
-- **P3-1 覆盖率继续抬升**：按文件地板已覆盖 10 个核心模块（`api.js` 下限 27%）；补面板路由级用例，把 `lib/api.js` 行覆盖抬到 40%+ 后再升地板。
-- **P3-2 类型收紧**：`@types/node` 已对齐 Node 22.15；下一步评估把 `tsconfig` 的 `strict` 从 `false` 逐步打开，先处理 `lib/api.js` 与 `lib/tools.js`。
-- **P3-3 MCP token 轮换**：面板一键轮换（或 `aim_memory` 管理动作），旧 token 立即失效；当前只能改配置或删 `mcp-token` 后重启。
-- **P3-4 market 索引自动提交**：`market` 工作流成功后由 bot 提交 `market/index.json`（当前构建成功但索引仍要本地手动提交）；需要评估 workflow 的 `contents: write` 与推送权限。
-- **P3-5 路径统一剩余面**：SQLite 库文件与面板「打开文件夹」的路径已由 `store.root` / 登记根约束；评估是否也强制走 `lib/safe-path.js` 并补符号链接用例。
+- **P3-1 覆盖率继续抬升（进行中）**：按文件地板已覆盖 10 个核心模块（`api.js` 下限 27%）；0.5.21 后补上 MCP 轮换、安全体检路由、未登记根拒绝的用例，全局行覆盖 84.01%。离 `api.js` 40% 的目标还差路由级用例（state/config/diagnostics 等依赖较多的处理器），继续按模块补。
+- **P3-2 类型收紧（已评估，未实施）**：`tsc --strict` 当前有 394 个错误（多数是 `catch` 的 `unknown`、可空字段与 `{}` 推断），一次打开不现实；按 `api.js` → `tools.js` → `store.js` 分批迁移，先处理 `catch (error)` 与可空对象。
+- **P3-3 MCP token 轮换（已完成，未发布）**：后端 `POST /api/mcp/rotate` 删除并重建自动 token，运行中的 MCP 路由立即改用新值，旧 token 下一次请求即 401；自定义 `mcpToken` 拒绝轮换并提示改配置。面板「MCP 出口」加了「轮换自动令牌」按钮，拒绝/轮换都写审计。
+- **P3-4 market 索引自动提交（已完成，未发布）**：`market` 改为 checkout `main`，构建后如果 `market/index.json` 有变化就由 `github-actions[bot]` 提交并推送（提交信息带 `[skip ci]`），不再依赖本地手动提交；需要仓库允许 bot 推送 main，分支保护下会在该步骤失败。
+- **P3-5 路径统一剩余面（已完成，未发布）**：核查 `knowledgeDatabasePath()` 由 `store.root` 直接派生、面板 reveal 只接受登记根/固定根，均无用户可控拼接；补了「未登记根 reveal 返回 404」与安全体检路由的用例。SQLite 库文件与 reveal 不新增 `safe-path` 包装，避免把无输入的路径也套一层解析。
 - **P3-6 评估记录：SQLite authorizer 拒读 `sqlite_*` 不可行**——SQLite 内部查询也会读 `sqlite_master.ROWID`，安装后正常 `SELECT count(*)` 都会被拒；保留解析层（关系白名单）作为唯一闸门，不引入第二套半可用的检查。
 
 

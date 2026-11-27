@@ -576,6 +576,9 @@ window.__ModuleLoader__.load({
         mcpTokenSaved: '已设置，留空或填 - 切回自动令牌',
         mcpTokenNone: '未设置；将自动生成到本机文件',
         mcpTokenAuto: '自动令牌文件',
+        mcpRotate: '轮换自动令牌',
+        mcpRotated: '已轮换；旧令牌立即失效，新令牌在自动令牌文件里',
+        mcpRotateFailed: '轮换失败',
         autoMode: '自动整理',
         switchOn: '开',
         switchOff: '关',
@@ -1157,6 +1160,9 @@ window.__ModuleLoader__.load({
         mcpTokenSaved: 'Stored; leave empty or enter - to use the automatic token',
         mcpTokenNone: 'Not set; a token is generated in a local file',
         mcpTokenAuto: 'Automatic token file',
+        mcpRotate: 'Rotate automatic token',
+        mcpRotated: 'Rotated; the old token is invalid now and the new one is in the token file',
+        mcpRotateFailed: 'Rotation failed',
         autoMode: 'Auto tidy',
         switchOn: 'On',
         switchOff: 'Off',
@@ -2422,6 +2428,18 @@ window.__ModuleLoader__.load({
           setExternalStatus(`${t.externalFail}: ${String(error?.message ?? error)}`);
         } finally {
           setExternalProbing(false);
+        }
+      };
+      /** Rotate the auto-generated MCP token; the old one stops working immediately. */
+      const rotateMcpToken = async () => {
+        try {
+          const result = await callApi('/mcp/rotate', { method: 'POST', body: {} });
+          setNotice({
+            kind: 'ok',
+            text: result?.tokenFile ? `${t.mcpRotated}：${result.tokenFile}` : t.mcpRotated,
+          });
+        } catch (error) {
+          setNotice({ kind: 'err', text: `${t.mcpRotateFailed}：${String(error?.message ?? error)}` });
         }
       };
       /** Fill endpoint fields from a discovered model folder, starting the local engine when it has a GGUF. */
@@ -5967,7 +5985,15 @@ window.__ModuleLoader__.load({
             })),
           mcpTokenFile
             ? h('p', { style: styles.hint }, `${t.mcpTokenAuto}: ${mcpTokenFile}`)
-            : null),
+            : null,
+          h('div', { style: styles.actions },
+            h('button', {
+              type: 'button',
+              className: 'aim-btn',
+              style: styles.button,
+              disabled: !formMcpEnabled,
+              onClick: rotateMcpToken,
+            }, t.mcpRotate))),
           h('div', {
             style: {
               borderTop: '1px solid rgba(127,127,127,0.22)',

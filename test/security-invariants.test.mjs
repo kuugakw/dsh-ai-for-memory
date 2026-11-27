@@ -286,6 +286,90 @@ test('the read ledger wraps a leaked body but not a status line', async () => {
   assert.equal(exempted, longBody, 'exempt actions keep their explicit formatting');
 });
 
+test('panel read routes answer for a fixed root and reject unregistered roots', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-route-root-'));
+  const d = deps();
+  d.config = { root };
+  d.registryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-route-reg-'));
+  try {
+    const routes = captureRoutes(d);
+    const check = routes.get('/ai-for-memory/api/security/check');
+    const req = request({ 'sec-fetch-site': 'same-origin' });
+    req.url = '/ai-for-memory/api/security/check';
+    const res = response();
+    await check(req, res);
+    assert.equal(res.statusCode, 200);
+    const payload = JSON.parse(res.body);
+    assert.equal(payload.ok, true);
+    assert.equal(typeof payload.report?.ok, 'boolean');
+
+    const noRoot = deps();
+    noRoot.registryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-route-reg-'));
+    try {
+      const reveal = captureRoutes(noRoot).get('/ai-for-memory/api/reveal');
+      const body = JSON.stringify({ root: path.join(os.tmpdir(), 'not-registered-aim') });
+      const denied = response();
+      await reveal({
+        method: 'POST',
+        headers: { host: HOST, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' },
+        socket: { remoteAddress: '127.0.0.1', localPort: PORT },
+        async *[Symbol.asyncIterator]() { yield Buffer.from(body); },
+      }, denied);
+      assert.equal(denied.statusCode, 404);
+    } finally {
+      fs.rmSync(noRoot.registryDir, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(d.registryDir, { recursive: true, force: true });
+  }
+});
+
+test('MCP token rotation invalidates the old token immediately', async () => {
+  const d = deps();
+  d.registryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-rotate-'));
+  d.config = { mcpEnabled: true, capabilityMcp: true };
+  try {
+    const tokenFile = path.join(d.registryDir, 'mcp-token');
+    fs.writeFileSync(tokenFile, 'old-token\n', { mode: 0o600 });
+    d.mcpToken = 'old-token';
+    const routes = captureRoutes(d);
+    const rotate = routes.get('/ai-for-memory/api/mcp/rotate');
+    assert.ok(typeof rotate === 'function', 'rotation route must be registered');
+
+    const res = response();
+    await rotate(request({ 'sec-fetch-site': 'same-origin' }, 'POST'), res);
+    assert.equal(res.statusCode, 200);
+    const newToken = fs.readFileSync(tokenFile, 'utf8').trim();
+    assert.notEqual(newToken, 'old-token');
+    assert.equal(d.mcpToken, newToken, 'the running route must use the rotated token');
+
+    const mcp = routes.get('/ai-for-memory/mcp');
+    const denied = response();
+    await mcp(request({ authorization: 'Bearer old-token', 'content-type': 'application/json' }, 'POST'), denied);
+    assert.equal(denied.statusCode, 401);
+    const accepted = response();
+    await mcp(request({ authorization: `Bearer ${newToken}`, 'content-type': 'application/json' }, 'POST'), accepted);
+    assert.notEqual(accepted.statusCode, 401);
+  } finally {
+    fs.rmSync(d.registryDir, { recursive: true, force: true });
+  }
+});
+
+test('a configured MCP token cannot be rotated from the panel', async () => {
+  const d = deps();
+  d.registryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-rotate-custom-'));
+  d.config = { mcpEnabled: true, capabilityMcp: true, mcpToken: 'custom-token' };
+  try {
+    const rotate = captureRoutes(d).get('/ai-for-memory/api/mcp/rotate');
+    const res = response();
+    await rotate(request({ 'sec-fetch-site': 'same-origin' }, 'POST'), res);
+    assert.equal(res.statusCode, 400);
+  } finally {
+    fs.rmSync(d.registryDir, { recursive: true, force: true });
+  }
+});
+
 test('security self-check flags an ungranted MCP surface without touching disk', () => {
   const missing = path.join(os.tmpdir(), `aim-missing-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const clean = runSecurityCheck({ root: missing, config: {}, registryDir: '' });

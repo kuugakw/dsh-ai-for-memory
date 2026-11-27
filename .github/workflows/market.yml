@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -32,9 +32,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The publish run checked out the tagged commit; deploy that commit,
-          # not whatever happens to be on main when the run starts.
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          # Build on main so the rebuilt index can be committed back there.
+          # The version assertion below ties it to the published release.
+          ref: main
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -78,6 +79,23 @@ jobs:
           '
 
       - uses: actions/configure-pages@v5
+
+      # Keep the checked-in index in step with what npm serves instead of
+      # leaving every release to a manual "build and commit" step. `[skip ci]`
+      # keeps the index commit from starting another test matrix.
+      - name: Commit the rebuilt index
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- market/index.json; then
+            echo "index already current"
+            exit 0
+          fi
+          version=$(node -p "require('./package.json').version")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add market/index.json
+          git commit -m "market: rebuild index for $version [skip ci]"
+          git push origin HEAD:main
 
       - uses: actions/upload-pages-artifact@v4
         with:
