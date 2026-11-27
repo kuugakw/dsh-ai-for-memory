@@ -3030,6 +3030,26 @@ test('config validator accepts defaults and rejects wrong types', () => {
   assert.ok(tokenize('API 超时').includes('超时'));
 });
 
+test('config schema rejects unknown keys and bad values', () => {
+  const validate = (raw) => Config['~standard'].validate(raw);
+  const ok = validate({ defaultTopK: 9, capabilityForget: true });
+  assert.ok(ok.value);
+  assert.equal(ok.value.defaultTopK, 9);
+  assert.equal(ok.value.capabilityForget, true);
+
+  // A typo in a capability name used to be silently ignored and fall back to
+  // "off"; the strict validator must name it instead.
+  const typo = validate({ capabilityExprot: true });
+  assert.ok(typo.issues?.length > 0);
+  const messages = typo.issues.map((issue) => issue.message).join('\n');
+  assert.match(messages, /未知配置项 capabilityExprot/);
+  assert.match(messages, /允许的键/);
+
+  const bad = validate({ defaultTopK: '9' });
+  assert.ok(bad.issues?.length > 0);
+  assert.match(bad.issues[0].message, /defaultTopK 必须是/);
+});
+
 test('topic similarity separates related turns from unrelated ones', () => {
   const related = topicSimilarity(
     '上下文清理按相似度保留高相似度的轮次',

@@ -5,7 +5,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "allowJs": true,
-    "checkJs": false,
+    "checkJs": true,
     "noEmit": true,
     "strict": false,
     "noImplicitAny": false,
@@ -13,5 +13,5 @@
     "types": ["node"],
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["lib/**/*.js", "index.js"]
+  "include": ["index.js", "lib/**/*.js"]
 }

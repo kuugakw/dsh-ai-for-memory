@@ -59,7 +59,7 @@ npm run check   # lint + 元数据一致性（README/docs/CHANGELOG/package.json
 npm run coverage # 覆盖率门禁：行 ≥80%、函数 ≥80%、分支 ≥65%
 ```
 
-类型检查采用**逐文件 ratchet**：`tsconfig.json` 里 `checkJs=false`，只有文件头写了 `// @ts-check` 的模块会被 `tsc` 检查（目前覆盖 `lib/config.js`、`lib/egress.js`、`lib/safe-path.js`、`lib/api.js` 之外的 17 个 lib 模块）；新增或改动的模块应加上这一行，后续把剩余的大文件（`api.js`、`store.js`、`session-repair.js`、`local-engine.js`）逐个迁入即可，不需要一次性修完 500+ 条推断错误。CI 只在 ubuntu + Node 22 上跑覆盖率与类型检查，避免六个矩阵任务重复付费。
+类型检查覆盖 `index.js` + `lib/**/*.js` 全部模块（`checkJs: true`，`npm run typecheck` 应为 0 错误）；`client.js` 不在范围里——它是 DSH 面板的单文件 module-loader 脚本，不是 Node 模块。CI 只在 ubuntu + Node 22 上跑覆盖率与类型检查，避免六个矩阵任务重复付费。
 
 `test/client-smoke.test.mjs` 在 VM 里加载 `client.js`，用假的 `window.__ModuleLoader__` 和真实 React 跑 `factory()` + `apply()`，断言面板注册了侧栏入口与主面板、双语标题正确——这是目前唯一覆盖面板代码的测试。
 
