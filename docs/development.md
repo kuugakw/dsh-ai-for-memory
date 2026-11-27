@@ -56,7 +56,7 @@ npm test        # 单元测试（含面板冒烟测试）
 npm run lint    # ESLint flat config：只查正确性（未定义名、未用变量、重复键、ASI 陷阱等）
 npm run typecheck # tsc --noEmit：检查带 `// @ts-check` 的文件
 npm run check   # lint + 元数据一致性（README/docs/CHANGELOG/package.json/market 索引）
-npm run coverage # 覆盖率门禁：行 ≥80%、函数 ≥80%、分支 ≥65%
+npm run coverage # 覆盖率门禁：全局行 ≥80%、函数 ≥80%、分支 ≥65%，并按文件设地板（api/index/tools/store 等）
 ```
 
 类型检查覆盖 `index.js` + `lib/**/*.js` 全部模块（`checkJs: true`，`npm run typecheck` 应为 0 错误）；`client.js` 不在范围里——它是 DSH 面板的单文件 module-loader 脚本，不是 Node 模块。CI 只在 ubuntu + Node 22 上跑覆盖率与类型检查，避免六个矩阵任务重复付费。

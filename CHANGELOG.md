@@ -2,7 +2,7 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
-## 未发布
+## 0.5.19（2026-11-27）
 
 ### 安全修复
 
@@ -15,7 +15,8 @@
 ### 工程规范
 
 - **发布门禁**：`publish` 在 npm 发布前校验 tag 与 `package.json` 版本一致；`market` 改为在 `publish` 成功后用 `workflow_run` 触发，等待 npm packument 真正列出该版本，并在部署前断言索引最新版本就是当前版本，避免 tag 并行起跑导致的失败和“成功部署旧索引”。
-- **元数据检查补漏**：`npm run check` 现在同时校验 README 状态徽章、`docs/installation.md` 的安装版本，以及 `package-lock.json` 根版本与 `package.json` 一致；`package-lock.json` 已同步到 0.5.18。
+- **元数据检查补漏**：`npm run check` 现在同时校验 README 状态徽章、`docs/installation.md` 的安装版本，以及 `package-lock.json` 根版本与 `package.json` 一致；`package-lock.json` 已同步到 0.5.19。
+- **按文件覆盖率地板**：`npm run coverage` 改为 `scripts/check-coverage.mjs`，在全局阈值（行/函数 ≥80%、分支 ≥65%）之外给 `api.js`、`index.js`、`tools.js`、`store.js`、`knowledge-query.js` 等 10 个核心模块设下限，只升不降；`lib/api.js` 这类大模块不再能被全局平均掩盖。
 - **导出边界回归用例**：补上「最终文件是符号链接」与「嵌套子目录是符号链接」两个用例，覆盖 0.5.18 声称已修复但未直接测试的分支。
 - 文档更新：`docs/mcp.md` 的默认值改为关闭并说明非浏览器访问；`docs/development.md` 的发布顺序与质量门禁与脚本一致，测试计数改为以 `npm test` 为准。
 
