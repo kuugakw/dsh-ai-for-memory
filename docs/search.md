@@ -25,7 +25,7 @@
 问计数、分组、最近 N 条、标签、置信度、最长文档、未确认模型自述、精确 id 时，插件会把 JSON 文档装进一个临时只读 SQLite 库，翻译成单条 `SELECT` / `WITH`。
 
 - 不允许写操作；`load_extension`、`readfile`、`writefile`、`fts3_tokenizer` 等扩展/文件函数一律拒绝（`node:sqlite` 默认不加载扩展，但白名单不依赖这个默认值）；
-- 只有一张表 `knowledge_docs`：`JOIN` 或同一张表出现两次（自连接）直接拒绝——`SELECT count(*) FROM knowledge_docs a, knowledge_docs b, …` 会在 SQLite 内部同步物化，一条 SQL 就能卡住宿主事件循环；原始 `SELECT` 一律被外层 `SELECT * FROM (…) LIMIT 50` 包住，不依赖迭代到 50 行就停；
+- 只允许 `knowledge_docs` 这一张表和 `json_each()` / `json_tree()` 两个 JSON 表函数：其他关系——`sqlite_master`、`sqlite_schema`、`sqlite_temp_master`、`pragma_table_info(...)` 等内部表/表函数、附加 schema——在解析阶段直接拒绝；`JOIN` 只接受上述 JSON 表函数，同一张表出现两次（自连接）也拒绝——`SELECT count(*) FROM knowledge_docs a, knowledge_docs b, …` 会在 SQLite 内部同步物化，一条 SQL 就能卡住宿主事件循环；原始 `SELECT` 一律被外层 `SELECT * FROM (…) LIMIT 50` 包住，不依赖迭代到 50 行就停；
 - 最多返回 50 行；单行超过 2 MiB 或结果累计超过 16 MiB 时拒绝返回，避免大 Blob/字符串按行数放大内存；SQLite 暴露 `db.limits` 时同时设置 2 MiB 的值长度硬限制，在构造阶段就拒绝超限值；`randomblob` / `zeroblob` 超过单值上限会在分配前报错，`printf`、`format`、`hex`、`quote`、`json_quote`、`replace`、`concat` / `concat_ws`、`group_concat` / `string_agg`、`json_group_*` 不允许用于原始 SQL（`substr` 只截取输入，保留）；
 - 不需要打开持久 SQLite 镜像；
 - 临时库按文档集合缓存，文档没变时复用；

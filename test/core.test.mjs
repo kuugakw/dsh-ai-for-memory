@@ -5834,10 +5834,22 @@ test('raw SQL is accepted only as one read-only statement', () => {
   // Any other JOIN target is still rejected (cartesian product / second table).
   assert.equal(isSafeSelect('SELECT * FROM knowledge_docs JOIN other_table'), false);
   assert.equal(isSafeSelect('SELECT * FROM knowledge_docs JOIN knowledge_docs'), false);
+  // Only the owned relation is visible: catalog tables and pragma table
+  // functions are outside the channel even though SQLite can answer them.
+  assert.equal(isSafeSelect('SELECT * FROM sqlite_master'), false);
+  assert.equal(isSafeSelect('SELECT * FROM sqlite_schema'), false);
+  assert.equal(isSafeSelect('SELECT * FROM sqlite_temp_master'), false);
+  assert.equal(isSafeSelect('SELECT * FROM "sqlite_master"'), false);
+  assert.equal(isSafeSelect('SELECT * FROM [sqlite_master]'), false);
+  assert.equal(isSafeSelect("SELECT * FROM pragma_table_info('knowledge_docs')"), false);
+  assert.equal(isSafeSelect('SELECT * FROM (SELECT * FROM sqlite_master)'), false);
+  assert.equal(isSafeSelect('WITH bad AS (SELECT * FROM sqlite_master) SELECT * FROM bad'), false);
   // Quoted columns and strings in a non-recursive CTE are still ordinary data.
   assert.equal(isSafeSelect('WITH "c" AS (SELECT 1) SELECT * FROM "c"'), true);
   assert.equal(isSafeSelect('WITH x AS (SELECT "text" AS t FROM knowledge_docs) SELECT * FROM x'), true);
-  assert.equal(isSafeSelect('WITH x AS (SELECT * FROM knowledge_docs, other) SELECT * FROM x'), true);
+  // A relation the route does not own is rejected even inside a CTE body; the
+  // old gate let it through and only the "no such table" error surfaced.
+  assert.equal(isSafeSelect('WITH x AS (SELECT * FROM knowledge_docs, other) SELECT * FROM x'), false);
   assert.equal(isSafeSelect("WITH x AS (SELECT 'FROM \"c\"' AS t) SELECT * FROM x"), true);
 });
 

@@ -2,6 +2,12 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 未发布
+
+### 安全修复
+
+- **SQL 只读通道补齐关系白名单**：`isSafeSelect()` 以前只检查 `knowledge_docs` 出现次数，没有限制其他 FROM 关系，`SELECT * FROM sqlite_master`、`SELECT * FROM pragma_table_info('knowledge_docs')`、`FROM sqlite_temp_master` 等都会被放行（0.5.12 及更早版本同样存在），泄露的是临时库的库结构名。现在 FROM/JOIN 的目标只能是 `knowledge_docs`、`json_each()` / `json_tree()` 或语句内定义的 CTE，其余关系在解析阶段直接拒绝；同时修正关系计数把函数参数（`json_each(tags)` 里的 `tags`）当成表名的问题。新增回归用例并同步 `docs/search.md`。
+
 ## 0.5.18（2026-11-27）
 
 ### 安全与架构
