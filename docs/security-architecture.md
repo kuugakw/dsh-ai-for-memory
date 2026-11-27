@@ -68,7 +68,7 @@
 
 ### P0（本版，未发布）
 
-- **不变量测试**：`test/security-invariants.test.mjs` 用假的 web server 捕获 `installApi()` 注册的**全部**路由，断言：无 Fetch Metadata 的请求一律 403、同源请求放行、MCP 无 token 401、MCP 关闭 404。以后新增路由自动被覆盖，不需要逐条补测试。
+- **不变量测试**：`test/security-invariants.test.mjs` 用假的 web server 捕获 `installApi()` 注册的**全部**路由，断言：无 Fetch Metadata 的面板请求一律 403、同源请求放行、MCP 关闭 404、MCP 无 token 401，以及 MCP 豁免浏览器元数据后仍受可信 Host/Origin 与 token 约束。以后新增路由自动被覆盖，不需要逐条补测试。
 - **把「单点」写进测试**：上述 403 断言是遍历捕获到的 `routes` 的；任何绕过 `register()` 直接 `server.register()` 的路由也会被抓进循环并因缺少统一门而失败。
 - 文档化信任等级与出口规则（本文）。
 

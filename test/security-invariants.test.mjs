@@ -77,12 +77,59 @@ test('every panel route goes through the single trusted-request gate', async () 
   const routes = captureRoutes(deps());
   assert.ok(routes.size > 10, 'expected the panel API to register its routes');
   // A request with no Fetch Metadata and no Origin is what a local script
-  // sends; the route wrapper must reject it before any handler runs.
+  // sends; the route wrapper must reject it before any handler runs. The MCP
+  // route is exempt by design (its clients are not browsers) and is covered by
+  // the token test below.
   for (const [routePath, handler] of routes) {
+    if (routePath === '/ai-for-memory/mcp') continue;
     const res = response();
     await handler(request({}), res);
     assert.equal(res.statusCode, 403, `${routePath} must reject an untrusted request`);
   }
+});
+
+test('MCP accepts non-browser clients but still enforces Host, Origin and token', async () => {
+  const d = deps();
+  d.config = { mcpEnabled: true };
+  d.mcpToken = 'secret-token';
+  const handler = captureRoutes(d).get('/ai-for-memory/mcp');
+  assert.ok(typeof handler === 'function', 'MCP route must be registered');
+
+  // curl / Claude Desktop style: no Origin, no Sec-Fetch-Site.
+  const denied = response();
+  await handler(request({}, 'POST'), denied);
+  assert.equal(denied.statusCode, 401, 'a browser-less request still needs the bearer token');
+
+  const accepted = response();
+  await handler(request({
+    authorization: 'Bearer secret-token',
+    'content-type': 'application/json',
+  }, 'POST'), accepted);
+  assert.notEqual(accepted.statusCode, 403);
+  assert.notEqual(accepted.statusCode, 401);
+
+  // Non-browser does not mean trusting a rebinding Host.
+  const rebinding = response();
+  await handler({
+    method: 'POST',
+    headers: {
+      host: 'evil.example:57578',
+      authorization: 'Bearer secret-token',
+      'content-type': 'application/json',
+    },
+    socket: { remoteAddress: '127.0.0.1', localPort: PORT },
+    async *[Symbol.asyncIterator]() { /* no body */ },
+  }, rebinding);
+  assert.equal(rebinding.statusCode, 403);
+
+  // A cross-origin browser request is still rejected.
+  const cross = response();
+  await handler(request({
+    origin: 'http://evil.example',
+    authorization: 'Bearer secret-token',
+    'content-type': 'application/json',
+  }, 'POST'), cross);
+  assert.equal(cross.statusCode, 403);
 });
 
 test('the gate accepts a same-origin browser request', async () => {
@@ -248,6 +295,52 @@ test('security self-check flags an ungranted MCP surface without touching disk',
   const ungranted = runSecurityCheck({ root: missing, config: { mcpEnabled: true }, registryDir: '' });
   assert.equal(ungranted.ok, false);
   assert.ok(ungranted.checks.some((check) => check.id === 'mcp-capability' && check.ok === false));
+});
+
+test('security self-check: Windows mode checks are not-applicable, custom MCP tokens need no file', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-seccheck-'));
+  try {
+    fs.mkdirSync(path.join(root, 'knowledge'));
+    const result = runSecurityCheck({ root, config: {}, registryDir: '' });
+    if (process.platform === 'win32') {
+      const rootCheck = result.checks.find((check) => check.id === 'root-mode');
+      assert.equal(rootCheck.ok, true, 'a synthetic Windows mode must not fail the check');
+      assert.match(rootCheck.detail, /Windows|NTFS/);
+    }
+    const configured = runSecurityCheck({
+      root,
+      config: { mcpEnabled: true, capabilityMcp: true, mcpToken: 'configured-token' },
+      registryDir: '',
+    });
+    assert.ok(configured.checks.some((check) => check.id === 'mcp-token' && check.ok === true),
+      'a configured token does not need the auto-generated token file');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('security self-check: a POSIX token file must be 0600', (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows has no POSIX mode bits');
+    return;
+  }
+  const registry = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-seccheck-reg-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-seccheck-root-'));
+  try {
+    const tokenFile = path.join(registry, 'mcp-token');
+    fs.writeFileSync(tokenFile, 'token\n', { mode: 0o600 });
+    fs.chmodSync(tokenFile, 0o600);
+    const ok = runSecurityCheck({ root, config: { mcpEnabled: true, capabilityMcp: true }, registryDir: registry });
+    const okCheck = ok.checks.find((check) => check.id === 'mcp-token-mode');
+    assert.equal(okCheck.ok, true);
+    fs.chmodSync(tokenFile, 0o644);
+    const loose = runSecurityCheck({ root, config: { mcpEnabled: true, capabilityMcp: true }, registryDir: registry });
+    const looseCheck = loose.checks.find((check) => check.id === 'mcp-token-mode');
+    assert.equal(looseCheck.ok, false);
+  } finally {
+    fs.rmSync(registry, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('store-level tagging: hits carry tags while the panel path stays plain', () => {

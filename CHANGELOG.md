@@ -7,6 +7,17 @@
 ### 安全修复
 
 - **SQL 只读通道补齐关系白名单**：`isSafeSelect()` 以前只检查 `knowledge_docs` 出现次数，没有限制其他 FROM 关系，`SELECT * FROM sqlite_master`、`SELECT * FROM pragma_table_info('knowledge_docs')`、`FROM sqlite_temp_master` 等都会被放行（0.5.12 及更早版本同样存在），泄露的是临时库的库结构名。现在 FROM/JOIN 的目标只能是 `knowledge_docs`、`json_each()` / `json_tree()` 或语句内定义的 CTE，其余关系在解析阶段直接拒绝；同时修正关系计数把函数参数（`json_each(tags)` 里的 `tags`）当成表名的问题。新增回归用例并同步 `docs/search.md`。
+- **脱敏补到所有写入字段与常见令牌形态**：知识文档的 `tags` / `url` / `evidence`、上下文存档的 `label` / `model_summary`、快照的 `state`、审计日志的 `detail` 以前没有或没有完整过脱敏，现在统一在落盘边界替换；令牌形态补上 Cookie / Set-Cookie 头、Azure `AccountKey=` / `SharedKey=`、空用户名 DSN（`redis://:pass@…`）、截断的 PEM 私钥、`passphrase` 整句，以及 `github_pat_` / `npm_` / `glpat-` / `AIza` / `sk_live_`。
+- **导出权限收紧**：`exports/` 及其子目录按 0700、导出文件按 0600 写入（覆盖已有文件时再 `chmod` 一次），不再沿用 umask 的 0755/0644；`exports/` 已存在时也会被纠正一次。Windows 上 chmod 只影响只读位，权限仍由父目录 ACL 决定。
+- **MCP 路由恢复为非浏览器客户端可用**：面板路由统一要求浏览器 Fetch Metadata，但 MCP 客户端（Claude Desktop、Cursor、curl）不发送 `Origin`/`Sec-Fetch-Site`，此前会被 403 掉，文档里的 curl 示例实际不可用。MCP 路由现在显式声明 `allowNonBrowser`，仍保留回环 Host 校验、跨源 Origin 拒绝和 bearer token 校验。
+- **安全体检按平台区分**：Windows 不再把不可能成立的 POSIX 0600/0700 检查报成失败（改为 not-applicable，真实边界是 NTFS ACL）；POSIX 上新增 `mcp-token-mode` 检查，已存在的 token 文件在启动时也会补一次 0600。使用自定义 `mcpToken` 时不再要求自动 token 文件存在。
+
+### 工程规范
+
+- **发布门禁**：`publish` 在 npm 发布前校验 tag 与 `package.json` 版本一致；`market` 改为在 `publish` 成功后用 `workflow_run` 触发，等待 npm packument 真正列出该版本，并在部署前断言索引最新版本就是当前版本，避免 tag 并行起跑导致的失败和“成功部署旧索引”。
+- **元数据检查补漏**：`npm run check` 现在同时校验 README 状态徽章、`docs/installation.md` 的安装版本，以及 `package-lock.json` 根版本与 `package.json` 一致；`package-lock.json` 已同步到 0.5.18。
+- **导出边界回归用例**：补上「最终文件是符号链接」与「嵌套子目录是符号链接」两个用例，覆盖 0.5.18 声称已修复但未直接测试的分支。
+- 文档更新：`docs/mcp.md` 的默认值改为关闭并说明非浏览器访问；`docs/development.md` 的发布顺序与质量门禁与脚本一致，测试计数改为以 `npm test` 为准。
 
 ## 0.5.18（2026-11-27）
 

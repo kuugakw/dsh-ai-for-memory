@@ -10,7 +10,7 @@ MCP 端点跑在当前 DSH Web 监听器上：
 http://127.0.0.1:<DSH 端口>/ai-for-memory/mcp
 ```
 
-面板「设置 → 使用与存储设置 → MCP 出口」会显示当前完整地址，并可用开关启用/停用。默认启用，只接受回环地址（`127.0.0.1` / `localhost` / `::1`）和可信 Host；这层校验与面板 API 相同，用来防止 DNS rebinding。MCP 不是浏览器会话，所以额外使用一个本机 bearer token，见下文「访问令牌」。
+面板「设置 → 使用与存储设置 → MCP 出口」会显示当前完整地址，并可用开关启用/停用。**默认关闭**（开启还需要 `capabilityMcp` 能力令牌）；开启后只接受回环地址（`127.0.0.1` / `localhost` / `::1`）和可信 Host，这层校验与面板 API 相同，用来防止 DNS rebinding。MCP 不是浏览器会话，所以不要求 `Sec-Fetch-Site`/`Origin`，改用本机 bearer token 作为访问门槛，见下文「访问令牌」。
 
 传输是 **Streamable HTTP + JSON-RPC 2.0**，无状态：向该地址 POST 一个 JSON-RPC 请求，读取 JSON 响应。不支持 stdio。
 

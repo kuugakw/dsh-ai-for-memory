@@ -725,7 +725,7 @@ http://127.0.0.1:<DSH 端口>/ai-for-memory/mcp
 | `decisionRetentionDays` | 0 | 决策记录保留天数；0=不自动删 |
 | `autoDecisionLog` | `true` | 每轮把工具调用和本地文件改动自动记入决策层（outcome=observed） |
 | `requestAnchor` | `true` | 检查点到且本步无新请求时注入上一轮请求锚点 |
-| `mcpEnabled` | `true` | 是否启用 MCP 出口 |
+| `mcpEnabled` | `false` | 是否启用 MCP 出口（默认关闭，开启仍需 `capabilityMcp`） |
 | `mcpToken` | 空 | 可选自定义 Bearer 令牌；空=自动生成本机令牌 |
 | `ragMount` | `false` | 是否把 RAG 索引挂到检索；本地双模型运行且无外部端点时可自动挂载 |
 | `externalBaseUrl` | 空 | 外部模型主地址；空=未配置 |
@@ -743,7 +743,7 @@ http://127.0.0.1:<DSH 端口>/ai-for-memory/mcp
 - API Key 只保存在本机，面板只显示“是否已保存”，不回显明文；
 - 知识、上下文、快照、决策都是本地 JSON；
 - 上下文存档包含完整对话，可能含密钥、内部接口或客户数据，默认不对外开放；
-- MCP 默认生成 Bearer token；任何能访问 loopback 端口的本机进程仍可能读写，不要把监听器暴露到公网；
+- MCP 启用后生成 Bearer token；任何能访问 loopback 端口的本机进程仍可能读写，不要把监听器暴露到公网；
 - 不应把完整上下文存档提交到 Git；网络同步可以选择只同步知识等层；
 - 本地模型权重由用户自行提供，本插件不下载、不再分发权重。
 

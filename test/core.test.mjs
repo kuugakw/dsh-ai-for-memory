@@ -3413,6 +3413,12 @@ test('audit log is append-only, bounded and newest first', () => {
     assert.equal(readAudit(root, -5).length, 0);
     assert.equal(readAudit(root, 1.9).length, 1);
     assert.equal(readAudit(root, 1000).length, 2);
+    // Audit details are user-visible rows: a credential pasted into an action
+    // detail must not be persisted verbatim.
+    appendAudit(root, { action: 'tool.run', root: '/memory', detail: 'token=abcdef1234567890' });
+    const last = readAudit(root, 1)[0];
+    assert.equal(last.detail.includes('abcdef1234567890'), false);
+    assert.match(last.detail, /\[REDACTED\]/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -8279,6 +8285,56 @@ test('export refuses an exports directory that is a symlink outside the root', (
   }
 });
 
+test('export refuses a nested directory that is a symlink outside the root', () => {
+  const root = tempRoot();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-export-outside-'));
+  try {
+    const store = new MemoryStore(root);
+    store.init();
+    const exportsDir = path.join(root, 'exports');
+    fs.rmSync(exportsDir, { recursive: true, force: true });
+    fs.mkdirSync(exportsDir, { recursive: true });
+    fs.symlinkSync(outside, path.join(exportsDir, 'nested'), 'junction');
+    const blocked = writeExportArtifacts(store, { dest: 'nested/kb.md', types: ['knowledge'] });
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.error, /符号链接/);
+    assert.deepEqual(fs.readdirSync(outside), [], '不能经嵌套目录链接写到记忆目录之外');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('export refuses to write through a symlinked target file', (t) => {
+  const root = tempRoot();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-export-outside-'));
+  try {
+    const store = new MemoryStore(root);
+    store.init();
+    const outsideFile = path.join(outside, 'canary.md');
+    fs.writeFileSync(outsideFile, 'canary');
+    fs.mkdirSync(path.join(root, 'exports'), { recursive: true });
+    try {
+      fs.symlinkSync(outsideFile, path.join(root, 'exports', 'kb.md'));
+    } catch (error) {
+      // Windows needs developer mode (or admin) to create file symlinks; the
+      // exact error code differs between runners, so skip on any Windows failure.
+      if (process.platform === 'win32') {
+        t.skip(`当前 Windows 会话不允许创建文件符号链接（${error?.code ?? error?.message}）`);
+        return;
+      }
+      throw error;
+    }
+    const blocked = writeExportArtifacts(store, { dest: 'kb.md', types: ['knowledge'] });
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.error, /符号链接/);
+    assert.equal(fs.readFileSync(outsideFile, 'utf8'), 'canary', '符号链接目标不能被覆盖');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('a foreign lock waits out staleMs and is taken over instead of timing out', async () => {
   const root = tempRoot();
   try {
@@ -8351,6 +8407,34 @@ test('redactSecrets covers quoted JSON keys and quoted values', () => {
     { 'x-secret-key': '[REDACTED]' },
   );
   assert.equal(redactSecrets('x-secret-key: hdr-secret-123456').includes('hdr-secret-123456'), false);
+  // Common token shapes are redacted even without a key name next to them.
+  // Build token-shaped strings at runtime: the literal form trips GitHub's
+  // push protection (a fake Stripe key is still a Stripe key to it).
+  const sampleToken = (prefix, length) => `${prefix}${'a'.repeat(length)}`;
+  for (const raw of [
+    sampleToken('ghp_', 36),
+    sampleToken('github_pat_', 40),
+    sampleToken('npm_', 36),
+    sampleToken('glpat-', 20),
+    sampleToken('AIza', 35),
+    sampleToken('sk_live_', 24),
+  ]) {
+    assert.equal(redactSecrets(`key ${raw} end`).includes(raw), false, `must redact ${raw.slice(0, 12)}…`);
+  }
+  // Cookie headers, storage keys, empty-user DSNs and truncated PEMs.
+  assert.equal(redactSecrets("curl -H 'Cookie: session=abcdef1234567890' url").includes('abcdef1234567890'), false);
+  assert.equal(redactSecrets('Set-Cookie: sid=abcdef1234567890; Path=/').includes('abcdef1234567890'), false);
+  assert.equal(
+    redactSecrets('DefaultEndpointsProtocol=https;AccountKey=abcdefghijklmnopqrstuvwxyz0123456789;EndpointSuffix=core.windows.net')
+      .includes('abcdefghijklmnopqrstuvwxyz0123456789'),
+    false,
+  );
+  assert.equal(redactSecrets('redis://:hunter2hunter2@cache.internal:6379').includes('hunter2hunter2'), false);
+  assert.equal(
+    redactSecrets('-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktZG9udGxlYWs=').includes('b3BlbnNzaC1rZXktZG9udGxlYWs='),
+    false,
+  );
+  assert.equal(redactSecrets('passphrase: correct horse battery staple').includes('correct horse'), false);
   // Unrelated JSON must survive untouched.
   assert.equal(redactSecrets('{"note": "hello world"}'), '{"note": "hello world"}');
   assert.equal(redactSecrets('{"api_key_policy": "abcdef123456"}').includes('abcdef123456'), true);
@@ -8372,16 +8456,50 @@ test('stored artifacts are private and secrets are redacted', () => {
     assert.equal(staged.includes('hunter2hunter2'), false);
     assert.match(staged, /\[REDACTED\]/);
 
-    store.saveContext({ label: 'x', turns: [{ text: 'token=abc1234567890' }], text: 'ok', turnFrom: 1, turnTo: 1 });
+    store.saveContext({
+      label: 'x token=abc1234567890',
+      turns: [{ text: 'token=abc1234567890' }],
+      text: 'ok',
+      turnFrom: 1,
+      turnTo: 1,
+      model_summary: '摘要 token=abc1234567890',
+    });
     const context = store.listContexts()[0];
     const raw = fs.readFileSync(path.join(store.contextDir, `${context.context_id}.json`), 'utf8');
     assert.equal(raw.includes('abc1234567890'), false);
+
+    // tags/url/evidence are caller-supplied and exported too, not just `text`.
+    const token = 'ghp_' + 'a'.repeat(36);
+    const tagged = store.remember({
+      text: '带令牌的链接',
+      category: 'project_facts',
+      source: 'user',
+      tags: [`tag-${token}`],
+      url: `https://example.test/cb?access_token=${token}`,
+      evidence: [{ kind: 'note', detail: token }],
+    });
+    const taggedRaw = fs.readFileSync(path.join(store.root, tagged.file), 'utf8');
+    assert.equal(taggedRaw.includes(token), false, 'tags/url/evidence must be redacted on disk');
+
+    // A snapshot's free-form state is an exact restore point, not a secret store.
+    store.snapshot({ name: 's', state: { env: `GITHUB_TOKEN=${token}` } });
+    const snapshotRaw = fs.readdirSync(store.snapshotDir)
+      .map((name) => fs.readFileSync(path.join(store.snapshotDir, name), 'utf8'))
+      .join('\n');
+    assert.equal(snapshotRaw.includes(token), false, 'snapshot state must be redacted on disk');
 
     if (process.platform !== 'win32') {
       const file = path.join(store.knowledgeDir, 'mode-check.json');
       writeJson(file, { ok: true });
       assert.equal(fs.statSync(file).mode & 0o077, 0, '新文件必须是 0600');
       assert.equal(fs.statSync(store.knowledgeDir).mode & 0o077, 0, '目录必须是 0700');
+
+      const exported = writeExportArtifacts(store, { dest: 'perm/file.json', types: ['knowledge'] });
+      assert.equal(exported.ok, true);
+      const exportedFile = exported.files[0].path;
+      assert.equal(fs.statSync(exportedFile).mode & 0o077, 0, '导出文件必须是 0600');
+      assert.equal(fs.statSync(path.dirname(exportedFile)).mode & 0o077, 0, '导出子目录必须是 0700');
+      assert.equal(fs.statSync(path.join(store.root, 'exports')).mode & 0o077, 0, 'exports/ 必须是 0700');
     }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
