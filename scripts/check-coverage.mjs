@@ -62,15 +62,16 @@ if (result.status !== 0) {
   process.exit(result.status ?? 1);
 }
 
-// `name | line % | branch % | funcs % | uncovered`. Names inside a directory
-// entry are printed indented without their directory prefix; basenames are
-// unique in lib/, so the floor table keys on the basename.
+// `name | line % | branch % | funcs % | uncovered`. Node 22 prints full
+// relative paths (`lib/api.js`); newer versions group by directory and print
+// bare basenames. Both shapes map to the same floor entry.
 const rows = new Map();
 let global = null;
 for (const line of output.split(/\r?\n/)) {
-  const row = /^\S*\s+([A-Za-z0-9_.-]+\.js)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/.exec(line);
+  const row = /^\S*\s+([A-Za-z0-9_./\\-]+\.js)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/.exec(line);
   if (row) {
-    rows.set(row[1], { lines: Number(row[2]), branches: Number(row[3]), functions: Number(row[4]) });
+    const name = row[1].split(/[\\/]/).pop();
+    rows.set(name, { lines: Number(row[2]), branches: Number(row[3]), functions: Number(row[4]) });
     continue;
   }
   const total = /all files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/.exec(line);
