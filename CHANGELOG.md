@@ -2,6 +2,16 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 0.5.21（2026-11-27）
+
+### 路线图
+
+- **P0/P1/P2 标记完成**：[安全架构](docs/security-architecture.md) 的路线图按实际发布更新——P0 与 P1（出口收口、路径收口、动作分类、信任标签、运行期兜底、标签下沉、单点门禁）随 0.5.19/0.5.20 发布；P2（能力令牌、启动自检）已完成，自检补齐 token 文件 0600、自定义 token、Windows 平台说明。P1 的 `documents()` 列表回显评估后不做：面板需要纯数组，工具出口已由 `tagText`/`renderMemoryText` 覆盖。
+- **P3 排期**：覆盖率继续抬升（api.js 行覆盖目标 40%+）、`strict` 逐步收紧、MCP token 一键轮换、market 索引由 workflow 自动提交、SQLite 库文件/面板 reveal 的路径统一评估。
+- **评估记录**：SQLite authorizer 拒读 `sqlite_*` 不可行——SQLite 内部查询也会读 `sqlite_master.ROWID`，安装后正常 `SELECT count(*)` 都会被拒；解析层的关系白名单仍是唯一闸门。
+
+本版无功能与行为变化。
+
 ## 0.5.20（2026-11-27）
 
 ### 安全修复

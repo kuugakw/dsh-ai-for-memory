@@ -66,13 +66,13 @@
 
 ## 5. 路线图
 
-### P0（本版，未发布）
+### P0（已完成，0.5.19）
 
 - **不变量测试**：`test/security-invariants.test.mjs` 用假的 web server 捕获 `installApi()` 注册的**全部**路由，断言：无 Fetch Metadata 的面板请求一律 403、同源请求放行、MCP 关闭 404、MCP 无 token 401，以及 MCP 豁免浏览器元数据后仍受可信 Host/Origin 与 token 约束。以后新增路由自动被覆盖，不需要逐条补测试。
 - **把「单点」写进测试**：上述 403 断言是遍历捕获到的 `routes` 的；任何绕过 `register()` 直接 `server.register()` 的路由也会被抓进循环并因缺少统一门而失败。
 - 文档化信任等级与出口规则（本文）。
 
-### P1（本版部分完成）
+### P1（已完成，0.5.19 / 0.5.20）
 
 - **出口收口（第一步）**：边界实现移到 `lib/egress.js` 单一定义（`wrapMemoryData`、`containsMemoryBoundary`、伪造结束标记替换），`index.js` 只做 re-export；新增不变量测试遍历所有会回显记忆正文的 action（`remember`/`learn`/`incident`/`promote`/`search`），断言输出带边界、且伪造结束标记只出现一处（被中和）。`stage` 的回显是调用方输入、不是库里的旧数据，按 0.5.12 的设计不走边界，改为在正文里标注来源。
 - **路径收口**：`lib/safe-path.js` 的 `resolveRelativeWithin` + `realPathInside` 成为唯一解析器，导出目标与 `aim_repair` 的会话日志符号链接复核都已改用它。
@@ -81,13 +81,23 @@
 - **信任标签**：`formatHits`、`formatSnapshotList`、`formatRestoreContext` 不再返回裸字符串，而是返回 `tagMemory(...)` 标记；组装点必须用 `taggedText(...)` 取正文，出口再 `renderMemoryText` 包一次。标记对象在字符串化时**直接抛错**（不是 `[object Object]`），所以任何忘记取正文的插值都会在出错的那一行报「必须用 taggedText() 取值」；另有静态守卫扫描三处 formatter 的调用行。面板 `/search` 等走同一工具，返回的本来就是带边界的文本，不受影响。
 - **运行期兜底（读取台账）**：每次工具调用跑在 `AsyncLocalStorage` 台账里（`lib/egress.js` 的 `runWithMemoryLedger`），`MemoryStore` 的 `search()` / `documents()` 读到正文时记一笔；工具出口由 `withMemoryLedger` 包装，发现「本次读过库 + 结果是 ≥120 字符的长文本 + 没有边界」就整段补包并注明是自动兜底。短状态行（如 restore 的「将在下一步生效」）与显式豁免动作（`aim_context:restore`）不受影响；面板不在台账里读库，JSON 保持纯净。
 - **标签下沉到 store 读取层**：`MemoryStore.search()` 支持 `tagText: true`——命中项的 `title`/`text` 在 store 边界就变成 `tagMemory` 标记（`knowledge/search/text`），工具的两个检索通道都带这个开关，`formatHits`/`foldDuplicateHits`/`summarizeHits` 用 `taggedText` 取正文。这样即使新代码绕过 formatter 直接拿 store 命中做拼装，只要忘了取正文就会在那一行抛错；面板调用 `search()` 不带开关，依旧是纯 JSON。
-- **仍未做**：`documents()` 的列表回显走的是同一条路（面板要纯数组），需要时可加同样的 `tagText` 开关。
+- **`documents()` 列表回显：评估后不做**——面板需要纯数组；工具侧的列表出口都走 search/formatter，已由 `tagText` 与 `renderMemoryText` 覆盖，单独给 `documents()` 加标记只会多一个无人调用的开关。
 - **控制面**：10 处路由内重复的 `isTrustedRequest` 已注释关闭（保留原文作为语义标记），并新增静态扫描测试：`lib/api.js` 里未注释的 gate 调用只允许 2 处（`register()` 包装器 + POST 读体器），有人再复制一份就会失败。
 
-### P2
+### P2（已完成，0.5.19 / 0.5.20）
 
 - **能力令牌（已实现）**：`capabilityExport` / `capabilityForget` / `capabilityRepair` / `capabilityMcp` 四个布尔能力默认全部关闭。删除知识、导出记忆、`aim_repair` 写回、开启 MCP 都要先显式授权；未授权时工具返回带能力名的说明，拒绝事件写审计（`capability.denied`，带能力 id），放行事件写 `capability.granted`。面板「设置 → 破坏性能力」可开关，配置里直接改同样生效；`mcpEnabled=true` 但缺 `capabilityMcp` 时 MCP 保持关闭并写明原因。
-- **启动自检（已实现）**：新增 `lib/security-check.js`，只读检查记忆根/知识/快照/导出目录的 0700、知识文件抽样 0600、`audit.jsonl` 0600、迁移备份的存在与数量、schema 版本、MCP 能力与 token 文件是否匹配。插件启动时若配置了固定 `root` 就检查一次并写日志；面板「诊断」页新增「安全体检」区显示每条结果（不通过标明原因），也可直接 `GET /ai-for-memory/api/security/check`。自检永不阻塞操作。
+- **启动自检（已实现）**：新增 `lib/security-check.js`，只读检查记忆根/知识/快照/导出目录的 0700、知识文件抽样 0600、`audit.jsonl` 0600、迁移备份的存在与数量、schema 版本、MCP 能力与 token 文件是否匹配。插件启动时若配置了固定 `root` 就检查一次并写日志；面板「诊断」页新增「安全体检」区显示每条结果（不通过标明原因），也可直接 `GET /ai-for-memory/api/security/check`。自检永不阻塞操作。0.5.19 补齐 token 文件的 0600 检查、自定义 `mcpToken` 不要求自动 token 文件、Windows 上不再把不存在的 POSIX mode 报成失败。
+
+### P3（下一批，已排期）
+
+- **P3-1 覆盖率继续抬升**：按文件地板已覆盖 10 个核心模块（`api.js` 下限 27%）；补面板路由级用例，把 `lib/api.js` 行覆盖抬到 40%+ 后再升地板。
+- **P3-2 类型收紧**：`@types/node` 已对齐 Node 22.15；下一步评估把 `tsconfig` 的 `strict` 从 `false` 逐步打开，先处理 `lib/api.js` 与 `lib/tools.js`。
+- **P3-3 MCP token 轮换**：面板一键轮换（或 `aim_memory` 管理动作），旧 token 立即失效；当前只能改配置或删 `mcp-token` 后重启。
+- **P3-4 market 索引自动提交**：`market` 工作流成功后由 bot 提交 `market/index.json`（当前构建成功但索引仍要本地手动提交）；需要评估 workflow 的 `contents: write` 与推送权限。
+- **P3-5 路径统一剩余面**：SQLite 库文件与面板「打开文件夹」的路径已由 `store.root` / 登记根约束；评估是否也强制走 `lib/safe-path.js` 并补符号链接用例。
+- **P3-6 评估记录：SQLite authorizer 拒读 `sqlite_*` 不可行**——SQLite 内部查询也会读 `sqlite_master.ROWID`，安装后正常 `SELECT count(*)` 都会被拒；保留解析层（关系白名单）作为唯一闸门，不引入第二套半可用的检查。
+
 
 ## 6. 明确不做（以及为什么）
 
