@@ -37,6 +37,7 @@ import {
   buildKnowledgeExport, exportArtifact, knowledgeExportPayload, normalizeExportFormat, normalizeExportTypeList,
   writeExportArtifacts, writeKnowledgeExport,
 } from '../lib/export.js';
+import { realPathInside } from '../lib/safe-path.js';
 import { knowledgeDatabasePath, sqliteAvailable } from '../lib/knowledge-sqlite.js';
 import {
   categoryOf, formatSqlResult, isSafeSelect, routeKnowledgeQuery, runSqlQuery, translateToSql,
@@ -87,6 +88,22 @@ process.env.DSH_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-test-home-'));
 
 function tempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agm-test-'));
+}
+
+/** Directory link that needs no admin rights: junction on Windows, symlink elsewhere. */
+function makeDirLink(target, link) {
+  fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
+}
+
+/** Hard link; returns false when the filesystem does not support them. */
+function tryHardLink(target, link) {
+  try {
+    fs.linkSync(target, link);
+    return true;
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV'].includes(error?.code)) return false;
+    throw error;
+  }
 }
 
 /**
@@ -8453,6 +8470,93 @@ test('export refuses to write through a symlinked target file', (t) => {
     assert.equal(fs.readFileSync(outsideFile, 'utf8'), 'canary', '符号链接目标不能被覆盖');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('export refuses a hard-linked target file on every platform', (t) => {
+  const root = tempRoot();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-export-outside-'));
+  try {
+    const store = new MemoryStore(root);
+    store.init();
+    const outsideFile = path.join(outside, 'canary.md');
+    fs.writeFileSync(outsideFile, 'canary');
+    fs.mkdirSync(path.join(root, 'exports'), { recursive: true });
+    if (!tryHardLink(outsideFile, path.join(root, 'exports', 'kb.md'))) {
+      t.skip('this filesystem does not support hard links');
+      return;
+    }
+    const blocked = writeExportArtifacts(store, { dest: 'kb.md', types: ['knowledge'] });
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.error, /硬链接/);
+    assert.equal(fs.readFileSync(outsideFile, 'utf8'), 'canary', '硬链接目标不能被覆盖');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('export refuses a file-shaped directory link target', () => {
+  const root = tempRoot();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-export-outside-'));
+  try {
+    const store = new MemoryStore(root);
+    store.init();
+    fs.mkdirSync(path.join(root, 'exports'), { recursive: true });
+    makeDirLink(outside, path.join(root, 'exports', 'kb.md'));
+    const blocked = writeExportArtifacts(store, { dest: 'kb.md', types: ['knowledge'] });
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.error, /符号链接|目录/);
+    assert.deepEqual(fs.readdirSync(outside), []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('realPathInside resolves a Windows junction as outside the base', () => {
+  const base = tempRoot();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-realpath-outside-'));
+  try {
+    makeDirLink(outside, path.join(base, 'linked'));
+    assert.equal(realPathInside(base, path.join(base, 'linked')), false);
+    assert.equal(realPathInside(base, base), true);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('session repair refuses a log behind a directory link', () => {
+  const sessions = tempRoot();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-repair-outside-'));
+  try {
+    fs.writeFileSync(path.join(outside, 'session.v2.jsonl.zstd'), 'canary');
+    makeDirLink(outside, path.join(sessions, 'linked-session'));
+    const target = path.join(sessions, 'linked-session', 'session.v2.jsonl.zstd');
+    assert.throws(() => resolveSessionLogTarget(sessions, target), /只能修复/);
+  } finally {
+    fs.rmSync(sessions, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('session repair refuses a hard-linked log', (t) => {
+  const sessions = tempRoot();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-repair-outside-'));
+  try {
+    const outsideFile = path.join(outside, 'session.v2.jsonl.zstd');
+    fs.writeFileSync(outsideFile, 'canary');
+    fs.mkdirSync(path.join(sessions, 'session-x'), { recursive: true });
+    const target = path.join(sessions, 'session-x', 'session.v2.jsonl.zstd');
+    if (!tryHardLink(outsideFile, target)) {
+      t.skip('this filesystem does not support hard links');
+      return;
+    }
+    assert.throws(() => resolveSessionLogTarget(sessions, target), /硬链接/);
+  } finally {
+    fs.rmSync(sessions, { recursive: true, force: true });
     fs.rmSync(outside, { recursive: true, force: true });
   }
 });

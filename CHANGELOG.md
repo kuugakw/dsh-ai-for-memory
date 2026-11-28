@@ -4,6 +4,10 @@
 
 ## 未发布
 
+### Windows 路径防线
+
+- **导出与 repair 在 Windows 上用 junction/硬链接验证**：junction 不需要管理员权限，硬链接也不需要，而 `realpath` 只能看见前者；原来文件符号链接用例在 Windows 直接 `t.skip()`，导出目标与 repair 目标在这台每日运行的平台上没有等价覆盖。现在导出会拒绝符号链接、目录链接和 `nlink > 1` 的硬链接目标，`resolveSessionLogTarget` 与 `repairSessionLog` 也会拒绝符号链接/硬链接日志；新增 5 个用例，用 junction（Windows 无管理员）和硬链接（跨平台）直接跑，不再靠 skip。
+
 ### 引擎 argv 白名单
 
 - **`extraArgs` 从黑名单改为白名单**：原来只拦 `--host`/`--port`/`-m`/`--path`/`--api-key` 等少数名字，llama.cpp 新增参数、短别名（`-ngl`、`-c`、`-fa`）或 `--foo=value` 形式都可能绕过，属于打地鼠。现在每个 token 必须匹配白名单里的调参参数，值按 int/float/enum/格式校验；未知参数、位置参数、缺值和控制字符直接拒绝。加载 `model.json`、面板保存和 `buildServerArgs` 共用 `validateExtraArgs()`，不再有三处判断。
