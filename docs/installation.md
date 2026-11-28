@@ -29,7 +29,7 @@ git check-ignore -v .ai-for-memory/
 推荐从 npm 安装：
 
 ```bash
-dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.25
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.26
 ```
 
 `<profile>` 换成你的 DSH profile（例如 `desktop`）。安装后重启 DSH；工具、侧栏入口和面板由 bundle 自动加载。

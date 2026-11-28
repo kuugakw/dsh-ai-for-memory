@@ -1,13 +1,13 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.5.25-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.5.25-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
+[![Status](https://img.shields.io/badge/status-stable%200.5.26-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.5.26-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.5.25 是检索与配置结构版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版新增 [记忆召回基准](docs/recall-benchmark.md)：41 条记忆、20 条查询，按 exact / paraphrase / trap / provenance 报告 Recall@1/3/5、MRR、nDCG@10，并对比 BM25、vector 与 hybrid（hybrid R@5 95%、未确认说法进 top-3 为 0%）；同时把配置保存入口的两套逐字段校验收敛为 `validateConfig()` 一处判断，删除约 400 行重复校验。
+> **0.5.26 是边界与可验证性版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版补齐 Windows junction/硬链接路径防线与引擎 argv 白名单，`GET /api/state` 不再写注册表，发布流程对实际 tarball 做 GitHub artifact attestation 并自动校验 npm provenance；面板 API 行覆盖提到 67.36%，`lib/api.js` 的隐式 any 清零；同时补了 10k/30k 规模曲线（30k 的 hybrid/SQL 出现非线性悬崖，尚未达标）并把剩余风险单独记录。
 >
-> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.25）。插件索引这类新渠道从当前版本（0.5.25）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
+> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.26）。插件索引这类新渠道从当前版本（0.5.26）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
 >
 > 升级前建议备份记忆目录；数据版本变化会走 `schema.json` 的迁移流程，迁移前自动把要改写的文件备份到 `backups/schema-v<旧版本>-<时间>/`，更详细的规则见 [配置与数据目录](docs/configuration.md#格式版本与迁移)。
 
@@ -127,7 +127,7 @@ verified: false
 ## 快速开始
 
 ```bash
-dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.25
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.26
 ```
 
 也可以在 DSH **设置 → 插件 → 添加插件** 中填 `dsh-ai-for-memory`。本地开发用目录安装：
@@ -210,10 +210,11 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 ## 更新内容
 
-当前版本 **0.5.25**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.5.26**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
+- **0.5.26**：边界与可验证性版——Windows junction/硬链接路径防线、引擎 argv 白名单、`GET /api/state` 只读、发布 tarball 的 GitHub artifact attestation + npm provenance 自动校验、面板 API 覆盖 67.36%、`api.js` 隐式 any 清零、10k/30k 规模曲线与 [剩余风险](docs/residual-risks.md)；
 - **0.5.25**：检索与配置结构版——新增 [记忆召回基准](docs/recall-benchmark.md)（41 条记忆 / 20 条查询，exact、paraphrase、trap、provenance 四类，对比 BM25/vector/hybrid；hybrid R@5 95%、MRR 0.771，未确认说法 top-3 0%）；配置保存入口收敛为 `validateConfig()` 一处判断，非法值统一 400 且不落盘，删除约 400 行重复校验；
 - **0.5.24**：安全与可解释版——引擎 `extraArgs` 拒绝覆盖 loopback/端口/权重/静态目录/API key；新增 8 类对抗评测与 [对抗评测文档](docs/adversarial.md)；知识卡片与总览页显示来源判定、证据、变更审计、使用情况；新增 [3000 篇规模压测](docs/benchmarks.md) 与 `scripts/bench-scale.mjs`；`npm run check` 校验 `cordis.patch.yml` 的键与 `DEFAULTS` 一致；
 - **0.5.23**：面板默认根修复——测试泄漏的 `agm-test-*` 根不再抢占默认位，`/api/state` 自动清理，测试隔离 `DSH_HOME`；catch 变量迁移并启用 `useUnknownInCatchVariables`（84 个类型错误清零）；
