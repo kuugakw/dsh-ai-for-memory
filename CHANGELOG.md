@@ -4,6 +4,10 @@
 
 ## 未发布
 
+### 配置入口收敛
+
+- **面板保存配置不再自带一套校验**：`POST /api/config` 原来逐字段重复 `Config` 的类型/范围判断，新增配置项要改 DEFAULTS、Config 和 api.js 三处，两套判断还可能给出不同结果。现在路由只负责合并表单与保留 write-only 密钥（空值保留、`-` 清空），然后调用 `validateConfig()`；错误统一为 400 + 第一条 issue。`Config`/`DEFAULTS`/`NUMERIC_BOUNDS` 是唯一判断来源，补了「非法值不落盘」的回归用例。
+
 ### 记忆召回基准
 
 - 新增 `scripts/bench-recall.mjs` 与 `scripts/recall-dataset.mjs`：41 条记忆、20 条查询（exact / paraphrase / trap / provenance），输出 Recall@1/3/5、MRR、nDCG@10 与未确认说法进 top-3 的比例，对比 bm25 / vector / hybrid；结果与解读见 [docs/recall-benchmark.md](docs/recall-benchmark.md)。基线：hybrid R@5 95%、MRR 0.771；paraphrase R@1 50%（哈希向量非语义）；trap R@1 0%（文本本身无法判断真伪）；未确认说法 top-3 0%。

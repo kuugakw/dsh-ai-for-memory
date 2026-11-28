@@ -337,6 +337,74 @@ test('panel read and config routes produce real payloads', async () => {
   }
 });
 
+test('panel config save rejects invalid values through the shared validator', async () => {
+  const d = {
+    config: normalizeConfig({}),
+    registryDir: '',
+    runtime: {},
+    entry: {},
+    editor: {
+      async edit() {
+        throw new Error('invalid config must not be saved');
+      },
+    },
+  };
+  const routes = captureRoutes(d);
+  const body = JSON.stringify({ autoEveryRounds: 0, mcpEnabled: 'yes' });
+  const res = response();
+  await routes.get('/ai-for-memory/api/config')({
+    method: 'POST',
+    headers: { host: HOST, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' },
+    socket: { remoteAddress: '127.0.0.1', localPort: PORT },
+    async *[Symbol.asyncIterator]() { yield Buffer.from(body); },
+  }, res);
+  assert.equal(res.statusCode, 400);
+  assert.match(JSON.parse(res.body).error, /autoEveryRounds/);
+});
+
+test('panel config save covers root, directory, URL, RAG and editor branches', async () => {
+  const save = async (d, body) => {
+    const routes = captureRoutes(d);
+    const res = response();
+    await routes.get('/ai-for-memory/api/config')({
+      method: 'POST',
+      headers: { host: HOST, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' },
+      socket: { remoteAddress: '127.0.0.1', localPort: PORT },
+      async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(body)); },
+    }, res);
+    return res;
+  };
+  const base = () => ({
+    config: normalizeConfig({}),
+    registryDir: '',
+    runtime: {},
+    entry: {},
+    editor: { async edit(_entry, mutate) { return mutate({}); } },
+  });
+
+  assert.equal((await save(base(), { root: 'relative/path' })).statusCode, 400);
+  assert.equal((await save(base(), { directoryName: 'a/b' })).statusCode, 400);
+  assert.equal((await save(base(), { externalEmbedBaseUrl: 'not-a-url' })).statusCode, 400);
+  assert.equal((await save(base(), { ragMount: true })).statusCode, 400);
+  const noEditor = base();
+  delete noEditor.editor;
+  assert.equal((await save(noEditor, {})).statusCode, 503);
+  const throwing = base();
+  throwing.editor = { async edit() { throw new Error('disk full'); } };
+  assert.equal((await save(throwing, {})).statusCode, 500);
+
+  const ok = await save(base(), {
+    autoEveryRounds: 3,
+    mcpToken: '-',
+    externalApiKey: '-',
+    externalEmbedApiKey: '-',
+    externalRerankApiKey: '-',
+  });
+  assert.equal(ok.statusCode, 200);
+  assert.equal(JSON.parse(ok.body).saved.autoEveryRounds, 3);
+  assert.equal(JSON.parse(ok.body).saved.mcpToken, '');
+});
+
 test('panel read routes answer for a fixed root and reject unregistered roots', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-route-root-'));
   const d = deps();
