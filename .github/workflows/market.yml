@@ -145,5 +145,10 @@ jobs:
         with:
           path: market
 
+      # deploy-pages immediately after upload occasionally reports "No artifacts
+      # named github-pages" while the artifact is still propagating.
+      - name: Wait for the Pages artifact to be visible
+        run: sleep 5
+
       - id: deployment
         uses: actions/deploy-pages@v4
