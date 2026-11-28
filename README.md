@@ -1,13 +1,13 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.5.23-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.5.23-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
+[![Status](https://img.shields.io/badge/status-stable%200.5.24-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.5.24-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.5.23 是面板修复版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版修复面板默认根被测试临时目录抢占导致所有计数显示 0 的问题（默认根优先现有非临时目录、面板自动清理泄漏的 `agm-test-*` 条目、测试强制隔离 `DSH_HOME`）；同时把 catch 变量迁移到 `errorMessage()` / `errorCode()` 并启用 `useUnknownInCatchVariables`，清掉 84 个类型错误。
+> **0.5.24 是安全与可解释版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版把本地引擎 `extraArgs` 锁回 loopback（拒绝 `--host`/`--port`/`-m`/`--path`/`--api-key` 等能覆盖绑定与权重的参数），新增 8 类对抗评测（伪造边界标记、来源冒充、冲突闸门、密钥落盘/导出、跨对话泄露、SQL/路径逃逸、来源降级），并让面板直接显示「记住了什么、为什么记住」：来源判定、来源对话、证据条目、变更审计与使用情况。另附 3000 篇规模压测基线。
 >
-> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.23）。插件索引这类新渠道从当前版本（0.5.23）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
+> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.24）。插件索引这类新渠道从当前版本（0.5.24）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
 >
 > 升级前建议备份记忆目录；数据版本变化会走 `schema.json` 的迁移流程，迁移前自动把要改写的文件备份到 `backups/schema-v<旧版本>-<时间>/`，更详细的规则见 [配置与数据目录](docs/configuration.md#格式版本与迁移)。
 
@@ -127,7 +127,7 @@ verified: false
 ## 快速开始
 
 ```bash
-dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.23
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.24
 ```
 
 也可以在 DSH **设置 → 插件 → 添加插件** 中填 `dsh-ai-for-memory`。本地开发用目录安装：
@@ -210,10 +210,11 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 ## 更新内容
 
-当前版本 **0.5.23**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.5.24**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
+- **0.5.24**：安全与可解释版——引擎 `extraArgs` 拒绝覆盖 loopback/端口/权重/静态目录/API key；新增 8 类对抗评测与 [对抗评测文档](docs/adversarial.md)；知识卡片与总览页显示来源判定、证据、变更审计、使用情况；新增 [3000 篇规模压测](docs/benchmarks.md) 与 `scripts/bench-scale.mjs`；`npm run check` 校验 `cordis.patch.yml` 的键与 `DEFAULTS` 一致；
 - **0.5.23**：面板默认根修复——测试泄漏的 `agm-test-*` 根不再抢占默认位，`/api/state` 自动清理，测试隔离 `DSH_HOME`；catch 变量迁移并启用 `useUnknownInCatchVariables`（84 个类型错误清零）；
 - **0.5.22**：P3 落地——`lib/api.js` 行覆盖 31%→51%，按文件地板 48/40/45；MCP 令牌面板一键轮换（旧令牌立即失效）；market 索引由 workflow 自动提交；面板 state/diagnostics/session-logs/config 路由测试；`tsconfig` 启用五个零错误严格子项；
 - **0.5.21**：路线图收口（无功能变化）——P0/P1/P2 标记为已完成并注明对应发布版本；新增 P3 排期（api.js 覆盖率、strict 收紧、MCP token 轮换、market 索引自动提交、剩余路径统一），记录 SQLite authorizer 评估结论；
