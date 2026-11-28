@@ -69,7 +69,7 @@ npm run coverage # 覆盖率门禁：全局行 ≥80%、函数 ≥80%、分支 �
 
 全套测试数以 `npm test` 输出为准（当前 292 项）；依赖 `node:sqlite`、zstd 或平台符号链接/权限能力的用例按运行时能力 `skip()`，CI 同时跑 Node 22 与 24。
 
-`noImplicitAny` 还没全局打开：`npm run typecheck:strict` 用 `tsc --noImplicitAny` 统计隐式 any 错误，预算 1296，只允许下降。当前大头是 `tools.js`（120）、`local-engine.js`（116）、`store.js`（93）、`session-repair.js`（78）、`api.js`（75）；改到哪个模块就把该模块的隐式 any 消掉，并同步下调 `scripts/check-implicit-any.mjs` 的 `BUDGET`，不要为了过门禁上调。新用例若依赖运行时能力，用 `t.skip()` 标注原因，保持这条边界可核对。对抗场景单独列在 [对抗评测](adversarial.md)（`test/adversarial.test.mjs`）。
+`noImplicitAny` 还没全局打开：`npm run typecheck:strict` 用 `tsc --noImplicitAny` 统计隐式 any 错误，预算 1221，只允许下降。`lib/api.js` 的隐式 any 已清零（路由入口统一 `IncomingMessage`/`ServerResponse`，其余顶层 helper 补了 JSDoc）；剩余大头是 `tools.js`（120）、`local-engine.js`（116）、`store.js`（93）、`session-repair.js`（78）。改到哪个模块就把该模块的隐式 any 消掉，并同步下调 `scripts/check-implicit-any.mjs` 的 `BUDGET`，不要为了过门禁上调。新用例若依赖运行时能力，用 `t.skip()` 标注原因，保持这条边界可核对。对抗场景单独列在 [对抗评测](adversarial.md)（`test/adversarial.test.mjs`）。
 
 **质量门禁**：CI 的 `tests` 工作流在 ubuntu/windows/macos × Node 22/24 上执行 `npm ci && npm test && npm run check`；`publish` 工作流在 tag 上先校验 `v<version>` 与 `package.json` 一致，再跑 `npm ci && npm run check && npm test`，然后 `npm publish --provenance`。README 的两个徽章、安装命令、当前版本行、`docs/features.md` 的对应版本、`docs/installation.md` 的安装版本、`package-lock.json` 根版本与 `CHANGELOG.md` 的小节都必须与 `package.json` 一致，否则 `npm run check` 直接失败。Lint 规则只覆盖 correctness，不引入格式审查，避免大范围重排掩盖真实改动。
 

@@ -8,7 +8,7 @@
 
 - 新增 `test/api-routes.test.mjs`：直接调用面板 action/知识/保留/快照/对话/校验路由，走真实 store 与 fake `runMcpTool`，覆盖此前只有路由注册、没有测试经过的处理分支。
 - `lib/api.js` 行覆盖 51% → **67.36%**，分支 40% → 51.18%，函数 45% → 75%；覆盖率地板从 48/40/45 提到 **65/50/72**，只升不降。
-- 给 `register` 补 handler 的 `IncomingMessage`/`ServerResponse` 类型，`noImplicitAny` 下 `api.js` 错误 135 → 75，全仓 1368 → 1296；新增 `npm run typecheck:strict` 预算门禁（1296，只降不升），**不等于已开启 `noImplicitAny`**，仍是待还的债。
+- 给 `register` 补 handler 的 `IncomingMessage`/`ServerResponse` 类型，并给 `api.js` 的顶层 helper 补 JSDoc；`noImplicitAny` 下 `api.js` 错误 135 → **0**，全仓 1368 → **1221**；新增 `npm run typecheck:strict` 预算门禁（1221，只降不升），**不等于已开启全局 `noImplicitAny`**，剩余大头是 `tools.js`/`local-engine.js`/`store.js`。
 
 ### 发布来源链
 

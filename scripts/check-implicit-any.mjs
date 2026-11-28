@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const BUDGET = 1296;
+const BUDGET = 1221;
 
 const tsc = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
 const result = spawnSync(process.execPath, [tsc, '-p', 'tsconfig.json', '--noImplicitAny'], {
