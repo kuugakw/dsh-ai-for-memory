@@ -88,6 +88,7 @@ try {
   const coldSearch = measure('search bm25 (cold)', () => store.search(query, { mode: 'bm25', topK: 5 }));
   const warmSearch = measure('search bm25 (warm)', () => store.search(query, { mode: 'bm25', topK: 5 }));
   const hybridWarm = measure('search hybrid (warm)', () => store.search(query, { mode: 'hybrid', topK: 5 }));
+  const hybridSecond = measure('search hybrid (2nd)', () => store.search(query, { mode: 'hybrid', topK: 5 }));
 
   const sql = measure('sql count by category', () => runSqlQuery(store, '按分类统计知识数量'));
   const sqlRaw = measure('sql raw select 50', () => runSqlQuery(store, 'SELECT doc_id, category FROM knowledge_docs LIMIT 50'));
@@ -128,7 +129,7 @@ try {
     ? 0
     : contexts.reduce((sum, value) => sum + value, 0) / contexts.length;
 
-  rows.push(init, coldDocs, warmDocs, coldSearch, warmSearch, hybridWarm, sql, sqlRaw, exportJson, exportMarkdown, listed, sessions);
+  rows.push(init, coldDocs, warmDocs, coldSearch, warmSearch, hybridWarm, hybridSecond, sql, sqlRaw, exportJson, exportMarkdown, listed, sessions);
   rows.push({ label: 'saveContext (avg)', ms: Number(contextAverage.toFixed(1)), value: contexts.length });
 
   const result = {
