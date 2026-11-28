@@ -13,6 +13,10 @@ import {
 } from '../lib/egress.js';
 import { realPathInside, resolveRelativeWithin } from '../lib/safe-path.js';
 
+// Tool calls in this suite use agm-test-* workspaces; keep their roots out of
+// the developer's real DSH registry (see core.test.mjs).
+process.env.DSH_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-test-home-'));
+
 const HOST = '127.0.0.1:57578';
 const PORT = 57578;
 

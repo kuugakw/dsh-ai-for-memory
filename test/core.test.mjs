@@ -70,7 +70,7 @@ import {
   KNOWLEDGE_CATEGORIES, knowledgeKey, normalizeCategory, normalizeKnowledge, normalizeProvenance,
   normalizeSource, stripInjectedText, withTokens,
 } from '../lib/knowledge.js';
-import { defaultRegistryDir, listRootRows, readRoots, rememberRoot, resolveRegisteredRoot } from '../lib/registry.js';
+import { defaultRegistryDir, listRootRows, pruneTestRoots, readRoots, rememberRoot, resolveRegisteredRoot } from '../lib/registry.js';
 import { appendAudit, readAudit } from '../lib/audit.js';
 import {
   decodeSeqRanges, decodeZstdLog, DEFAULT_MAX_DECODED_BYTES, encodeSeqRanges, encodeZstdLog, findSessionLogs, formatRepairReport,
@@ -79,6 +79,11 @@ import {
 } from '../lib/session-repair.js';
 import { installApi, isTrustedRequest, openInFileManager } from '../lib/api.js';
 import { apply, compileParameterSchema, Config, createTools, installContextManagement, memoryContext, normalizeConfig, planPrefixReset, searchWithRag, workspaceOf, wrapMemoryData } from '../index.js';
+
+// Tests create `agm-test-*` workspaces and call tools against them; without an
+// isolated home they register those roots in the developer's real
+// `~/.dsh/ai-for-memory/roots.json` and the panel can default to an empty one.
+process.env.DSH_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-test-home-'));
 
 function tempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agm-test-'));
@@ -926,6 +931,24 @@ test('registry only resolves roots it recorded', () => {
     assert.equal(fixedRows.length, 3);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('registry default root skips leaked test roots and prune removes them', () => {
+  const testRoot = tempRoot();
+  const realRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-registry-real-'));
+  try {
+    const registryDir = path.join(testRoot, 'registry');
+    rememberRoot(path.join(testRoot, 'empty'), path.join(testRoot, 'empty'), registryDir);
+    rememberRoot(realRoot, realRoot, registryDir);
+    // The leaked test root now sorts first (newest), but the default must pick
+    // the existing non-test project root.
+    assert.equal(resolveRegisteredRoot('', registryDir), realRoot);
+    assert.ok(pruneTestRoots(registryDir) >= 1);
+    assert.equal(listRootRows(registryDir).some((row) => /agm-test-/.test(row.root)), false);
+  } finally {
+    fs.rmSync(testRoot, { recursive: true, force: true });
+    fs.rmSync(realRoot, { recursive: true, force: true });
   }
 });
 

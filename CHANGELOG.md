@@ -4,6 +4,10 @@
 
 ## 未发布
 
+### 修复
+
+- **面板默认根落在测试临时目录，所有计数显示 0**：测试套件用 `agm-test-*` 工作区调用工具但没有隔离 `DSH_HOME`，把 99 个临时根写进了真实 `~/.dsh/ai-for-memory/roots.json`；面板默认选中最新的空根（`resolveRegisteredRoot('')` 直接取第一条），于是知识/上下文/决策全是 0。现在 `resolveRegisteredRoot` 默认跳过 `agm-test-*` 和 OS 临时目录，优先现有非临时根；面板 `/api/state` 在列根前调用 `pruneTestRoots()` 清掉泄漏条目；测试强制使用临时 `DSH_HOME`，不再写真实注册表。已用备份后的清理脚本修正当前机器上的注册表（100 → 1 条，指向 `D:\ai\工作区\.ai-for-memory`）。
+
 ### 工程
 
 - **catch 变量迁移**：`tsconfig` 启用 `useUnknownInCatchVariables`，新增 `errorMessage()` / `errorCode()` 辅助并把 80+ 处 `error?.message` / `error?.code` 访问收口，84 个 `unknown` 类型错误清零；剩余 `strictNullChecks` 269 个、`noImplicitAny` 1349 个，继续按模块分批。
