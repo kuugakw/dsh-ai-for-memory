@@ -21,6 +21,8 @@ node scripts/verify-release.mjs 0.5.25
 
 它会检查 registry 版本、provenance attestation、tarball integrity、OIDC trusted publisher、`gitHead` 与本地 tag 的提交；tag 未签名时给出 warning。加上 `--require-tag-signature` 会把未签名 tag 当成失败，供维护者或 CI 使用（当前不要默认开，0.5.25 及更早的 tag 都没有签名）。
 
+0.5.26 起发布的是 `npm pack` 的 tarball，registry 的 `gitHead` 可能为空；验证脚本会从 SLSA provenance 里读取 `gitCommit`，并核对 provenance subject 的 sha512 与 registry integrity 一致，因此不依赖 `gitHead` 字段也能绑定提交与字节。0.5.26 的验证结果：provenance ✅、subject digest ✅、trusted publisher ✅、provenance commit 与 `v0.5.26` 一致 ✅、tag 仍未签名。
+
 ## 为什么 token 泄露不等于可以安静发恶意版本
 
 - npm 包已启用 **trusted publishing**：0.5.25 的 `_npmUser` 是 `npm-oidc-no-reply@github.com` 且带 `trustedPublisher`。用普通 token 发布的版本不会带这组字段，`verify-release.mjs` 会直接失败。

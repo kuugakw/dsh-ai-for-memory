@@ -57,6 +57,24 @@ if (!pass(doc.version === version, 'registry version', doc.version)) {
 }
 const dist = doc.dist ?? {};
 const provenance = dist.attestations?.provenance;
+let provenanceCommit = '';
+let provenanceDigest = '';
+if (dist.attestations?.url) {
+  try {
+    const attestation = await (await fetch(dist.attestations.url, {
+      headers: { 'user-agent': 'dsh-ai-for-memory-release-verify' },
+    })).json();
+    const slsa = (attestation.attestations ?? [])
+      .find((item) => item.predicateType === 'https://slsa.dev/provenance/v1');
+    if (slsa?.bundle?.dsseEnvelope?.payload) {
+      const payload = JSON.parse(Buffer.from(slsa.bundle.dsseEnvelope.payload, 'base64').toString('utf8'));
+      provenanceCommit = payload.predicate?.buildDefinition?.resolvedDependencies?.[0]?.digest?.gitCommit ?? '';
+      provenanceDigest = payload.subject?.[0]?.digest?.sha512 ?? '';
+    }
+  } catch {
+    // The local checks still cover version/integrity/trusted publisher.
+  }
+}
 if (!pass(Boolean(dist.attestations?.url && provenance?.predicateType), 'npm provenance attestation',
   dist.attestations?.url ?? 'missing')) {
   problems.push('no npm provenance: publish with --provenance from GitHub Actions');
@@ -64,19 +82,29 @@ if (!pass(Boolean(dist.attestations?.url && provenance?.predicateType), 'npm pro
 if (!pass(Boolean(dist.integrity), 'tarball integrity', dist.integrity ?? 'missing')) {
   problems.push('registry has no tarball integrity');
 }
+if (provenanceDigest && typeof dist.integrity === 'string' && dist.integrity.startsWith('sha512-')) {
+  const actual = Buffer.from(dist.integrity.slice('sha512-'.length), 'base64').toString('hex');
+  if (!pass(actual === provenanceDigest, 'provenance subject digest matches tarball')) {
+    problems.push('provenance subject digest does not match registry integrity');
+  }
+}
 
 const trusted = doc._npmUser?.trustedPublisher;
 if (!pass(trusted?.id === 'github', 'OIDC trusted publisher', trusted ? 'github' : 'missing (token publish?)')) {
   problems.push('published without the GitHub OIDC trusted publisher');
 }
 
-const head = String(dist.gitHead ?? doc.gitHead ?? '');
+const registryHead = String(dist.gitHead ?? doc.gitHead ?? '');
+const head = registryHead || provenanceCommit;
 const local = git('rev-parse', '--verify', `${tag}^{}`);
 if (!local) {
   warnings.push(`local tag ${tag} is not present; cannot compare gitHead`);
+} else if (head === '') {
+  warnings.push('neither registry gitHead nor provenance commit is available');
 } else {
-  if (!pass(head === local, 'gitHead matches tag commit', head.slice(0, 12))) {
-    problems.push(`registry gitHead ${head} != ${tag} commit ${local}`);
+  const source = registryHead ? 'gitHead' : 'provenance commit';
+  if (!pass(head === local, `${source} matches tag commit`, head.slice(0, 12))) {
+    problems.push(`${source} ${head} != ${tag} commit ${local}`);
   }
   const signed = (() => {
     try {

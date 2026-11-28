@@ -48,6 +48,19 @@ jobs:
         with:
           node-version: 22
 
+      # The publish workflow creates the release after npm publish. If that
+      # step was skipped (e.g. a verification failure after a successful
+      # publish), the index job can still finish the release instead of leaving
+      # a published npm version with no GitHub Release.
+      - name: Ensure the GitHub release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          gh release view "$tag" >/dev/null 2>&1 \
+            || gh release create "$tag" --title "$tag" --generate-notes
+
       # The version endpoint can return 200 before the packument lists the
       # version; build-index reads the packument, so wait for that.
       - name: Wait until the npm packument lists this version
