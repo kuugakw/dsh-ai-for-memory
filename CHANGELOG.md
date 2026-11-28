@@ -4,6 +4,12 @@
 
 ## 未发布
 
+### 读接口不再改注册表
+
+- **`GET /api/state` 去掉了 `pruneTestRoots()`**：读接口会在面板每次轮询时写 `roots.json`，而且 `pruneTestRoots` 先在锁外 `readRoots()`、再进锁写回 `kept`——中间新注册的根会被旧列表覆盖。清理移到 API 启动时执行一次（写审计 `registry.prune`），GET 只读。
+- **`pruneTestRoots` 改为锁内重读**：读取、过滤、写回都在同一个 `withFileLockSync` 里，和 `rememberRoot` 串行；启动清理也不会丢并发注册的根。
+- 补用例：启动时清理泄漏的 `agm-test-*` 根；`GET /state` 前后注册表行数不变且刚注册的根仍在；`prune` 保留真实根。
+
 ### 面板 API 路由覆盖
 
 - 新增 `test/api-routes.test.mjs`：直接调用面板 action/知识/保留/快照/对话/校验路由，走真实 store 与 fake `runMcpTool`，覆盖此前只有路由注册、没有测试经过的处理分支。

@@ -983,6 +983,7 @@ test('registry default root skips leaked test roots and prune removes them', () 
     assert.equal(resolveRegisteredRoot('', registryDir), realRoot);
     assert.ok(pruneTestRoots(registryDir) >= 1);
     assert.equal(listRootRows(registryDir).some((row) => /agm-test-/.test(row.root)), false);
+    assert.ok(readRoots(registryDir).some((row) => row.root === realRoot), 'prune must keep the real root');
   } finally {
     fs.rmSync(testRoot, { recursive: true, force: true });
     fs.rmSync(realRoot, { recursive: true, force: true });

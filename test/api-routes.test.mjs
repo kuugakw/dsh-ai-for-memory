@@ -13,6 +13,7 @@ import { installApi } from '../lib/api.js';
 import { MemoryStore } from '../lib/store.js';
 import { MemoryScopes, sessionKey } from '../lib/scopes.js';
 import { normalizeConfig } from '../lib/config.js';
+import { readRoots, rememberRoot } from '../lib/registry.js';
 
 const HOST = '127.0.0.1:57579';
 const PORT = 57579;
@@ -107,6 +108,47 @@ function setup() {
   };
   return { root, registryDir, store, deps, routes: captureRoutes(deps), left, right };
 }
+
+test('API startup prunes a leaked test root before serving state', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-routes-root-'));
+  const registryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-routes-reg-'));
+  const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-test-leak-'));
+  try {
+    rememberRoot(testRoot, testRoot, registryDir);
+    assert.ok(readRoots(registryDir).some((row) => row.root === testRoot));
+    captureRoutes({
+      config: normalizeConfig({ root }),
+      registryDir,
+      runtime: {},
+      entry: {},
+      editor: null,
+      runMcpTool: async () => '',
+    });
+    assert.equal(readRoots(registryDir).some((row) => row.root === testRoot), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(registryDir, { recursive: true, force: true });
+    fs.rmSync(testRoot, { recursive: true, force: true });
+  }
+});
+
+test('GET state does not write the root registry', async () => {
+  const { root, registryDir, routes } = setup();
+  const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-test-state-'));
+  try {
+    rememberRoot(testRoot, testRoot, registryDir);
+    const before = readRoots(registryDir).length;
+    assert.ok(readRoots(registryDir).some((row) => row.root === testRoot));
+
+    const res = await call(routes, '/ai-for-memory/api/state', { method: 'GET' });
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(readRoots(registryDir).length, before, 'a GET must not prune the registry');
+    assert.ok(readRoots(registryDir).some((row) => row.root === testRoot), 'the GET must not delete a registered root');
+  } finally {
+    fs.rmSync(testRoot, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('panel action routes invoke their tools', async () => {
   const { root, routes, deps } = setup();

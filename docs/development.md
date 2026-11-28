@@ -67,7 +67,7 @@ npm run coverage # 覆盖率门禁：全局行 ≥80%、函数 ≥80%、分支 �
 
 当前测试覆盖六层读写、对话隔离、上下文清理/恢复、知识冲突、模型自述确认、事故记录、SQL 路由、RAG 构建、导出、面板数据组装、安全不变量，以及本地引擎的 GGUF 发现和 llama.cpp 启动参数等。规模与召回数据见 [规模压测](benchmarks.md) 和 [记忆召回基准](recall-benchmark.md)（`npm run bench:scale` / `npm run bench:recall`，发布前手动跑）。
 
-全套测试数以 `npm test` 输出为准（当前 292 项）；依赖 `node:sqlite`、zstd 或平台符号链接/权限能力的用例按运行时能力 `skip()`，CI 同时跑 Node 22 与 24。
+全套测试数以 `npm test` 输出为准（当前 293 项）；依赖 `node:sqlite`、zstd 或平台符号链接/权限能力的用例按运行时能力 `skip()`，CI 同时跑 Node 22 与 24。
 
 `noImplicitAny` 还没全局打开：`npm run typecheck:strict` 用 `tsc --noImplicitAny` 统计隐式 any 错误，预算 1221，只允许下降。`lib/api.js` 的隐式 any 已清零（路由入口统一 `IncomingMessage`/`ServerResponse`，其余顶层 helper 补了 JSDoc）；剩余大头是 `tools.js`（120）、`local-engine.js`（116）、`store.js`（93）、`session-repair.js`（78）。改到哪个模块就把该模块的隐式 any 消掉，并同步下调 `scripts/check-implicit-any.mjs` 的 `BUDGET`，不要为了过门禁上调。新用例若依赖运行时能力，用 `t.skip()` 标注原因，保持这条边界可核对。对抗场景单独列在 [对抗评测](adversarial.md)（`test/adversarial.test.mjs`）。
 
