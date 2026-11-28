@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   id-token: write
+  attestations: write
 
 concurrency:
   group: npm-publish
@@ -47,8 +48,26 @@ jobs:
       - name: Test
         run: npm test
 
+      # Publish the exact bytes that were attested, not a second tarball built
+      # by npm during publish. Provenance still comes from the OIDC token.
+      - name: Pack the release tarball
+        run: npm pack
+
+      - name: Attest the release tarball (GitHub artifact provenance)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dsh-ai-for-memory-*.tgz
+
       - name: Publish with provenance
-        run: npm publish --provenance --access public
+        run: npm publish ./dsh-ai-for-memory-*.tgz --provenance --access public
+
+      - name: Verify published provenance and commit
+        run: node scripts/verify-release.mjs "$(node -p "require('./package.json').version")"
+
+      - name: Verify the tarball attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh attestation verify dsh-ai-for-memory-*.tgz --repo "$GITHUB_REPOSITORY"
 
       # A tag push now produces both the npm release and the GitHub release, so a
       # release never depends on someone remembering the second half. The workflow

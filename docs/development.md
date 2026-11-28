@@ -42,6 +42,8 @@ npm 上的包名是 `dsh-ai-for-memory`；`package.json` 已移除 `private`，�
 
 同一个 workflow 在 `npm publish` 成功后用 `GITHUB_TOKEN`（`contents: write`）自动创建 GitHub Release，标题与 tag 一致、正文由 GitHub 生成；Release 创建在发布之后，发布失败不会留下指向空版本的 Release。
 
+发布后自动跑 `node scripts/verify-release.mjs <version>` 和 `gh attestation verify`：前者核对 npm provenance、OIDC trusted publisher、tarball integrity 与 `gitHead`/tag 提交，后者核对实际发布的 tarball 的 GitHub artifact attestation。完整说明、验证命令和 tag 签名步骤见 [发布验证](release-verification.md)。
+
 `0.0.0-stage` 是首次发布流程留下的占位版本，已用 `npm deprecate` 标记废弃（该操作需要 npm 账号的一次性验证码，CI 的 OIDC 令牌不能代替）。
 
 本地手工发布仍可用 `npm publish --dry-run` 检查包内容，再 `npm publish`；本地发布必须满足 npm 的 2FA 要求，且不会生成 CI provenance。

@@ -4,6 +4,12 @@
 
 ## 未发布
 
+### 发布来源链
+
+- **发布验证脚本**：新增 `scripts/verify-release.mjs`，核对 registry 版本、npm provenance（SLSA v1）、OIDC trusted publisher、tarball integrity、`gitHead` 与本地 tag 提交；tag 未签名时 warning，`--require-tag-signature` 可升级为失败。
+- **publish workflow 绑定实际 tarball**：先 `npm pack`，用 `actions/attest-build-provenance` 对同一份 tarball 生成 GitHub artifact attestation，再 `npm publish <tgz> --provenance`；发布后自动跑 `verify-release.mjs` 和 `gh attestation verify`，缺 provenance 或 tarball 不匹配会失败。
+- **文档**：新增 [发布验证](docs/release-verification.md)，说明 0.5.25 已有 npm provenance/trusted publisher、tag 仍未签名的事实，以及维护者配置 SSH/GPG tag 签名的步骤；token 直接发布的包没有 `trustedPublisher`，验证脚本会拒绝。
+
 ### Windows 路径防线
 
 - **导出与 repair 在 Windows 上用 junction/硬链接验证**：junction 不需要管理员权限，硬链接也不需要，而 `realpath` 只能看见前者；原来文件符号链接用例在 Windows 直接 `t.skip()`，导出目标与 repair 目标在这台每日运行的平台上没有等价覆盖。现在导出会拒绝符号链接、目录链接和 `nlink > 1` 的硬链接目标，`resolveSessionLogTarget` 与 `repairSessionLog` 也会拒绝符号链接/硬链接日志；新增 5 个用例，用 junction（Windows 无管理员）和硬链接（跨平台）直接跑，不再靠 skip。

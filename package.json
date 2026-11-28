@@ -53,7 +53,8 @@
     "coverage": "node scripts/check-coverage.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "bench:recall": "node scripts/bench-recall.mjs",
-    "bench:scale": "node scripts/bench-scale.mjs"
+    "bench:scale": "node scripts/bench-scale.mjs",
+    "verify:release": "node scripts/verify-release.mjs"
   },
   "publishConfig": {
     "access": "public",
