@@ -2,6 +2,14 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 未发布
+
+### 发布校验修复（0.5.26 事后）
+
+- **tarball 发布没有 registry `gitHead`**：`npm publish <tgz>` 成功后 registry 的 `gitHead` 为空，`verify-release.mjs` 在 0.5.26 发布后误判失败，导致 publish workflow 的 Release 步骤被跳过。现在验证脚本从 SLSA provenance 读取 `gitCommit`，并用 provenance subject sha512 与 registry integrity 对比；0.5.26 验证通过（commit `351169b`、digest 一致）。
+- **Release/Pages 恢复**：market workflow 增加“缺少 Release 就补建”，并在上传 Pages artifact 后等待 5 秒再 deploy；0.5.26 的 GitHub Release 与 Pages 索引已由重跑的 market 补齐。
+- 后续发布不需要手工补 Release；若 publish 的 `npm publish` 已成功但校验失败，market 会补 Release 并部署索引。
+
 ## 0.5.26（2026-11-28）
 
 ### 规模曲线与剩余风险
