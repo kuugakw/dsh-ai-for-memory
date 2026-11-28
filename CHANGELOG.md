@@ -2,6 +2,12 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 未发布
+
+### 工程
+
+- **catch 变量迁移**：`tsconfig` 启用 `useUnknownInCatchVariables`，新增 `errorMessage()` / `errorCode()` 辅助并把 80+ 处 `error?.message` / `error?.code` 访问收口，84 个 `unknown` 类型错误清零；剩余 `strictNullChecks` 269 个、`noImplicitAny` 1349 个，继续按模块分批。
+
 ## 0.5.22（2026-11-28）
 
 ### 安全与功能

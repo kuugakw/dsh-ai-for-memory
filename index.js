@@ -1,3 +1,4 @@
+import { errorMessage } from './lib/util.js';
 /**
  * AI for Memory — layered project memory for DeepSeek Harness.
  *
@@ -142,7 +143,7 @@ export function apply(ctx, config) {
   try {
     installContextManagement(ctx, resolved, deps, runtime);
   } catch (error) {
-    console.error(`[ai-for-memory] 上下文管理注册失败：${error?.message ?? error}`);
+    console.error(`[ai-for-memory] 上下文管理注册失败：${errorMessage(error)}`);
   }
 
   for (const raw of createTools(resolved, deps, runtime)) {
@@ -154,7 +155,7 @@ export function apply(ctx, config) {
         ctx.tools.register(tool);
       }
     } catch (error) {
-      console.error(`[ai-for-memory] 工具 ${tool.name} 注册失败：${error?.message ?? error}`);
+      console.error(`[ai-for-memory] 工具 ${tool.name} 注册失败：${errorMessage(error)}`);
     }
   }
 
@@ -165,7 +166,7 @@ export function apply(ctx, config) {
   try {
     void restoreLocalEngines({ scanProcesses: true });
   } catch (error) {
-    console.error(`[ai-for-memory] 本地引擎接管失败：${error?.message ?? error}`);
+    console.error(`[ai-for-memory] 本地引擎接管失败：${errorMessage(error)}`);
   }
 
   // The Web panel reads the same store over a small same-origin HTTP API.
@@ -195,6 +196,6 @@ export function apply(ctx, config) {
       mcpTokenFile: mcpAccess.file,
     });
   } catch (error) {
-    console.error(`[ai-for-memory] 面板 API 注册失败：${error?.message ?? error}`);
+    console.error(`[ai-for-memory] 面板 API 注册失败：${errorMessage(error)}`);
   }
 }
