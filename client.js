@@ -108,6 +108,8 @@ window.__ModuleLoader__.load({
         overviewSubtitle: '当前工作区的记忆规模、运行状态和最近活动。',
         overviewHealth: '运行状态',
         overviewRecent: '最近活动',
+        overviewRemembered: '最近记住',
+        overviewRememberedEmpty: '还没有记住任何知识。',
         overviewQuick: '快捷操作',
         overviewNoRecent: '还没有可展示的记录。',
         overviewGenerated: '更新时间',
@@ -395,6 +397,21 @@ window.__ModuleLoader__.load({
         modeNeedsServer: '已启用外部模型模式：请确认配置的 OpenAI 兼容服务可访问，否则对应操作会自动回退本地规则（结果里会注明）。',
         modeLocalHint: '当前三层都用本地规则，不依赖任何外部服务。',
         evidence: '证据',
+        whyRemembered: '为什么记住',
+        whyProvenance: '来源判定',
+        whyEvidence: '证据',
+        whyNoEvidence: '没有附加证据（模型写入或早期数据）。',
+        whyChanges: '变更审计',
+        whyNoChanges: '未发生过变更。',
+        whyUsage: '使用情况',
+        whyHits: '检索命中',
+        whyWeight: '本对话权重',
+        whyLastUsed: '最近使用',
+        provUser: '用户确认',
+        provModel: '模型自述（未确认）',
+        provModelConfirmed: '模型写入，已确认',
+        provAuthored: '导入/手写',
+        viewKnowledge: '查看知识库',
         modelClaim: '模型自述（未确认）',
         modelClaimHint: '这条来自模型自己的过程记录、推理或事故记录，不是用户确认的事实；检索已降权，请勿当作项目已知事实。确认无误后点「确认这条」清除黄标。',
         verifyClaim: '确认这条',
@@ -692,6 +709,8 @@ window.__ModuleLoader__.load({
         overviewSubtitle: 'Size, runtime health and recent activity for the selected workspace.',
         overviewHealth: 'Runtime status',
         overviewRecent: 'Recent activity',
+        overviewRemembered: 'Recently remembered',
+        overviewRememberedEmpty: 'No knowledge has been remembered yet.',
         overviewQuick: 'Quick actions',
         overviewNoRecent: 'Nothing to show yet.',
         overviewGenerated: 'Updated',
@@ -979,6 +998,21 @@ window.__ModuleLoader__.load({
         modeNeedsServer: 'External mode is on: make sure the configured OpenAI-compatible service is reachable, otherwise those operations fall back to the local rules (the result says so).',
         modeLocalHint: 'All three layers currently use local rules and need no external service.',
         evidence: 'Evidence',
+        whyRemembered: 'Why remembered',
+        whyProvenance: 'Provenance',
+        whyEvidence: 'Evidence',
+        whyNoEvidence: 'No extra evidence (model-written or an early record).',
+        whyChanges: 'Change audit',
+        whyNoChanges: 'Never changed.',
+        whyUsage: 'Usage',
+        whyHits: 'Search hits',
+        whyWeight: 'Conversation weight',
+        whyLastUsed: 'Last used',
+        provUser: 'User-confirmed',
+        provModel: 'Model claim (unconfirmed)',
+        provModelConfirmed: 'Model-written, confirmed',
+        provAuthored: 'Imported/authored',
+        viewKnowledge: 'View knowledge',
         modelClaim: 'Model claim (unverified)',
         modelClaimHint: 'This came from the model’s own process log, reasoning or incident prose, not from a user-confirmed fact. Retrieval downranks it; do not treat it as established project knowledge. Click "Confirm this" to clear the badge.',
         verifyClaim: 'Confirm this',
@@ -1595,6 +1629,12 @@ window.__ModuleLoader__.load({
     function formatTime(value) {
       const text = String(value ?? '');
       return text === '' ? '' : text.replace('T', ' ').slice(0, 19);
+    }
+
+    function provenanceLabel(doc, t) {
+      if (doc?.provenance === 'user') return t.provUser;
+      if (doc?.provenance === 'model') return doc.verified === true ? t.provModelConfirmed : t.provModel;
+      return t.provAuthored;
     }
 
     function formatBytes(value) {
@@ -3770,6 +3810,10 @@ window.__ModuleLoader__.load({
                   head: [
                     h('span', { key: 'id', style: { fontWeight: 600 } }, doc.doc_id),
                     h('span', { key: 'cat', style: badgeStyle('pending') }, doc.category),
+                    h('span', {
+                      key: 'prov',
+                      style: badgeStyle(doc.provenance === 'user' ? 'pass' : (doc.verified === true ? 'pending' : 'fail')),
+                    }, provenanceLabel(doc, t)),
                     doc.source === 'mcp'
                       ? h('span', { key: 'mcp', style: { ...badgeStyle('pending'), background: '#eef2ff', color: '#4338ca' } }, 'MCP')
                       : null,
@@ -3879,16 +3923,33 @@ window.__ModuleLoader__.load({
                       },
                     }, deleteArmed === doc.doc_id ? t.confirmDelete : t.delete),
                     h('p', { key: 'text', style: styles.content }, doc.text),
-                    (doc.changes_count ?? 0) > 0
-                      ? h('p', { key: 'updated-hint', style: styles.hint },
-                        `⤴ ${t.updatedHint}`
-                          + (doc.last_change_kind ? `｜${t.lastChange}: ${doc.last_change_kind}` : '')
-                          + (doc.last_change_at ? ` ${formatTime(doc.last_change_at)}` : ''))
-                      : null,
-                    (doc.changes_count ?? 0) > 0 && doc.previous_text
-                      ? h('p', { key: 'previous-text', style: styles.hint },
-                        `${t.previousText}: ${doc.previous_text}`)
-                      : null,
+                    h('div', {
+                      key: 'why',
+                      style: { marginTop: '4px', padding: '8px 10px', borderRadius: '6px', background: 'rgba(127,127,127,0.07)' },
+                    },
+                    h('div', { style: { fontWeight: 600, marginBottom: '3px' } }, t.whyRemembered),
+                    h('p', { style: styles.hint },
+                      `${t.whyProvenance}: ${provenanceLabel(doc, t)}`
+                        + (doc.session_label ? `｜${t.source}: ${doc.session_label}` : '')),
+                    h('p', { style: styles.hint }, `${t.whyEvidence}: ${doc.evidence_count ?? 0}`),
+                    (doc.evidence ?? []).length > 0
+                      ? h('div', { style: styles.hint }, ...[...doc.evidence].map((item, index) => h('div', {
+                        key: `evidence-${index}`,
+                        style: { marginLeft: '10px' },
+                      }, `- ${item.kind || 'evidence'}${item.ref ? `：${item.ref}` : ''}`)))
+                      : h('p', { style: styles.hint }, t.whyNoEvidence),
+                    h('p', { style: styles.hint },
+                      (doc.changes_count ?? 0) > 0
+                        ? `${t.whyChanges}: ${doc.last_change_kind || 'text'}`
+                          + (doc.last_change_at ? ` ${formatTime(doc.last_change_at)}` : '')
+                          + (doc.last_change_before || doc.last_change_after
+                            ? `｜${doc.last_change_before || '—'} → ${doc.last_change_after || '—'}`
+                            : (doc.previous_text ? `｜${t.previousText}: ${doc.previous_text}` : ''))
+                        : t.whyNoChanges),
+                    h('p', { style: styles.hint },
+                      `${t.whyUsage}: ${t.whyHits} ${doc.hits ?? 0}`
+                        + `｜${t.whyWeight} ${Number(doc.weight ?? 0).toFixed(2)}`
+                        + `｜${t.whyLastUsed} ${formatTime(doc.last_used_at) || '—'}`)),
                     doc.url ? h('p', { key: 'url', style: styles.hint }, `${t.sourceUrl}: ${doc.url}`) : null,
                   ],
                 });
@@ -4420,6 +4481,32 @@ window.__ModuleLoader__.load({
                 row.category ? h('span', { style: badgeStyle('pending') }, row.category) : null,
                 h('span', { style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(row.timestamp))),
               h('p', { style: styles.logPreview }, clipPreview(row.content, 150)))))),
+          h('section', { style: styles.card },
+            h('div', { style: { display: 'flex', alignItems: 'center' } },
+              h('h3', { style: styles.cardTitle }, t.overviewRemembered),
+              h('button', {
+                type: 'button',
+                className: 'aim-btn',
+                style: { ...styles.button, marginLeft: 'auto', padding: '2px 9px', fontSize: '11.5px' },
+                onClick: () => goLayer('knowledge'),
+              }, t.viewKnowledge)),
+            (data?.knowledge ?? []).length === 0
+              ? h(Empty, { text: t.overviewRememberedEmpty })
+              : h('div', { style: styles.list }, (data.knowledge ?? []).slice(0, 3).map((doc) => h('div', {
+                key: doc.doc_id,
+                style: { ...styles.row, padding: '7px 9px' },
+              },
+              h('div', { style: styles.rowHead },
+                h('span', { style: badgeStyle('pending') }, doc.category),
+                h('span', {
+                  style: badgeStyle(doc.provenance === 'user' ? 'pass' : (doc.verified === true ? 'pending' : 'fail')),
+                }, provenanceLabel(doc, t)),
+                h('span', { style: { ...styles.meta, marginLeft: 'auto' } }, formatTime(doc.updated_at || doc.created_at))),
+              h('p', { style: styles.logPreview }, clipPreview(doc.text, 140)),
+              h('p', { style: styles.hint },
+                `${t.whyProvenance}: ${provenanceLabel(doc, t)}`
+                  + `｜${t.whyEvidence}: ${doc.evidence_count ?? 0}`
+                  + ((doc.changes_count ?? 0) > 0 ? `｜${t.whyChanges}: ${doc.changes_count}` : '')))))),
           h('section', { style: styles.card },
             h('h3', { style: styles.cardTitle }, t.overviewQuick),
             h('div', { style: { display: 'flex', flexDirection: 'column', gap: '7px' } },

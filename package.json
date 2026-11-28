@@ -45,7 +45,7 @@
     }
   },
   "scripts": {
-    "test": "node --test test/core.test.mjs test/security-invariants.test.mjs test/session-doctor.test.mjs test/conversation-access.test.mjs test/client-smoke.test.mjs test/schema.test.mjs",
+    "test": "node --test test/core.test.mjs test/security-invariants.test.mjs test/session-doctor.test.mjs test/conversation-access.test.mjs test/client-smoke.test.mjs test/schema.test.mjs test/adversarial.test.mjs",
     "prepublishOnly": "npm test",
     "market:build": "node scripts/market/build-index.mjs",
     "check": "npm run lint && node scripts/check-metadata.mjs",

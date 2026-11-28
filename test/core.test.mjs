@@ -890,6 +890,22 @@ test('ui state exposes every memory layer', () => {
     assert.equal(stats.archived, 2);
     const snap = store.snapshot({ name: 'before-cleanup', state: { step: 1 } });
     store.remember({ doc_id: 'err_1', text: '超时重试三次', category: 'errors_fixes' });
+    store.remember({
+      doc_id: 'k_evidence',
+      text: '服务端口 8081',
+      category: 'project_facts',
+      source: 'user-confirmed',
+      provenance: 'user',
+      verified: true,
+      evidence: [{ kind: 'user-confirm', ref: 'panel' }],
+      changes: [{
+        at: '2026-01-01T00:00:00.000Z',
+        kind: 'number',
+        before: ['8080'],
+        after: ['8081'],
+        previous_text: '服务端口 8080',
+      }],
+    });
     store.recordDecision(evaluateDecision({
       decision: '删除全部文件', risk: 'high', thesis: '空间不足', antithesis: '可能丢失数据',
       irreversible: true,
@@ -899,12 +915,16 @@ test('ui state exposes every memory layer', () => {
     assert.equal(state.counts.staging, 2);
     assert.equal(state.counts.archive, 2);
     assert.equal(state.counts.snapshots, 1);
-    assert.equal(state.counts.knowledge, 1);
+    assert.equal(state.counts.knowledge, 2);
     assert.equal(state.counts.decisions, 1);
     assert.equal(state.archive.find((group) => group.category === 'errors_fixes').count, 1);
     assert.equal(state.snapshots[0].snapshot_id, snap.snapshot_id);
     assert.match(state.snapshots[0].state_text, /step/);
     assert.equal(state.decisions[0].outcome, 'rejected');
+    const evidenceDoc = state.knowledge.find((doc) => doc.doc_id === 'k_evidence');
+    assert.equal(evidenceDoc.evidence[0].kind, 'user-confirm');
+    assert.equal(evidenceDoc.last_change_before, '8080');
+    assert.equal(evidenceDoc.last_change_after, '8081');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -6036,7 +6056,7 @@ test('SQL view keeps provenance/changes and counts copies across conversations',
     store.remember({
       text: '发布分支实际是 release',
       category: 'project_facts',
-      source: 'user',
+      source: 'user-confirmed',
       provenance: 'user',
       verified: true,
     }, { confirm: true });
