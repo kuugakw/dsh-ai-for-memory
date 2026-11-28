@@ -2,6 +2,18 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 未发布
+
+### 安全与进程边界
+
+- **本地引擎 `extraArgs` 不再能改绑定与权重**：`--host`、`--port`、`-m`/`--model`、`--path`、`--api-key`（含 `=值`）会覆盖插件管理的 loopback 绑定、端口和权重路径，甚至把 llama-server 暴露到 `0.0.0.0`。现在加载 `model.json` 与面板保存 `extraArgs` 时都拒绝这些参数，其余调参（`--threads` 等）照常可用；补了拒绝与正常参数两组用例。
+- **Cordis 补丁检查**：`npm run check` 现在校验 `cordis.patch.yml` 的 `insert` 行、`name` 与 `config` 键都存在于 `DEFAULTS`，避免 loader 静默忽略过期键；同时把 `scripts/` 纳入发布文件（`npm run coverage` 的脚本此前不在 tarball 里）。
+- **profile 补丁**：当前桌面 profile 的 `cordis.patch.yml` 补上 `capabilityMcp: true`——它已经设置 `mcpEnabled: true`，但缺少能力令牌导致 MCP 实际被关闭（请求返回 404）。
+
+### 规模压测
+
+- 新增 `scripts/bench-scale.mjs` 与 [docs/benchmarks.md](docs/benchmarks.md)：3000 篇知识、20 个上下文、10 个会话下测冷/热 `documents()`、BM25/hybrid 检索、SQL、导出与会话列表；记录冷启动 3.1 s（文件 I/O 主导）、热检索 0.1 ms、SQL 67 ms 等基线，并带宽松预算防止回归。
+
 ## 0.5.23（2026-11-28）
 
 ### 修复

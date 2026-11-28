@@ -63,7 +63,7 @@ npm run coverage # 覆盖率门禁：全局行 ≥80%、函数 ≥80%、分支 �
 
 `test/client-smoke.test.mjs` 在 VM 里加载 `client.js`，用假的 `window.__ModuleLoader__` 和真实 React 跑 `factory()` + `apply()`，断言面板注册了侧栏入口与主面板、双语标题正确——这是目前唯一覆盖面板代码的测试。
 
-当前测试覆盖六层读写、对话隔离、上下文清理/恢复、知识冲突、模型自述确认、事故记录、SQL 路由、RAG 构建、导出、面板数据组装、安全不变量，以及本地引擎的 GGUF 发现和 llama.cpp 启动参数等。
+当前测试覆盖六层读写、对话隔离、上下文清理/恢复、知识冲突、模型自述确认、事故记录、SQL 路由、RAG 构建、导出、面板数据组装、安全不变量，以及本地引擎的 GGUF 发现和 llama.cpp 启动参数等。规模数据见 [规模压测](benchmarks.md)（`scripts/bench-scale.mjs`，发布前手动跑）。
 
 全套测试数以 `npm test` 输出为准（当前 274 项）；依赖 `node:sqlite`、zstd 或平台符号链接/权限能力的用例按运行时能力 `skip()`，CI 同时跑 Node 22 与 24。新用例若依赖运行时能力，用 `t.skip()` 标注原因，保持这条边界可核对。
 

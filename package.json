@@ -13,6 +13,7 @@
     "index.js",
     "client.js",
     "lib",
+    "scripts",
     "models/README.md",
     "models/Embedding/README.md",
     "models/Rerank/README.md",

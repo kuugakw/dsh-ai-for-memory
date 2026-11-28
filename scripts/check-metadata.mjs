@@ -12,6 +12,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { DEFAULTS } from '../lib/config.js';
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const index = JSON.parse(fs.readFileSync(path.join(root, 'market', 'index.json'), 'utf8'));
@@ -54,8 +56,19 @@ if (lock.packages?.['']?.version !== version) {
 const changelog = readText('CHANGELOG.md');
 if (!changelog.includes(`## ${version}（`)) problems.push(`CHANGELOG.md 没有 ${version} 的小节`);
 
+// The bundle patch is the only row DSH mounts for this package. Keep its id,
+// name and config keys in step with the manifest/defaults: a stale key is
+// silently ignored by the loader and looks like a settings bug in the panel.
+const patch = readText('cordis.patch.yml');
+if (!patch.includes('- insert:')) problems.push('cordis.patch.yml 缺少 insert 行');
+if (!patch.includes(`name: ${manifest.name}`)) problems.push(`cordis.patch.yml 缺少 name: ${manifest.name}`);
+const patchKeys = [...patch.matchAll(/^ {8}([A-Za-z0-9_]+):/gm)].map((match) => match[1]);
+for (const key of patchKeys) {
+  if (!Object.hasOwn(DEFAULTS, key)) problems.push(`cordis.patch.yml 的 config.${key} 不是已知配置项`);
+}
+
 // The npm tarball must contain every runtime file the entry points import.
-const requiredFiles = ['index.js', 'client.js', 'lib', 'cordis.patch.yml', 'icon.svg', 'locale/*.json', 'docs', 'README.md', 'CHANGELOG.md', 'LICENSE'];
+const requiredFiles = ['index.js', 'client.js', 'lib', 'scripts', 'cordis.patch.yml', 'icon.svg', 'locale/*.json', 'docs', 'README.md', 'CHANGELOG.md', 'LICENSE'];
 for (const entry of requiredFiles) {
   if (!(manifest.files ?? []).includes(entry)) problems.push(`package.json files 缺少 ${entry}`);
 }

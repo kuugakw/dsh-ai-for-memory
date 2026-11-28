@@ -4053,6 +4053,33 @@ test('local engine resolves GGUF files and builds llama.cpp arguments', () => {
     assert.deepEqual(embedArgs.slice(embedArgs.indexOf('--pooling'), embedArgs.indexOf('--pooling') + 2), ['--pooling', 'cls']);
     assert.ok(embedArgs.includes('--port'));
 
+    // extraArgs may tune the engine, but may not move it off loopback, change
+    // the plugin-owned port/weights, or expose static files/API keys.
+    fs.writeFileSync(path.join(embedDir, 'model.json'), JSON.stringify({
+      name: 'BGE-M3', model: 'bge-m3', pooling: 'cls', extraArgs: ['--threads', '4'],
+    }));
+    const withExtra = resolveModel({ modelsRoot: models, modelId: 'Embedding/bge-m3' });
+    assert.equal(withExtra.ok, true);
+    assert.deepEqual(buildServerArgs(withExtra.model, 19001).slice(-2), ['--threads', '4']);
+
+    for (const args of [['--host', '0.0.0.0'], ['--port', '9999'], ['-m', 'other.gguf'], ['--api-key=secret']]) {
+      fs.writeFileSync(path.join(embedDir, 'model.json'), JSON.stringify({
+        name: 'BGE-M3', model: 'bge-m3', pooling: 'cls', extraArgs: args,
+      }));
+      const blocked = resolveModel({ modelsRoot: models, modelId: 'Embedding/bge-m3' });
+      assert.equal(blocked.ok, false, `extraArgs ${args.join(' ')} must be rejected`);
+      assert.match(blocked.error, /extraArgs/);
+    }
+
+    fs.writeFileSync(path.join(embedDir, 'model.json'), JSON.stringify({
+      name: 'BGE-M3', model: 'bge-m3', pooling: 'cls',
+    }));
+    const unsafeSave = updateModelConfig({
+      modelsRoot: models, modelId: 'Embedding/bge-m3', extraArgs: ['--host', '0.0.0.0'],
+    });
+    assert.equal(unsafeSave.ok, false);
+    assert.match(unsafeSave.error, /extraArgs/);
+
     // An explicit kind in model.json wins over the folder name; otherwise a
     // panel "mark as Rerank" would silently start an embedding server.
     fs.writeFileSync(path.join(embedDir, 'model.json'), JSON.stringify({
