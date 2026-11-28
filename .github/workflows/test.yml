@@ -43,3 +43,8 @@ jobs:
         # lib is migrated onto the same gate incrementally.
         if: matrix.os == 'ubuntu-latest' && matrix.node == 22
         run: npm run typecheck
+      - name: noImplicitAny debt ratchet
+        # `noImplicitAny` is still off globally; this fails when the implicit-any
+        # error count grows. Lower the budget as modules are annotated.
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        run: npm run typecheck:strict

@@ -26,7 +26,7 @@ const GLOBAL = { lines: 80, branches: 65, functions: 80 };
 
 /** Per-file floors for the modules large enough to hide behind the average. */
 const FLOORS = {
-  'api.js': { lines: 48, branches: 40, functions: 45 },
+  'api.js': { lines: 65, branches: 50, functions: 72 },
   'index.js': { lines: 66, branches: 24, functions: 40 },
   'tools.js': { lines: 82, branches: 54, functions: 70 },
   'store.js': { lines: 91, branches: 76, functions: 90 },
