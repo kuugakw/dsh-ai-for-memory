@@ -51,7 +51,9 @@
     "check": "npm run lint && node scripts/check-metadata.mjs",
     "lint": "eslint .",
     "coverage": "node scripts/check-coverage.mjs",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "bench:recall": "node scripts/bench-recall.mjs",
+    "bench:scale": "node scripts/bench-scale.mjs"
   },
   "publishConfig": {
     "access": "public",

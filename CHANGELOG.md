@@ -2,6 +2,12 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 未发布
+
+### 记忆召回基准
+
+- 新增 `scripts/bench-recall.mjs` 与 `scripts/recall-dataset.mjs`：41 条记忆、20 条查询（exact / paraphrase / trap / provenance），输出 Recall@1/3/5、MRR、nDCG@10 与未确认说法进 top-3 的比例，对比 bm25 / vector / hybrid；结果与解读见 [docs/recall-benchmark.md](docs/recall-benchmark.md)。基线：hybrid R@5 95%、MRR 0.771；paraphrase R@1 50%（哈希向量非语义）；trap R@1 0%（文本本身无法判断真伪）；未确认说法 top-3 0%。
+
 ## 0.5.24（2026-11-28）
 
 ### 对抗评测与面板解释

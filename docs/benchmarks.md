@@ -1,6 +1,6 @@
 # 规模压测
 
-用于观察 JSON 存储层在较大语料下的实际耗时，不是单元测试。脚本：`scripts/bench-scale.mjs`。
+用于观察 JSON 存储层在较大语料下的实际耗时，不是单元测试。脚本：`scripts/bench-scale.mjs`。检索质量（是否找得到）见 [记忆召回基准](recall-benchmark.md)。
 
 ```bash
 node scripts/bench-scale.mjs --docs=3000 --contexts=20
