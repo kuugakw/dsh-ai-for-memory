@@ -1,13 +1,13 @@
 # AI for Memory — 面向 DSH 的项目级记忆插件
 
 [![tests](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml/badge.svg)](https://github.com/kuugakw/dsh-ai-for-memory/actions/workflows/test.yml)
-[![Status](https://img.shields.io/badge/status-stable%200.5.21-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.5.21-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
+[![Status](https://img.shields.io/badge/status-stable%200.5.22-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.5.22-lightgrey.svg)](https://github.com/kuugakw/dsh-ai-for-memory/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **0.5.21 是路线图收口版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版不改变功能，把 [安全架构](docs/security-architecture.md) 的 P0/P1/P2 按实际发布（0.5.19 / 0.5.20）标为已完成，并补上 P3 排期：`lib/api.js` 覆盖率抬升、`strict` 逐步收紧、MCP token 轮换、market 索引自动提交、剩余路径统一；同时记录 SQLite authorizer 方案的评估结论（不可行，解析层仍是唯一闸门）。
+> **0.5.22 是 P3 落地版。** AI for Memory 是面向 DSH 的项目级记忆插件：六层记忆、六个 `aim_*` 工具、Web 面板、对话隔离（跨对话检索与恢复默认关闭，可在面板授权打开）、可恢复的上下文清理、BM25/SQL/RAG 检索、知识库冲突确认和风险决策审查整合为可安装的 DSH bundle；插件本体零外部依赖，只使用 Node 内置模块，所有记忆默认保存在本地。本版完成 P3-1/P3-3/P3-4/P3-5：`lib/api.js` 行覆盖 31%→51%（按文件地板 48/40/45）；MCP 令牌可在面板一键轮换、旧令牌立即失效；market 索引由 workflow 自动提交（`[skip ci]`）；补齐面板路径测试。P3-2 先启用五个零错误的严格子项，剩余 `strictNullChecks`/`noImplicitAny`/`useUnknownInCatchVariables` 按模块分批。
 >
-> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.21）。插件索引这类新渠道从当前版本（0.5.21）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
+> **发布范围。** 0.5.0 及更早的版本只在 [GitHub Releases](https://github.com/kuugakw/dsh-ai-for-memory/releases)；npm 是早期渠道，从 0.5.1 开始发布（当前 0.5.22）。插件索引这类新渠道从当前版本（0.5.22）起收录，之后发布的版本会跟着更新；首次发布留下的占位版本 `0.0.0-stage` 已标记废弃。
 >
 > 升级前建议备份记忆目录；数据版本变化会走 `schema.json` 的迁移流程，迁移前自动把要改写的文件备份到 `backups/schema-v<旧版本>-<时间>/`，更详细的规则见 [配置与数据目录](docs/configuration.md#格式版本与迁移)。
 
@@ -127,7 +127,7 @@ verified: false
 ## 快速开始
 
 ```bash
-dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.21
+dsh plugin --profile <profile> add dsh-ai-for-memory@0.5.22
 ```
 
 也可以在 DSH **设置 → 插件 → 添加插件** 中填 `dsh-ai-for-memory`。本地开发用目录安装：
@@ -210,10 +210,11 @@ plugin_manager action=install_bundle target=<dsh-ai-for-memory 目录>
 
 ## 更新内容
 
-当前版本 **0.5.21**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
+当前版本 **0.5.22**。版本号规则：本地开发和未发布改动不改版本号；只有正式发布到 GitHub 时才更新 `package.json`、README 徽章和 tag/Release。详细发布流程见 [开发与测试](docs/development.md#版本号与发布)。
 
 近期更新：
 
+- **0.5.22**：P3 落地——`lib/api.js` 行覆盖 31%→51%，按文件地板 48/40/45；MCP 令牌面板一键轮换（旧令牌立即失效）；market 索引由 workflow 自动提交；面板 state/diagnostics/session-logs/config 路由测试；`tsconfig` 启用五个零错误严格子项；
 - **0.5.21**：路线图收口（无功能变化）——P0/P1/P2 标记为已完成并注明对应发布版本；新增 P3 排期（api.js 覆盖率、strict 收紧、MCP token 轮换、market 索引自动提交、剩余路径统一），记录 SQLite authorizer 评估结论；
 - **0.5.20**：SQL 只读通道按 FROM 关系计数，不再误杀 `json_each(knowledge_docs.tags)` / 限定列引用；脱敏补 `*_key` 名称（保留 `primary_key`、`api_key_policy` 等结构名）；最低运行时提高到 Node 22.15+，CI 改为 Node 22/24；
 - **0.5.19**：安全与工程审计修复——SQL 只读通道拒绝 `sqlite_master`/`pragma_table_info` 等未授权关系；脱敏覆盖 `tags`/`url`/`evidence`、上下文摘要、快照与审计，并补 Cookie、Azure 密钥、空用户名 DSN、截断私钥等；MCP 恢复非浏览器客户端可用；导出权限 0700/0600；发布门禁校验 tag 版本，市场索引在 publish 成功后重建；覆盖率增加按文件地板；
