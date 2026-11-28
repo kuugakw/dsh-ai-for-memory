@@ -11,8 +11,9 @@
 
 ### 工程
 
+- **覆盖率与类型门禁**：补上面板 `state` / `diagnostics` / `session-logs` / `config` 的载荷用例，`lib/api.js` 行覆盖 31.00%→51.07%（Node 22/26 一致），全局行覆盖 86%+；按文件地板把 `api.js` 提到 48%/40%/45%。`tsconfig` 启用五个零错误的严格子项（`noImplicitThis`、`alwaysStrict`、`strictBindCallApply`、`strictFunctionTypes`、`noImplicitOverride`），剩余 `strictNullChecks` / `noImplicitAny` / `useUnknownInCatchVariables` 按模块分批。
 - **market 索引自动提交**：`market` 改为在 `main` 上构建，`market/index.json` 有变化时由 `github-actions[bot]` 提交并推送（`[skip ci]`），不再依赖本地手动提交；分支保护下该步骤会失败，需要放行 bot。
-- **路线图状态**：P3-3/P3-4/P3-5 标记完成（未发布）；P3-1 覆盖率继续推进（全局 84.01%，api.js 仍低于 40% 目标）；P3-2 `strict` 评估为 394 个错误，按模块分批，不一次性打开。
+- **路线图状态**：P3-1/P3-3/P3-4/P3-5 完成（P3-1 覆盖率达标），P3-2 部分完成；均未发布。
 
 ## 0.5.21（2026-11-27）
 

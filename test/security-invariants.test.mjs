@@ -286,6 +286,53 @@ test('the read ledger wraps a leaked body but not a status line', async () => {
   assert.equal(exempted, longBody, 'exempt actions keep their explicit formatting');
 });
 
+test('panel read and config routes produce real payloads', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-routes-root-'));
+  const registryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-routes-reg-'));
+  let saved = null;
+  const d = {
+    config: normalizeConfig({ root }),
+    registryDir,
+    runtime: {},
+    entry: {},
+    editor: {
+      async edit(_entry, mutate) {
+        saved = mutate({});
+        return saved;
+      },
+    },
+  };
+  try {
+    const routes = captureRoutes(d);
+    for (const [routePath, url] of [
+      ['/ai-for-memory/api/state', '/ai-for-memory/api/state'],
+      ['/ai-for-memory/api/diagnostics', '/ai-for-memory/api/diagnostics'],
+      ['/ai-for-memory/api/session-logs', '/ai-for-memory/api/session-logs'],
+    ]) {
+      const req = request({ 'sec-fetch-site': 'same-origin' });
+      req.url = url;
+      const res = response();
+      await routes.get(routePath)(req, res);
+      assert.equal(res.statusCode, 200, `${routePath} should answer with a payload`);
+      assert.equal(JSON.parse(res.body).ok, true, `${routePath} should report ok`);
+    }
+
+    const body = JSON.stringify({ root });
+    const configRes = response();
+    await routes.get('/ai-for-memory/api/config')({
+      method: 'POST',
+      headers: { host: HOST, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' },
+      socket: { remoteAddress: '127.0.0.1', localPort: PORT },
+      async *[Symbol.asyncIterator]() { yield Buffer.from(body); },
+    }, configRes);
+    assert.equal(configRes.statusCode, 200, 'config save should accept a fixed root');
+    assert.equal(saved?.root, root, 'the editor callback carries the new config');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(registryDir, { recursive: true, force: true });
+  }
+});
+
 test('panel read routes answer for a fixed root and reject unregistered roots', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aim-route-root-'));
   const d = deps();

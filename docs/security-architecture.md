@@ -91,8 +91,8 @@
 
 ### P3（进行中）
 
-- **P3-1 覆盖率继续抬升（进行中）**：按文件地板已覆盖 10 个核心模块（`api.js` 下限 27%）；0.5.21 后补上 MCP 轮换、安全体检路由、未登记根拒绝的用例，全局行覆盖 84.01%。离 `api.js` 40% 的目标还差路由级用例（state/config/diagnostics 等依赖较多的处理器），继续按模块补。
-- **P3-2 类型收紧（已评估，未实施）**：`tsc --strict` 当前有 394 个错误（多数是 `catch` 的 `unknown`、可空字段与 `{}` 推断），一次打开不现实；按 `api.js` → `tools.js` → `store.js` 分批迁移，先处理 `catch (error)` 与可空对象。
+- **P3-1 覆盖率抬升（已完成，未发布）**：补上面板 `state` / `diagnostics` / `session-logs` / `config` 的载荷用例后，`lib/api.js` 行覆盖从 31.00% 升到 51.07%（Node 22/26 一致），全局行覆盖 86%+；按文件地板把 `api.js` 从 27% 提到 48%（行）/40%（分支）/45%（函数），只升不降。
+- **P3-2 类型收紧（部分完成，未发布）**：先启用零错误的五个严格子项——`noImplicitThis`、`alwaysStrict`、`strictBindCallApply`、`strictFunctionTypes`、`noImplicitOverride`；剩余 `strictNullChecks` 269 个、`noImplicitAny` 1349 个、`useUnknownInCatchVariables` 84 个错误，按 `api.js` → `tools.js` → `store.js` 分批处理，不一次性打开 `strict`。
 - **P3-3 MCP token 轮换（已完成，未发布）**：后端 `POST /api/mcp/rotate` 删除并重建自动 token，运行中的 MCP 路由立即改用新值，旧 token 下一次请求即 401；自定义 `mcpToken` 拒绝轮换并提示改配置。面板「MCP 出口」加了「轮换自动令牌」按钮，拒绝/轮换都写审计。
 - **P3-4 market 索引自动提交（已完成，未发布）**：`market` 改为 checkout `main`，构建后如果 `market/index.json` 有变化就由 `github-actions[bot]` 提交并推送（提交信息带 `[skip ci]`），不再依赖本地手动提交；需要仓库允许 bot 推送 main，分支保护下会在该步骤失败。
 - **P3-5 路径统一剩余面（已完成，未发布）**：核查 `knowledgeDatabasePath()` 由 `store.root` 直接派生、面板 reveal 只接受登记根/固定根，均无用户可控拼接；补了「未登记根 reveal 返回 404」与安全体检路由的用例。SQLite 库文件与 reveal 不新增 `safe-path` 包装，避免把无输入的路径也套一层解析。
