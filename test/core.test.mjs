@@ -4082,7 +4082,38 @@ test('local engine resolves GGUF files and builds llama.cpp arguments', () => {
     assert.equal(withExtra.ok, true);
     assert.deepEqual(buildServerArgs(withExtra.model, 19001).slice(-2), ['--threads', '4']);
 
-    for (const args of [['--host', '0.0.0.0'], ['--port', '9999'], ['-m', 'other.gguf'], ['--api-key=secret']]) {
+    // extraArgs is an allowlist of tuning flags, including their short
+    // aliases. Anything else, positional tokens and malformed values must fail
+    // at load time rather than silently reaching llama-server's argv.
+    fs.writeFileSync(path.join(embedDir, 'model.json'), JSON.stringify({
+      name: 'BGE-M3',
+      model: 'bge-m3',
+      pooling: 'cls',
+      extraArgs: ['-ngl', '99', '-fa', 'on', '--tensor-split', '3,1', '--pooling', 'mean'],
+    }));
+    const tuned = resolveModel({ modelsRoot: models, modelId: 'Embedding/bge-m3' });
+    assert.equal(tuned.ok, true, tuned.error);
+    const tunedArgs = buildServerArgs(tuned.model, 19001);
+    assert.deepEqual(tunedArgs.slice(-8), ['-ngl', '99', '-fa', 'on', '--tensor-split', '3,1', '--pooling', 'mean']);
+
+    // A negative numeric value is a value, not the next flag.
+    fs.writeFileSync(path.join(embedDir, 'model.json'), JSON.stringify({
+      name: 'BGE-M3', model: 'bge-m3', pooling: 'cls', extraArgs: ['--main-gpu', '-1'],
+    }));
+    const negative = resolveModel({ modelsRoot: models, modelId: 'Embedding/bge-m3' });
+    assert.equal(negative.ok, true, negative.error);
+
+    for (const args of [
+      ['--host', '0.0.0.0'],
+      ['--port', '9999'],
+      ['-m', 'other.gguf'],
+      ['--api-key=secret'],
+      ['--evil-flag'],
+      ['oops'],
+      ['--threads'],
+      ['--n-gpu-layers', 'many'],
+      ['--metrics=1'],
+    ]) {
       fs.writeFileSync(path.join(embedDir, 'model.json'), JSON.stringify({
         name: 'BGE-M3', model: 'bge-m3', pooling: 'cls', extraArgs: args,
       }));
@@ -4099,6 +4130,11 @@ test('local engine resolves GGUF files and builds llama.cpp arguments', () => {
     });
     assert.equal(unsafeSave.ok, false);
     assert.match(unsafeSave.error, /extraArgs/);
+    const unknownSave = updateModelConfig({
+      modelsRoot: models, modelId: 'Embedding/bge-m3', extraArgs: ['--not-a-flag'],
+    });
+    assert.equal(unknownSave.ok, false);
+    assert.match(unknownSave.error, /extraArgs/);
 
     // An explicit kind in model.json wins over the folder name; otherwise a
     // panel "mark as Rerank" would silently start an embedding server.

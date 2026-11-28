@@ -2,6 +2,12 @@
 
 本项目从 `0.1.0` 起使用三段式版本号，规则见 [开发与测试](docs/development.md#版本号与发布)。
 
+## 未发布
+
+### 引擎 argv 白名单
+
+- **`extraArgs` 从黑名单改为白名单**：原来只拦 `--host`/`--port`/`-m`/`--path`/`--api-key` 等少数名字，llama.cpp 新增参数、短别名（`-ngl`、`-c`、`-fa`）或 `--foo=value` 形式都可能绕过，属于打地鼠。现在每个 token 必须匹配白名单里的调参参数，值按 int/float/enum/格式校验；未知参数、位置参数、缺值和控制字符直接拒绝。加载 `model.json`、面板保存和 `buildServerArgs` 共用 `validateExtraArgs()`，不再有三处判断。
+
 ## 0.5.25（2026-11-28）
 
 ### 配置入口收敛
